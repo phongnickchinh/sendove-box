@@ -7,6 +7,77 @@
 // MediaPlayer Implementation
 // ============================================================================
 
+#ifdef WOKWI_SIMULATION
+// ============================================================================
+// WOKWI SIMULATION MODE — Active Buzzer thay thế I2S Audio
+// ============================================================================
+// Trong giả lập Wokwi, I2S và MAX98357A không được hỗ trợ.
+// Thay vào đó, dùng active buzzer để phát tín hiệu âm thanh đơn giản
+// khi có tin nhắn mới.
+// ============================================================================
+
+bool MediaPlayer::init(SDCardManager* sdCard, DisplayDriver* display,
+                        uint8_t bclkPin, uint8_t lrcPin, uint8_t doutPin) {
+    _sdCard  = sdCard;
+    _display = display;
+
+    // Cấu hình buzzer pin (dùng chân DOUT cũ)
+    _buzzerPin = PIN_BUZZER;
+    pinMode(_buzzerPin, OUTPUT);
+    digitalWrite(_buzzerPin, LOW); // Tắt ban đầu
+
+    Serial.println(F("[MediaPlayer] WOKWI MODE: Buzzer initialized"));
+    _state = PlaybackState::IDLE;
+    return true;
+}
+
+bool MediaPlayer::playMessage(const char* videoPath, const char* audioPath) {
+    if (_display == nullptr) {
+        Serial.println(F("[MediaPlayer] ERROR: Display not initialized"));
+        _state = PlaybackState::ERROR;
+        return false;
+    }
+
+    Serial.println(F("[MediaPlayer] WOKWI MODE: Simulating playback..."));
+    _state = PlaybackState::PLAYING;
+
+    // Bật màn hình và hiển thị thông báo
+    _display->turnOn();
+    _display->setBacklight(BACKLIGHT_DAY_PERCENT);
+    _display->showMessage("Playing msg...");
+
+    // Bật buzzer kêu để mô phỏng phát âm thanh
+    digitalWrite(_buzzerPin, HIGH);
+    Serial.println(F("[MediaPlayer] WOKWI: Buzzer ON"));
+
+    // Giữ buzzer kêu trong BUZZER_PLAY_DURATION_MS
+    vTaskDelay(pdMS_TO_TICKS(BUZZER_PLAY_DURATION_MS));
+
+    // Tắt buzzer
+    digitalWrite(_buzzerPin, LOW);
+    Serial.println(F("[MediaPlayer] WOKWI: Buzzer OFF"));
+
+    _state = PlaybackState::IDLE;
+    Serial.println(F("[MediaPlayer] WOKWI: Simulated playback complete"));
+    return true;
+}
+
+void MediaPlayer::stop() {
+    if (_state == PlaybackState::PLAYING) {
+        digitalWrite(_buzzerPin, LOW);
+    }
+    _state = PlaybackState::IDLE;
+}
+
+PlaybackState MediaPlayer::getState() const {
+    return _state;
+}
+
+#else
+// ============================================================================
+// HARDWARE MODE — I2S Audio (MAX98357A) + Video (SD Card)
+// ============================================================================
+
 // Buffer sizes cho double-buffering
 // Frame buffer: 128 * 160 * 2 bytes (RGB565) = 40,960 bytes → quá lớn cho ESP32-C3
 // → Dùng line-by-line hoặc block-by-block rendering
@@ -264,3 +335,6 @@ bool MediaPlayer::parseWAVHeader(const uint8_t* data, WAVHeader* header) {
                   header->bitsPerSample, header->dataSize);
     return true;
 }
+
+#endif // WOKWI_SIMULATION
+

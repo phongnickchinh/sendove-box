@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "author": "SendLove Box - Wokwi Simulation",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-c3-devkitm-1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-ili9341",
+      "id": "tft",
+      "top": -250,
+      "left": -200,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn_touch",
+      "top": 150,
+      "left": -200,
+      "attrs": {
+        "color": "green",
+        "label": "TOUCH (TTP223)"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_pulldown",
+      "top": 210,
+      "left": -200,
+      "attrs": {
+        "value": "10000"
+      }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": 100,
+      "left": 250,
+      "attrs": {
+        "mode": "active"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_breath",
+      "top": -50,
+      "left": 250,
+      "attrs": {
+        "color": "red",
+        "label": "Breathing LED"
+      }
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "pot_battery",
+      "top": 300,
+      "left": -200,
+      "attrs": {
+        "label": "Battery ADC"
+      }
+    }
+  ],
+  "connections": [
+    ["tft:VCC", "esp:3V3", "red", ["h0"]],
+    ["tft:GND", "esp:GND.1", "black", ["h0"]],
+    ["tft:CS", "esp:7", "yellow", ["h0"]],
+    ["tft:DC", "esp:8", "blue", ["h0"]],
+    ["tft:RST", "esp:10", "white", ["h0"]],
+    ["tft:MOSI", "esp:6", "green", ["h0"]],
+    ["tft:SCK", "esp:4", "orange", ["h0"]],
+    ["tft:LED", "esp:3", "purple", ["h0"]],
+
+    ["btn_touch:1.r", "esp:20", "green", ["h0"]],
+    ["btn_touch:2.r", "esp:3V3", "red", ["h0"]],
+    ["r_pulldown:1", "esp:20", "green", ["v0"]],
+    ["r_pulldown:2", "esp:GND.2", "black", ["v0"]],
+
+    ["buzzer:1", "esp:0", "orange", ["h0"]],
+    ["buzzer:2", "esp:GND.3", "black", ["h0"]],
+
+    ["led_breath:A", "esp:21", "red", ["h0"]],
+    ["led_breath:C", "esp:GND.4", "black", ["h0"]],
+
+    ["pot_battery:SIG", "esp:4", "purple", ["h0"]],
+    ["pot_battery:VCC", "esp:3V3", "red", ["h0"]],
+    ["pot_battery:GND", "esp:GND.5", "black", ["h0"]]
+  ]
+}

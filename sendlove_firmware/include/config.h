@@ -109,4 +109,16 @@ static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
 // ============================================================================
 static constexpr const char* NVS_NAMESPACE = "sendlove";
 
+// ============================================================================
+// Wokwi Simulation — Thay thế phần cứng không hỗ trợ trong giả lập
+// ============================================================================
+#ifdef WOKWI_SIMULATION
+// Active buzzer thay thế loa I2S (MAX98357A)
+// Dùng chân DOUT cũ (GPIO 0) để đơn giản hóa wiring
+static constexpr uint8_t PIN_BUZZER = 0;
+
+// Thời gian buzzer kêu khi mô phỏng phát tin nhắn (ms)
+static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;
+#endif // WOKWI_SIMULATION
+
 #endif // CONFIG_H

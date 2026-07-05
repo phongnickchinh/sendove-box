@@ -2,7 +2,11 @@
 #define MEDIA_PLAYER_H
 
 #include <Arduino.h>
+#include "config.h"
+
+#ifndef WOKWI_SIMULATION
 #include "driver/i2s.h"
+#endif
 
 // Forward declarations
 class SDCardManager;
@@ -73,6 +77,10 @@ private:
     DisplayDriver*  _display = nullptr;
     PlaybackState   _state   = PlaybackState::IDLE;
 
+#ifdef WOKWI_SIMULATION
+    // Buzzer thay thế I2S trong giả lập Wokwi
+    uint8_t _buzzerPin = 0;
+#else
     // I2S config
     i2s_port_t _i2sPort = I2S_NUM_0;
 
@@ -85,6 +93,7 @@ private:
 
     /// Parse WAV header và validate
     bool parseWAVHeader(const uint8_t* headerData, WAVHeader* header);
+#endif
 };
 
 #endif // MEDIA_PLAYER_H

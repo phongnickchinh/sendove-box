@@ -339,13 +339,23 @@ void setup() {
     // --- Khởi tạo các module ---
     configMgr.init(NVS_NAMESPACE);
     battery.init(PIN_BATTERY_ADC, BATTERY_VOLTAGE_DIVIDER_RATIO);
+
+#ifdef WOKWI_SIMULATION
+    // Wokwi: Skip SD card (không có trong giả lập)
+    Serial.println(F("[Setup] WOKWI: Skipping SD card init"));
+    display.init(PIN_TFT_BLK, spiMutex);
+    powerMgr.init((gpio_num_t)PIN_TOUCH);
+    mediaPlayer.init(nullptr, &display, PIN_I2S_BCLK, PIN_I2S_LRC, PIN_I2S_DOUT);
+    networkHandler.init(&configMgr, nullptr, &timeMgr);
+    uiController.init(PIN_LED, PIN_TOUCH, &display, &battery, &timeMgr);
+#else
     sdCard.init(PIN_SD_CS, spiMutex);
     display.init(PIN_TFT_BLK, spiMutex);
     powerMgr.init((gpio_num_t)PIN_TOUCH);
-
     networkHandler.init(&configMgr, &sdCard, &timeMgr);
     mediaPlayer.init(&sdCard, &display, PIN_I2S_BCLK, PIN_I2S_LRC, PIN_I2S_DOUT);
     uiController.init(PIN_LED, PIN_TOUCH, &display, &battery, &timeMgr);
+#endif
 
     Serial.println(F("[Setup] All modules initialized"));
 

@@ -26,3 +26,5 @@ build/
 # Local configuration
 *.env
 local.ini
+
+node_modules/

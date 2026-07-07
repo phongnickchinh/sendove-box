@@ -50,6 +50,8 @@ const requireAuth = async (req, res, next) => {
             uid: decodedToken.uid,
             email: decodedToken.email,
         };
+        req.user.name = decodedToken.name;
+        req.user.picture = decodedToken.picture;
         next();
     }
     catch (error) {

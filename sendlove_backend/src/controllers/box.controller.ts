@@ -12,8 +12,8 @@ export class BoxController {
   public pairBox = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
       const uid = req.user!.uid;
-      const { pairingCode } = req.body;
-      const data = await this.boxService.pairBox(uid, pairingCode);
+      const { pairingCode, boxName } = req.body;
+      const data = await this.boxService.pairBox(uid, pairingCode, boxName || 'My Box');
       res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);

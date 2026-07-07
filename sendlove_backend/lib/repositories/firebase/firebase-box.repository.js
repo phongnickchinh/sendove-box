@@ -7,22 +7,11 @@ class FirebaseBoxRepository extends firebase_base_repository_1.FirebaseBaseRepos
     constructor() {
         super('boxes');
     }
-    // Update polling cache for a box
-    async updatePollingCache(boxId, data) {
-        const ref = firebase_1.db.ref(`device_polling_cache/${boxId}`);
-        await ref.update(data);
-    }
-    // Get polling cache for a box
-    async getPollingCache(boxId) {
-        const snapshot = await firebase_1.db.ref(`device_polling_cache/${boxId}`).once('value');
-        if (!snapshot.exists())
-            return null;
-        return snapshot.val();
-    }
-    // Find box by pairing code (scode or rcode)
-    async findByPairingCode(code) {
-        const isSender = code.startsWith('SCODE');
-        const field = isSender ? 'pairingInfo/senderCode' : 'pairingInfo/receiverCode';
+    /**
+     * Tìm box bằng mã pairing (scode hoặc rcode)
+     */
+    async findByPairingCode(code, codeType) {
+        const field = `code/${codeType}`;
         const snapshot = await firebase_1.db.ref(this.collectionPath)
             .orderByChild(field)
             .equalTo(code)
@@ -30,9 +19,39 @@ class FirebaseBoxRepository extends firebase_base_repository_1.FirebaseBaseRepos
             .once('value');
         if (!snapshot.exists())
             return null;
-        const boxes = snapshot.val();
-        const boxId = Object.keys(boxes)[0];
-        return { boxId, ...boxes[boxId] };
+        const data = snapshot.val();
+        const boxId = Object.keys(data)[0];
+        return { id: boxId, ...data[boxId] };
+    }
+    /**
+     * Cập nhật flags (a_flag, ota_flag, p_flag)
+     */
+    async updateFlags(boxId, flags) {
+        await firebase_1.db.ref(`${this.collectionPath}/${boxId}/flags`).update(flags);
+    }
+    /**
+     * Đọc flags hiện tại
+     */
+    async getFlags(boxId) {
+        const snapshot = await firebase_1.db.ref(`${this.collectionPath}/${boxId}/flags`).once('value');
+        if (!snapshot.exists())
+            return null;
+        return snapshot.val();
+    }
+    /**
+     * Cập nhật status (online, battery, charging, last_seen, fw_version)
+     */
+    async updateStatus(boxId, status) {
+        await firebase_1.db.ref(`${this.collectionPath}/${boxId}/status`).update(status);
+    }
+    /**
+     * Đọc status hiện tại
+     */
+    async getStatus(boxId) {
+        const snapshot = await firebase_1.db.ref(`${this.collectionPath}/${boxId}/status`).once('value');
+        if (!snapshot.exists())
+            return null;
+        return snapshot.val();
     }
 }
 exports.FirebaseBoxRepository = FirebaseBoxRepository;

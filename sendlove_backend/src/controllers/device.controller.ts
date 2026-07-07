@@ -37,15 +37,4 @@ export class DeviceController {
       next(error);
     }
   };
-
-  public ackMessage = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
-    try {
-      const boxId = `box_${req.deviceId}`;
-      const { msgId } = req.params;
-      await this.deviceService.ackMessage(boxId, msgId, req.body.status);
-      res.status(200).json({ success: true, data: { messageId: msgId, status: 'delivered' } });
-    } catch (error) {
-      next(error);
-    }
-  };
 }

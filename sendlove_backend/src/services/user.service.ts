@@ -9,19 +9,35 @@ export class UserService {
     this.userRepo = new FirebaseUserRepository();
   }
 
-  async getUserProfile(uid: string): Promise<User> {
-    const user = await this.userRepo.getById(uid);
-    if (!user) throw new AppError(404, 'user_not_found', 'User not found');
+  async getOrCreateUserProfile(uid: string, email: string, name?: string, picture?: string): Promise<User> {
+    let user = await this.userRepo.getById(uid);
+    if (!user) {
+      const now = Date.now();
+      const newUser: User = {
+        id: uid,
+        email: email,
+        display_name: name || email.split('@')[0],
+        avatar_url: picture || null,
+        is_admin: false,
+        last_login_at: now,
+        created_at: now,
+        updated_at: now,
+        boxes_list: {}
+      };
+      user = await this.userRepo.create(uid, newUser);
+    } else {
+      await this.userRepo.updateLastLogin(uid);
+    }
     return user;
   }
 
-  async updateProfile(uid: string, data: { displayName?: string, photoURL?: string }): Promise<User> {
+  async updateProfile(uid: string, data: { display_name?: string; avatar_url?: string }): Promise<User> {
     const user = await this.userRepo.getById(uid);
     if (!user) throw new AppError(404, 'user_not_found', 'User not found');
 
-    const updateData: Partial<User> = {};
-    if (data.displayName !== undefined) updateData.displayName = data.displayName;
-    if (data.photoURL !== undefined) updateData.photoURL = data.photoURL;
+    const updateData: Partial<User> = { updated_at: Date.now() };
+    if (data.display_name !== undefined) updateData.display_name = data.display_name;
+    if (data.avatar_url !== undefined) updateData.avatar_url = data.avatar_url;
 
     return await this.userRepo.update(uid, updateData);
   }

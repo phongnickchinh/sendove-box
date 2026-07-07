@@ -6,14 +6,25 @@ class FirebaseUserRepository extends firebase_base_repository_1.FirebaseBaseRepo
     constructor() {
         super('users');
     }
-    // Add specific user repository methods here
-    async linkBox(uid, boxId, role) {
-        const ref = this.getRef(`${uid}/pairedBoxes/${boxId}`);
-        await ref.set(role);
+    /**
+     * Liên kết user với box (ghi vào boxes_list)
+     */
+    async linkBox(uid, boxId, entry) {
+        const ref = this.getRef(`${uid}/boxes_list/${boxId}`);
+        await ref.set(entry);
     }
+    /**
+     * Ngắt liên kết user với box
+     */
     async unlinkBox(uid, boxId) {
-        const ref = this.getRef(`${uid}/pairedBoxes/${boxId}`);
+        const ref = this.getRef(`${uid}/boxes_list/${boxId}`);
         await ref.remove();
+    }
+    /**
+     * Cập nhật last_login_at
+     */
+    async updateLastLogin(uid) {
+        await this.getRef(`${uid}/last_login_at`).set(Date.now());
     }
 }
 exports.FirebaseUserRepository = FirebaseUserRepository;

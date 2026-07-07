@@ -1,8 +1,23 @@
-export interface User {
-  uid: string;
-  displayName: string | null;
-  email: string | null;
-  photoURL: string | null;
-  createdAt: number;
-  pairedBoxes?: Record<string, 'sender' | 'receiver'>; // boxId -> role
+import { BaseModel } from './base.types';
+
+// ==================================================
+// User — Node: users/{uid}
+// ==================================================
+export interface UserBoxEntry {
+  role: 'sender' | 'receiver';
+  box_name: string;
+}
+
+export interface User extends BaseModel {
+  email: string;
+  display_name: string;
+  is_admin: boolean;
+  avatar_url: string | null;
+  last_login_at: number;
+
+  /**
+   * Denormalized copy: danh sách box mà user được pairing.
+   * Key = box_id, Value = { role, box_name }
+   */
+  boxes_list: Record<string, UserBoxEntry>;
 }

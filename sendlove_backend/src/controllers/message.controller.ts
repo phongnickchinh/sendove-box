@@ -9,24 +9,25 @@ export class MessageController {
     this.msgService = new MessageService();
   }
 
-  public createMessage = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  public initiateMessage = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
       const { boxId } = req.params;
-      const data = await this.msgService.createMessage(boxId, req.body);
+      const uid = req.user!.uid;
+      const data = await this.msgService.initiateMessage(boxId, uid);
       res.status(201).json({ success: true, data });
     } catch (error) {
       next(error);
     }
   };
 
-  public completeUpload = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  public confirmMessage = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
-      const { boxId, msgId } = req.params;
-      const { uploadedFields } = req.body;
-      await this.msgService.completeUpload(boxId, msgId, uploadedFields || []);
-      res.status(202).json({
+      const { boxId } = req.params;
+      const uid = req.user!.uid;
+      const data = await this.msgService.confirmMessage(boxId, uid, req.body);
+      res.status(200).json({
         success: true,
-        data: { messageId: msgId, status: 'processing' }
+        data
       });
     } catch (error) {
       next(error);

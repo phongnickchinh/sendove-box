@@ -14,7 +14,6 @@ router.use(requireDeviceAuth);
 
 router.get('/poll', controller.poll);
 router.post('/heartbeat', controller.heartbeat);
-router.post('/ack/:msgId', controller.ackMessage);
 
 // Note: /download is usually handled by returning a signed URL in /poll
 // but if you want to proxy it through functions:

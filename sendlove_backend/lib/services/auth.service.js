@@ -8,39 +8,35 @@ class AuthService {
         this.userRepo = new firebase_user_repository_1.FirebaseUserRepository();
     }
     /**
-     * Handle user login via Google OAuth token validation.
-     * In a real implementation, you might exchange a custom token or just ensure the user exists in RTDB.
+     * Xử lý đăng nhập Google OAuth.
+     * Tạo user mới nếu chưa tồn tại, cập nhật profile nếu đã có.
      */
     async handleGoogleLogin(decodedToken) {
         const { uid, email, name, picture } = decodedToken;
+        const now = Date.now();
         let user = await this.userRepo.getById(uid);
         if (!user) {
-            // Create new user
+            // Tạo user mới
             user = await this.userRepo.create(uid, {
-                uid,
-                email: email || null,
-                displayName: name || null,
-                photoURL: picture || null,
-                createdAt: Date.now(),
+                id: uid,
+                email: email || '',
+                display_name: name || '',
+                is_admin: false,
+                avatar_url: picture || null,
+                last_login_at: now,
+                boxes_list: {},
+                created_at: now,
+                updated_at: now,
             });
         }
         else {
-            // Update profile info if changed
-            let changed = false;
-            if (name && user.displayName !== name) {
-                user.displayName = name;
-                changed = true;
-            }
-            if (picture && user.photoURL !== picture) {
-                user.photoURL = picture;
-                changed = true;
-            }
-            if (changed) {
-                user = await this.userRepo.update(uid, {
-                    displayName: user.displayName,
-                    photoURL: user.photoURL
-                });
-            }
+            // Cập nhật profile nếu thay đổi + ghi last_login_at
+            const updateData = { last_login_at: now, updated_at: now };
+            if (name && user.display_name !== name)
+                updateData.display_name = name;
+            if (picture && user.avatar_url !== picture)
+                updateData.avatar_url = picture;
+            user = await this.userRepo.update(uid, updateData);
         }
         return user;
     }
@@ -49,15 +45,13 @@ class AuthService {
         if (!user)
             throw new error_handler_middleware_1.AppError(404, 'user_not_found', 'User not found');
         const deletedBoxes = [];
-        // Unpair from all boxes
-        if (user.pairedBoxes) {
-            for (const [boxId] of Object.entries(user.pairedBoxes)) {
-                // We just return the list of boxes here, 
-                // the BoxService should ideally handle the actual unpairing logic on the Box node
+        // Thu thập danh sách box cần unpair
+        if (user.boxes_list) {
+            for (const boxId of Object.keys(user.boxes_list)) {
                 deletedBoxes.push(boxId);
             }
         }
-        // Delete user from RTDB
+        // Xoá user khỏi RTDB
         await this.userRepo.delete(uid);
         return deletedBoxes;
     }

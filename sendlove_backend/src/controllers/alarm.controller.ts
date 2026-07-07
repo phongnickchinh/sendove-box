@@ -11,9 +11,8 @@ export class AlarmController {
 
   public createAlarm = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
-      const uid = req.user!.uid;
       const { boxId } = req.params;
-      const data = await this.alarmService.createAlarm(uid, boxId, req.body);
+      const data = await this.alarmService.createAlarm(boxId, req.body);
       res.status(201).json({ success: true, data });
     } catch (error) {
       next(error);

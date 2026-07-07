@@ -12,7 +12,10 @@ export class UserController {
   public getProfile = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
       const uid = req.user!.uid;
-      const user = await this.userService.getUserProfile(uid);
+      const email = req.user!.email || '';
+      const name = (req.user as any).name;
+      const picture = (req.user as any).picture;
+      const user = await this.userService.getOrCreateUserProfile(uid, email, name, picture);
       res.status(200).json({ success: true, data: user });
     } catch (error) {
       next(error);

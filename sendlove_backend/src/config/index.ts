@@ -23,5 +23,11 @@ export const config = {
   video: {
     maxDurationSeconds: 15,
     framesPerSecond: 10,
-  }
+  },
+
+  // 5. Rate Limit: Giới hạn gửi tin nhắn (per sender + box)
+  rateLimit: {
+    maxMessagesPerWindow: 3,       // Tối đa 3 tin nhắn
+    windowDurationMs: 24 * 60 * 60 * 1000, // Trong 24 giờ
+  },
 };

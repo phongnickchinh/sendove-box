@@ -4,24 +4,25 @@ exports.MessageController = void 0;
 const message_service_1 = require("../services/message.service");
 class MessageController {
     constructor() {
-        this.createMessage = async (req, res, next) => {
+        this.initiateMessage = async (req, res, next) => {
             try {
                 const { boxId } = req.params;
-                const data = await this.msgService.createMessage(boxId, req.body);
+                const uid = req.user.uid;
+                const data = await this.msgService.initiateMessage(boxId, uid);
                 res.status(201).json({ success: true, data });
             }
             catch (error) {
                 next(error);
             }
         };
-        this.completeUpload = async (req, res, next) => {
+        this.confirmMessage = async (req, res, next) => {
             try {
-                const { boxId, msgId } = req.params;
-                const { uploadedFields } = req.body;
-                await this.msgService.completeUpload(boxId, msgId, uploadedFields || []);
-                res.status(202).json({
+                const { boxId } = req.params;
+                const uid = req.user.uid;
+                const data = await this.msgService.confirmMessage(boxId, uid, req.body);
+                res.status(200).json({
                     success: true,
-                    data: { messageId: msgId, status: 'processing' }
+                    data
                 });
             }
             catch (error) {

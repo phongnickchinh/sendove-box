@@ -1,85 +1,97 @@
 import { FirebaseMessageRepository } from '../repositories/firebase/firebase-message.repository';
 import { FirebaseStorageRepository } from '../repositories/firebase/firebase-storage.repository';
-import { Message, MessageType } from '../types/message.types';
+import { Message } from '../types/message.types';
 import { AppError } from '../middleware/error-handler.middleware';
-import { MediaProcessingService } from './media-processing.service';
 
 export class MessageService {
   private msgRepo: FirebaseMessageRepository;
   private storageRepo: FirebaseStorageRepository;
-  private mediaService: MediaProcessingService;
 
   constructor() {
     this.msgRepo = new FirebaseMessageRepository();
     this.storageRepo = new FirebaseStorageRepository();
-    this.mediaService = new MediaProcessingService();
   }
 
-  async createMessage(boxId: string, data: { type: MessageType, text?: string, metadata?: any, mediaCount?: number }): Promise<{ messageId: string, uploadURLs: { field: string, url: string }[] }> {
+  /**
+   * Bước 1: Sender yêu cầu gửi tin nhắn → backend tạo signed upload URLs.
+   * Sender chưa biết URL cuối cùng, chỉ nhận URL tạm để upload file.
+   */
+  async initiateMessage(boxId: string, senderId: string): Promise<{
+    message_id: string;
+    upload_urls: { bin?: string; voice?: string; gif?: string; bg_music?: string; image?: string };
+  }> {
     const messageId = `msg_${Date.now()}`;
-    
-    // Create DB entry
-    await this.msgRepo.createMessage(boxId, messageId, {
-      type: data.type,
-      status: 'awaiting_upload',
-      createdAt: Date.now(),
+    const basePath = `media/${boxId}/${messageId}`;
+
+    const upload_urls: Record<string, string> = {};
+
+    // Tạo signed upload URL cho mỗi loại file có thể có
+    upload_urls.bin = await this.storageRepo.generateUploadUrl(
+      `${basePath}/video.bin`, 'application/octet-stream'
+    );
+    upload_urls.voice = await this.storageRepo.generateUploadUrl(
+      `${basePath}/voice.wav`, 'audio/wav'
+    );
+    upload_urls.gif = await this.storageRepo.generateUploadUrl(
+      `${basePath}/animation.gif`, 'image/gif'
+    );
+    upload_urls.bg_music = await this.storageRepo.generateUploadUrl(
+      `${basePath}/bgmusic.mp3`, 'audio/mpeg'
+    );
+    upload_urls.image = await this.storageRepo.generateUploadUrl(
+      `${basePath}/photo.jpg`, 'image/jpeg'
+    );
+
+    return { message_id: messageId, upload_urls };
+  }
+
+  /**
+   * Bước 2: Sender upload xong → gọi confirm để ghi record vào RTDB.
+   * Chỉ lúc này message mới thực sự "tồn tại" trên database.
+   */
+  async confirmMessage(boxId: string, senderId: string, data: {
+    message_id: string;
+    text?: string;
+    bin_url?: string;
+    voice_url?: string;
+    gif_url?: string;
+    bg_music_url?: string;
+    image_url?: string;
+    total_size?: number;
+    thumbnail_url?: string;
+  }): Promise<Message> {
+    const now = Date.now();
+
+    const message: Omit<Message, 'id'> = {
+      sender_id: senderId,
+      box_id: boxId,
+      timestamp: now,
+      created_at: now,
+      updated_at: now,
+
       text: data.text,
-      metadata: data.metadata,
-    });
+      bin_url: data.bin_url,
+      voice_url: data.voice_url,
+      gif_url: data.gif_url,
+      bg_music_url: data.bg_music_url,
+      image_url: data.image_url,
+      total_size: data.total_size,
+      thumbnail_url: data.thumbnail_url,
+    };
 
-    const uploadURLs: { field: string, url: string }[] = [];
-
-    // Generate signed URLs if media is expected
-    if (data.type.includes('photo') || data.type.includes('video') || data.type.includes('voice')) {
-      const count = data.mediaCount || 1;
-      
-      if (data.type.includes('photo')) {
-        for (let i = 0; i < count; i++) {
-          const field = `photo_${i}`;
-          const path = `temp/${boxId}/${messageId}/${field}`;
-          const url = await this.storageRepo.generateUploadUrl(path, 'image/jpeg'); // or image/*
-          uploadURLs.push({ field, url });
-        }
-      } else if (data.type.includes('video')) {
-        const field = `video`;
-        const path = `temp/${boxId}/${messageId}/${field}`;
-        const url = await this.storageRepo.generateUploadUrl(path, 'video/mp4');
-        uploadURLs.push({ field, url });
-      }
-
-      if (data.type.includes('voice')) {
-        const field = `voice`;
-        const path = `temp/${boxId}/${messageId}/${field}`;
-        const url = await this.storageRepo.generateUploadUrl(path, 'audio/webm'); // Web recording format
-        uploadURLs.push({ field, url });
-      }
-    } else {
-      // If no media (text, text_music), directly trigger processing
-      // In real life, we might do this asynchronously via Pub/Sub or immediate background promise
-      this.mediaService.processMessageMedia(boxId, messageId, data.type, []).catch(console.error);
-    }
-
-    return { messageId, uploadURLs };
+    return this.msgRepo.createMessage(boxId, data.message_id, message);
   }
 
-  async completeUpload(boxId: string, messageId: string, uploadedFields: string[]): Promise<void> {
-    const msg = await this.msgRepo.getMessage(boxId, messageId);
-    if (!msg) throw new AppError(404, 'message_not_found', 'Message not found');
-
-    if (msg.status !== 'awaiting_upload') {
-      throw new AppError(400, 'invalid_status', 'Message is not waiting for upload');
-    }
-
-    await this.msgRepo.updateMessage(boxId, messageId, { status: 'processing' });
-
-    // Trigger media processing async
-    this.mediaService.processMessageMedia(boxId, messageId, msg.type, uploadedFields).catch(console.error);
-  }
-
+  /**
+   * Lấy danh sách tin nhắn (cho Receiver xem lịch sử)
+   */
   async getMessages(boxId: string, limit?: number): Promise<Message[]> {
     return this.msgRepo.listMessages(boxId, limit);
   }
 
+  /**
+   * Lấy chi tiết 1 tin nhắn
+   */
   async getMessageDetails(boxId: string, messageId: string): Promise<Message> {
     const msg = await this.msgRepo.getMessage(boxId, messageId);
     if (!msg) throw new AppError(404, 'message_not_found', 'Message not found');

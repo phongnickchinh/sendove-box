@@ -17,7 +17,7 @@ export const requireDeviceAuth = async (req: AuthenticatedRequest, res: Response
     const boxId = `box_${deviceId}`;
     const box = await boxRepo.getById(boxId);
 
-    if (!box || box.deviceSecret !== deviceSecret) {
+    if (!box || box.device_secret !== deviceSecret) {
       throw new AppError(401, 'unauthorized', 'Invalid device credentials');
     }
 

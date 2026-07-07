@@ -19,7 +19,9 @@ export const requireAuth = async (req: AuthenticatedRequest, res: Response<ApiRe
     req.user = {
       uid: decodedToken.uid,
       email: decodedToken.email,
-    };
+    } as any;
+    (req.user as any).name = decodedToken.name;
+    (req.user as any).picture = decodedToken.picture;
     
     next();
   } catch (error) {

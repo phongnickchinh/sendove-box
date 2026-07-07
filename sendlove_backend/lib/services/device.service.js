@@ -7,113 +7,144 @@ exports.DeviceService = void 0;
 const firebase_box_repository_1 = require("../repositories/firebase/firebase-box.repository");
 const firebase_message_repository_1 = require("../repositories/firebase/firebase-message.repository");
 const firebase_alarm_repository_1 = require("../repositories/firebase/firebase-alarm.repository");
-const firebase_storage_repository_1 = require("../repositories/firebase/firebase-storage.repository");
+const firebase_firmware_repository_1 = require("../repositories/firebase/firebase-firmware.repository");
+const firebase_ota_repository_1 = require("../repositories/firebase/firebase-ota.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
 const crypto_1 = __importDefault(require("crypto"));
-const config_1 = require("../config");
 class DeviceService {
     constructor() {
         this.boxRepo = new firebase_box_repository_1.FirebaseBoxRepository();
         this.msgRepo = new firebase_message_repository_1.FirebaseMessageRepository();
         this.alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository();
-        this.storageRepo = new firebase_storage_repository_1.FirebaseStorageRepository();
+        this.fwRepo = new firebase_firmware_repository_1.FirebaseFirmwareRepository();
+        this.otaRepo = new firebase_ota_repository_1.FirebaseOtaRepository();
     }
+    /**
+     * ESP32 đăng ký lần đầu
+     */
     async registerDevice(data) {
         const boxId = `box_${data.deviceId}`;
-        const deviceSecret = crypto_1.default.randomBytes(32).toString('hex');
+        const now = Date.now();
+        // Sinh pairing codes
+        const rcode = `R${crypto_1.default.randomBytes(3).toString('hex').toUpperCase()}`;
+        const scode = `S${crypto_1.default.randomBytes(3).toString('hex').toUpperCase()}`;
+        const deviceSecret = crypto_1.default.randomBytes(16).toString('hex');
         await this.boxRepo.create(boxId, {
-            boxId,
-            macAddress: data.macAddress,
-            deviceSecret,
-            firmwareVersion: data.firmwareVersion,
-            isOnline: true,
-            lastSeen: Date.now(),
-            pairingInfo: {
-                senderCode: data.senderCode,
-                receiverCode: data.receiverCode
-            }
-        });
-        // Initialize polling cache
-        await this.boxRepo.updatePollingCache(boxId, {
-            hasNewMessage: false,
-            latestMessageId: null,
-            hasNewAlarms: false,
-            hasNewWifiConfig: false,
-            pollIntervalSeconds: 30
+            id: boxId,
+            device_secret: deviceSecret,
+            created_at: now,
+            updated_at: now,
+            code: {
+                rcode,
+                scode,
+                rcode_created_at: now,
+                scode_created_at: now,
+            },
+            pairing: {
+                sender_id: null,
+                receiver_id: null,
+                sender_paired_time: null,
+                receiver_paired_time: null,
+            },
+            config: {
+                alarm_list: {},
+            },
+            flags: {
+                a_flag: false,
+                ota_flag: false,
+                p_flag: false,
+            },
+            status: {
+                online: true,
+                charging: false,
+                battery: 100,
+                fw_version: data.fw_version,
+                last_seen: now,
+            },
         });
         return {
-            boxId,
-            deviceSecret,
-            pollIntervalSeconds: 30,
-            serverTime: new Date().toISOString()
+            box_id: boxId,
+            device_secret: deviceSecret,
+            rcode,
+            scode,
+            server_time: new Date().toISOString(),
         };
     }
-    async poll(boxId) {
-        const cache = await this.boxRepo.getPollingCache(boxId);
-        if (!cache)
+    /**
+     * ESP32 poll định kỳ: kiểm tra flags, lấy messages mới, lấy alarm list nếu cần.
+     * ESP32 gửi last_download_ts → backend trả messages có timestamp > last_download_ts.
+     */
+    async poll(boxId, lastDownloadTs) {
+        const box = await this.boxRepo.getById(boxId);
+        if (!box)
             throw new error_handler_middleware_1.AppError(404, 'box_not_found', 'Box not found');
         const response = {
-            serverTime: new Date().toISOString(),
-            pollIntervalSeconds: cache.pollIntervalSeconds,
-            alarmsUpdated: cache.hasNewAlarms,
-            wifiConfig: null,
+            server_time: new Date().toISOString(),
+            flags: box.flags,
         };
-        // If new message
-        if (cache.hasNewMessage && cache.latestMessageId) {
-            const msg = await this.msgRepo.getMessage(boxId, cache.latestMessageId);
-            if (msg && msg.status === 'ready' && msg.storagePaths) {
-                response.newMessage = {
-                    messageId: msg.messageId,
-                    type: msg.type,
-                    metadata: msg.metadata,
-                    files: Object.keys(msg.storagePaths).map(key => ({
-                        fileType: key,
-                        // Assuming download API will handle piping the storage file
-                        url: `/api/device/download/${msg.messageId}/${key}`
-                    }))
+        // Nếu có tin nhắn mới (ESP32 gửi last_download_ts)
+        if (lastDownloadTs !== undefined) {
+            const allMessages = await this.msgRepo.listMessages(boxId, 20);
+            const newMessages = allMessages.filter(m => m.timestamp > lastDownloadTs);
+            if (newMessages.length > 0) {
+                response.new_messages = newMessages.map(m => ({
+                    id: m.id,
+                    timestamp: m.timestamp,
+                    text: m.text,
+                    bin_url: m.bin_url,
+                    voice_url: m.voice_url,
+                    gif_url: m.gif_url,
+                    bg_music_url: m.bg_music_url,
+                    image_url: m.image_url,
+                    total_size: m.total_size,
+                }));
+            }
+        }
+        // Nếu a_flag = true → trả alarm list mới
+        if (box.flags.a_flag) {
+            response.alarm_list = await this.alarmRepo.listAlarms(boxId);
+            // Reset flag sau khi ESP32 đã đọc
+            await this.boxRepo.updateFlags(boxId, { a_flag: false });
+        }
+        // Nếu ota_flag = true → trả thông tin OTA task
+        if (box.flags.ota_flag) {
+            const otaTask = await this.otaRepo.findPendingByBoxId(boxId);
+            if (otaTask) {
+                const fw = await this.fwRepo.getById(otaTask.fw_version);
+                response.ota = {
+                    task_id: otaTask.id,
+                    fw_version: otaTask.fw_version,
+                    storage_url: fw?.storage_url,
+                    checksum: fw?.checksum,
                 };
             }
         }
-        // If alarms updated
-        if (cache.hasNewAlarms) {
-            response.alarms = await this.alarmRepo.listAlarms(boxId);
-            // Reset flag
-            await this.boxRepo.updatePollingCache(boxId, { hasNewAlarms: false });
-        }
-        // If wifi config updated
-        if (cache.hasNewWifiConfig) {
-            const box = await this.boxRepo.getById(boxId);
-            if (box && box.wifiConfig && box.wifiConfig.status === 'pending_apply') {
-                response.wifiConfig = {
-                    ssid: box.wifiConfig.ssid,
-                    password: box.wifiConfig.password
-                };
-            }
+        // Nếu p_flag = true → trả pairing info mới
+        if (box.flags.p_flag) {
+            response.pairing = box.pairing;
+            await this.boxRepo.updateFlags(boxId, { p_flag: false });
         }
         return response;
     }
+    /**
+     * ESP32 gửi heartbeat (cập nhật status)
+     */
     async heartbeat(boxId, data) {
-        await this.boxRepo.update(boxId, {
-            isOnline: true,
-            lastSeen: Date.now(),
-            // could store telemetry (freeHeap, rssi) in a separate node if needed
+        await this.boxRepo.updateStatus(boxId, {
+            online: true,
+            last_seen: Date.now(),
+            ...(data.battery !== undefined && { battery: data.battery }),
+            ...(data.charging !== undefined && { charging: data.charging }),
+            ...(data.fw_version !== undefined && { fw_version: data.fw_version }),
         });
     }
-    async ackMessage(boxId, messageId, status) {
-        const msg = await this.msgRepo.getMessage(boxId, messageId);
-        if (!msg)
-            throw new error_handler_middleware_1.AppError(404, 'message_not_found', 'Message not found');
-        await this.msgRepo.updateMessage(boxId, messageId, { status: 'delivered' });
-        // Clear polling cache flag
-        const cache = await this.boxRepo.getPollingCache(boxId);
-        if (cache?.latestMessageId === messageId) {
-            await this.boxRepo.updatePollingCache(boxId, { hasNewMessage: false, latestMessageId: null });
-        }
-        // Optionally auto-delete binary files to save space
-        if (config_1.config.storage.autoDeleteAfterDownload && msg.storagePaths) {
-            for (const path of Object.values(msg.storagePaths)) {
-                await this.storageRepo.deleteFile(path).catch(e => console.error(`Failed to delete ${path}`, e));
-            }
+    /**
+     * ESP32 báo OTA hoàn tất
+     */
+    async ackOta(boxId, taskId, success, errorMessage) {
+        await this.otaRepo.updateOtaStatus(taskId, success ? 'completed' : 'failed', { error_message: errorMessage });
+        if (success) {
+            await this.boxRepo.updateFlags(boxId, { ota_flag: false });
         }
     }
 }

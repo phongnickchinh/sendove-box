@@ -6,9 +6,8 @@ class AlarmController {
     constructor() {
         this.createAlarm = async (req, res, next) => {
             try {
-                const uid = req.user.uid;
                 const { boxId } = req.params;
-                const data = await this.alarmService.createAlarm(uid, boxId, req.body);
+                const data = await this.alarmService.createAlarm(boxId, req.body);
                 res.status(201).json({ success: true, data });
             }
             catch (error) {

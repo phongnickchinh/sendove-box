@@ -7,7 +7,10 @@ class UserController {
         this.getProfile = async (req, res, next) => {
             try {
                 const uid = req.user.uid;
-                const user = await this.userService.getUserProfile(uid);
+                const email = req.user.email || '';
+                const name = req.user.name;
+                const picture = req.user.picture;
+                const user = await this.userService.getOrCreateUserProfile(uid, email, name, picture);
                 res.status(200).json({ success: true, data: user });
             }
             catch (error) {

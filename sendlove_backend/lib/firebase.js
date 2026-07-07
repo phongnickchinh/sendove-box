@@ -36,7 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.storage = exports.db = void 0;
 const admin = __importStar(require("firebase-admin"));
 if (!admin.apps.length) {
-    admin.initializeApp();
+    admin.initializeApp({
+        databaseURL: 'https://iot-app-839a2.asia-southeast1.firebasedatabase.app'
+    });
 }
 exports.db = admin.database();
 exports.storage = admin.storage();

@@ -1,0 +1,231 @@
+[debug] [2026-07-07T18:24:33.409Z] ----------------------------------------------------------------------
+[debug] [2026-07-07T18:24:33.416Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\phamp\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js emulators:start --only functions
+[debug] [2026-07-07T18:24:33.416Z] CLI Version:   15.22.4
+[debug] [2026-07-07T18:24:33.416Z] Platform:      win32
+[debug] [2026-07-07T18:24:33.417Z] Node Version:  v25.0.0
+[debug] [2026-07-07T18:24:33.417Z] Detected Agent: unknown
+[debug] [2026-07-07T18:24:33.417Z] Time:          Wed Jul 08 2026 01:24:33 GMT+0700 (Indochina Time)
+[debug] [2026-07-07T18:24:33.417Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-07-07T18:24:37.892Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-07-07T18:24:37.893Z] > authorizing via signed-in user (phamphong300111@gmail.com)
+[info] i  emulators: Starting emulators: functions {"metadata":{"emulator":{"name":"hub"},"message":"Starting emulators: functions"}}
+[debug] [2026-07-07T18:24:37.914Z] [logging] Logging Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-07-07T18:24:37.915Z] assigned listening specs for emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"ui":[{"address":"127.0.0.1","family":"IPv4","port":4000},{"address":"::1","family":"IPv6","port":4000}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}]},"metadata":{"message":"assigned listening specs for emulators"}}
+[debug] [2026-07-07T18:24:37.925Z] Write emulator hub locator at C:\Users\phamp\AppData\Local\Temp\hub-iot-app-839a2.json
+[debug] [2026-07-07T18:24:37.960Z] [functions] Functions Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-07-07T18:24:37.961Z] [eventarc] Eventarc Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-07-07T18:24:37.961Z] [tasks] Cloud Tasks Emulator only supports listening on one address (127.0.0.1). Not listening on ::1
+[debug] [2026-07-07T18:24:37.961Z] late-assigned ports for functions and eventarc emulators {"user":{"hub":[{"address":"127.0.0.1","family":"IPv4","port":4400},{"address":"::1","family":"IPv6","port":4400}],"ui":[{"address":"127.0.0.1","family":"IPv4","port":4000},{"address":"::1","family":"IPv6","port":4000}],"logging":[{"address":"127.0.0.1","family":"IPv4","port":4500}],"functions":[{"address":"127.0.0.1","family":"IPv4","port":5001}],"eventarc":[{"address":"127.0.0.1","family":"IPv4","port":9299}],"tasks":[{"address":"127.0.0.1","family":"IPv4","port":9499}]},"metadata":{"message":"late-assigned ports for functions and eventarc emulators"}}
+[warn] !  functions: The following emulators are not running, calls to these services from the Functions emulator will affect production: apphosting, auth, firestore, database, hosting, pubsub, storage, dataconnect {"metadata":{"emulator":{"name":"functions"},"message":"The following emulators are not running, calls to these services from the Functions emulator will affect production: \u001b[1mapphosting, auth, firestore, database, hosting, pubsub, storage, dataconnect\u001b[22m"}}
+[warn] !  functions: Application Default Credentials detected. Non-emulated services will access production using these credentials. Be careful! {"metadata":{"emulator":{"name":"functions"},"message":"Application Default Credentials detected. Non-emulated services will access production using these credentials. Be careful!"}}
+[debug] [2026-07-07T18:24:40.644Z] Checked if tokens are valid: true, expires at: 1783449644096
+[debug] [2026-07-07T18:24:40.644Z] Checked if tokens are valid: true, expires at: 1783449644096
+[debug] [2026-07-07T18:24:40.645Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/iot-app-839a2/adminSdkConfig [none]
+[debug] [2026-07-07T18:24:41.423Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/iot-app-839a2/adminSdkConfig 200
+[debug] [2026-07-07T18:24:41.423Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/iot-app-839a2/adminSdkConfig {"projectId":"iot-app-839a2","databaseURL":"https://iot-app-839a2-default-rtdb.asia-southeast1.firebasedatabase.app","storageBucket":"iot-app-839a2.firebasestorage.app"}
+[info] i  functions: Watching "P:\coddd\sendove-box\sendlove_backend" for Cloud Functions... {"metadata":{"emulator":{"name":"functions"},"message":"Watching \"P:\\coddd\\sendove-box\\sendlove_backend\" for Cloud Functions..."}}
+[debug] [2026-07-07T18:24:41.463Z] Validating nodejs source
+[warn] !  functions: package.json indicates an outdated version of firebase-functions. Please upgrade using npm install --save firebase-functions@latest in your functions directory. 
+[warn] !  functions: Please note that there will be breaking changes when you upgrade. 
+[debug] [2026-07-07T18:24:45.928Z] > [functions] package.json contents: {
+  "name": "sendlove-backend",
+  "version": "1.0.0",
+  "description": "Sendove Box Backend (Firebase Functions)",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "shell": "npm run build && firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "firebase-admin": "^12.1.0",
+    "firebase-functions": "^5.0.1",
+    "fluent-ffmpeg": "^2.1.3",
+    "sharp": "^0.33.4"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/fluent-ffmpeg": "^2.1.24",
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  },
+  "private": true
+}
+[debug] [2026-07-07T18:24:45.929Z] Building nodejs source
+[debug] [2026-07-07T18:24:45.930Z] Failed to find version of module node: reached end of search path P:\coddd\sendove-box\sendlove_backend\node_modules
+[warn] !  functions: Your requested "node" version "20" doesn't match your global version "25". Using node@25 from host. 
+[debug] [2026-07-07T18:24:45.934Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-07-07T18:24:45.950Z] Found firebase-functions binary at 'P:\coddd\sendove-box\sendlove_backend\node_modules\.bin\firebase-functions'
+[info] Serving at port 8391
+
+[debug] [2026-07-07T18:24:47.985Z] Got response from /__/functions.yaml {"endpoints":{"api":{"platform":"gcfv1","availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"serviceAccountEmail":null,"vpc":null,"httpsTrigger":{},"entryPoint":"api"}},"specVersion":"v1alpha1","requiredAPIs":[],"extensions":{}}
+[debug] [2026-07-07T18:24:49.334Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:24:49.334Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:24:49.335Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:24:49.334Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:24:49.338Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[info] +  functions: Loaded functions definitions from source: api. {"metadata":{"emulator":{"name":"functions"},"message":"Loaded functions definitions from source: api."}}
+[info] +  functions[us-central1-api]: http function initialized (http://127.0.0.1:5001/iot-app-839a2/us-central1/api). {"metadata":{"emulator":{"name":"functions"},"message":"\u001b[1mhttp\u001b[22m function initialized (http://127.0.0.1:5001/iot-app-839a2/us-central1/api)."}}
+[debug] [2026-07-07T18:24:52.057Z] Could not find VSCode notification endpoint: FetchError: request to http://localhost:40001/vscode/notify failed, reason: . If you are not running the Firebase SQL Connect VSCode extension, this is expected and not an issue.
+[info] 
+┌─────────────────────────────────────────────────────────────┐
+│ ✔  All emulators ready! It is now safe to connect your app. │
+│ i  View Emulator UI at http://127.0.0.1:4000/               │
+└─────────────────────────────────────────────────────────────┘
+
+┌───────────┬────────────────┬─────────────────────────────────┐
+│ Emulator  │ Host:Port      │ View in Emulator UI             │
+├───────────┼────────────────┼─────────────────────────────────┤
+│ Functions │ 127.0.0.1:5001 │ http://127.0.0.1:4000/functions │
+└───────────┴────────────────┴─────────────────────────────────┘
+  Emulator Hub host: 127.0.0.1 port: 4400
+  Other reserved ports: 4500
+
+Issues? Report them at https://github.com/firebase/firebase-tools/issues and attach the *-debug.log files.
+ 
+[debug] [2026-07-07T18:24:56.769Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:24:56.769Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:24:56.770Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:24:56.769Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:24:56.770Z] Accepted request OPTIONS /iot-app-839a2/us-central1/api/boxes/pair --> us-central1-api
+[debug] [2026-07-07T18:24:56.773Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:24:56.774Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair"}}
+[debug] [2026-07-07T18:24:56.789Z] [worker-pool] addWorker(us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] addWorker(us-central1-api)"}}
+[debug] [2026-07-07T18:24:56.790Z] [worker-pool] Adding worker with key us-central1-api, total=1 {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] Adding worker with key us-central1-api, total=1"}}
+[debug] [2026-07-07T18:24:58.570Z] [runtime-status] [23576] Resolved module firebase-admin {"declared":true,"installed":true,"version":"12.7.0","resolution":"P:\\coddd\\sendove-box\\sendlove_backend\\node_modules\\firebase-admin\\lib\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Resolved module firebase-admin {\"declared\":true,\"installed\":true,\"version\":\"12.7.0\",\"resolution\":\"P:\\\\coddd\\\\sendove-box\\\\sendlove_backend\\\\node_modules\\\\firebase-admin\\\\lib\\\\index.js\"}"}}
+[debug] [2026-07-07T18:24:58.571Z] [runtime-status] [23576] Resolved module firebase-functions {"declared":true,"installed":true,"version":"5.1.1","resolution":"P:\\coddd\\sendove-box\\sendlove_backend\\node_modules\\firebase-functions\\lib\\v1\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Resolved module firebase-functions {\"declared\":true,\"installed\":true,\"version\":\"5.1.1\",\"resolution\":\"P:\\\\coddd\\\\sendove-box\\\\sendlove_backend\\\\node_modules\\\\firebase-functions\\\\lib\\\\v1\\\\index.js\"}"}}
+[debug] [2026-07-07T18:24:58.572Z] [runtime-status] [23576] Outgoing network have been stubbed. [{"name":"http","status":"mocked"},{"name":"http","status":"mocked"},{"name":"https","status":"mocked"},{"name":"https","status":"mocked"},{"name":"net","status":"mocked"}] {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Outgoing network have been stubbed. [{\"name\":\"http\",\"status\":\"mocked\"},{\"name\":\"http\",\"status\":\"mocked\"},{\"name\":\"https\",\"status\":\"mocked\"},{\"name\":\"https\",\"status\":\"mocked\"},{\"name\":\"net\",\"status\":\"mocked\"}]"}}
+[debug] [2026-07-07T18:24:58.573Z] [runtime-status] [23576] Resolved module firebase-functions {"declared":true,"installed":true,"version":"5.1.1","resolution":"P:\\coddd\\sendove-box\\sendlove_backend\\node_modules\\firebase-functions\\lib\\v1\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Resolved module firebase-functions {\"declared\":true,\"installed\":true,\"version\":\"5.1.1\",\"resolution\":\"P:\\\\coddd\\\\sendove-box\\\\sendlove_backend\\\\node_modules\\\\firebase-functions\\\\lib\\\\v1\\\\index.js\"}"}}
+[debug] [2026-07-07T18:24:58.900Z] [runtime-status] [23576] Resolved module firebase-admin {"declared":true,"installed":true,"version":"12.7.0","resolution":"P:\\coddd\\sendove-box\\sendlove_backend\\node_modules\\firebase-admin\\lib\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Resolved module firebase-admin {\"declared\":true,\"installed\":true,\"version\":\"12.7.0\",\"resolution\":\"P:\\\\coddd\\\\sendove-box\\\\sendlove_backend\\\\node_modules\\\\firebase-admin\\\\lib\\\\index.js\"}"}}
+[debug] [2026-07-07T18:24:58.904Z] [runtime-status] [23576] Resolved module firebase-functions {"declared":true,"installed":true,"version":"5.1.1","resolution":"P:\\coddd\\sendove-box\\sendlove_backend\\node_modules\\firebase-functions\\lib\\v1\\index.js"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Resolved module firebase-functions {\"declared\":true,\"installed\":true,\"version\":\"5.1.1\",\"resolution\":\"P:\\\\coddd\\\\sendove-box\\\\sendlove_backend\\\\node_modules\\\\firebase-functions\\\\lib\\\\v1\\\\index.js\"}"}}
+[debug] [2026-07-07T18:24:59.160Z] [runtime-status] [23576] firebase-admin has been stubbed. {"adminResolution":{"declared":true,"installed":true,"version":"12.7.0","resolution":"P:\\coddd\\sendove-box\\sendlove_backend\\node_modules\\firebase-admin\\lib\\index.js"}} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] firebase-admin has been stubbed. {\"adminResolution\":{\"declared\":true,\"installed\":true,\"version\":\"12.7.0\",\"resolution\":\"P:\\\\coddd\\\\sendove-box\\\\sendlove_backend\\\\node_modules\\\\firebase-admin\\\\lib\\\\index.js\"}}"}}
+[debug] [2026-07-07T18:24:59.368Z] [runtime-status] [23576] initializeApp(DEFAULT) {"databaseURL":"https://iot-app-839a2.asia-southeast1.firebasedatabase.app"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] initializeApp(DEFAULT) {\"databaseURL\":\"https://iot-app-839a2.asia-southeast1.firebasedatabase.app\"}"}}
+[warn] !  functions: The Realtime Database emulator is not running, so calls to Realtime Database will affect production. {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"The Realtime Database emulator is not running, so calls to Realtime Database will affect production."}}
+[warn] !  functions: The Firebase Storage emulator is not running, so calls to Firebase Storage will affect production. {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"The Firebase Storage emulator is not running, so calls to Firebase Storage will affect production."}}
+[debug] [2026-07-07T18:24:59.713Z] [runtime-status] [23576] Functions runtime initialized. {"cwd":"P:\\coddd\\sendove-box\\sendlove_backend","node_version":"25.0.0"} {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Functions runtime initialized. {\"cwd\":\"P:\\\\coddd\\\\sendove-box\\\\sendlove_backend\",\"node_version\":\"25.0.0\"}"}}
+[debug] [2026-07-07T18:24:59.714Z] [runtime-status] [23576] Listening to port: \\?\pipe\fire_emu_dec6c5d4f3fc5299 {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[runtime-status] [23576] Listening to port: \\\\?\\pipe\\fire_emu_dec6c5d4f3fc5299"}}
+[debug] [2026-07-07T18:24:59.754Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:24:59.754Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:24:59.755Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[debug] [2026-07-07T18:24:59.760Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 5.6587ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 5.6587ms"}}
+[debug] [2026-07-07T18:24:59.762Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:24:59.762Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:24:59.763Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:24:59.764Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:24:59.768Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:24:59.768Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:24:59.769Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:24:59.768Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:24:59.769Z] Accepted request POST /iot-app-839a2/us-central1/api/boxes/pair --> us-central1-api
+[debug] [2026-07-07T18:24:59.770Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:24:59.771Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair"}}
+[debug] [2026-07-07T18:24:59.771Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:24:59.771Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[warn] !  functions: The Firebase Authentication emulator is not running, so calls to Firebase Authentication will affect production. {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"The Firebase Authentication emulator is not running, so calls to Firebase Authentication will affect production."}}
+[info] >  [2026-07-07T18:25:00.373Z]  @firebase/database: FIREBASE WARNING: Using an unspecified index. Your data will be downloaded and filtered on the client. Consider adding ".indexOn": "code/scode" at /boxes to your security rules for better performance.  {"user":"[2026-07-07T18:25:00.373Z]  @firebase/database: FIREBASE WARNING: Using an unspecified index. Your data will be downloaded and filtered on the client. Consider adding \".indexOn\": \"code/scode\" at /boxes to your security rules for better performance. ","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m [2026-07-07T18:25:00.373Z]  @firebase/database: FIREBASE WARNING: Using an unspecified index. Your data will be downloaded and filtered on the client. Consider adding \".indexOn\": \"code/scode\" at /boxes to your security rules for better performance. "}}
+[debug] [2026-07-07T18:25:00.616Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 845.4294ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 845.4294ms"}}
+[debug] [2026-07-07T18:25:00.617Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:25:00.618Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:25:00.618Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:25:00.618Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:00.626Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:25:00.626Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:00.627Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:25:00.626Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:25:00.627Z] Accepted request OPTIONS /iot-app-839a2/us-central1/api/users/me --> us-central1-api
+[debug] [2026-07-07T18:25:00.629Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:25:00.630Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me"}}
+[debug] [2026-07-07T18:25:00.630Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:25:00.631Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[debug] [2026-07-07T18:25:00.634Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 2.6666ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 2.6666ms"}}
+[debug] [2026-07-07T18:25:00.634Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:25:00.635Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:25:00.635Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:25:00.635Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:00.638Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:25:00.638Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:00.638Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:25:00.638Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:25:00.638Z] Accepted request GET /iot-app-839a2/us-central1/api/users/me --> us-central1-api
+[debug] [2026-07-07T18:25:00.641Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:25:00.641Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me"}}
+[debug] [2026-07-07T18:25:00.641Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:25:00.642Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[debug] [2026-07-07T18:25:00.764Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 122.6586ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 122.6586ms"}}
+[debug] [2026-07-07T18:25:00.765Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:25:00.766Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:25:00.766Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:25:00.766Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:33.651Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:25:33.651Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:33.651Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:25:33.651Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:25:33.651Z] Accepted request OPTIONS /iot-app-839a2/us-central1/api/boxes/pair --> us-central1-api
+[debug] [2026-07-07T18:25:33.655Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:25:33.656Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair"}}
+[debug] [2026-07-07T18:25:33.656Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:25:33.657Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[debug] [2026-07-07T18:25:33.660Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 3.0922ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 3.0922ms"}}
+[debug] [2026-07-07T18:25:33.661Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:25:33.662Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:25:33.662Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:25:33.662Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:33.667Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:25:33.667Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:25:33.667Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/boxes/pair-2026-07-07T18:25:33.667Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:25:33.667Z] Accepted request POST /iot-app-839a2/us-central1/api/boxes/pair --> us-central1-api
+[debug] [2026-07-07T18:25:33.671Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:25:33.671Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/boxes/pair, mapping to path=/boxes/pair"}}
+[debug] [2026-07-07T18:25:33.672Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:25:33.673Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[info] >  [2026-07-07T18:25:33.736Z]  @firebase/database: FIREBASE WARNING: Using an unspecified index. Your data will be downloaded and filtered on the client. Consider adding ".indexOn": "code/rcode" at /boxes to your security rules for better performance.  {"user":"[2026-07-07T18:25:33.736Z]  @firebase/database: FIREBASE WARNING: Using an unspecified index. Your data will be downloaded and filtered on the client. Consider adding \".indexOn\": \"code/rcode\" at /boxes to your security rules for better performance. ","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m [2026-07-07T18:25:33.736Z]  @firebase/database: FIREBASE WARNING: Using an unspecified index. Your data will be downloaded and filtered on the client. Consider adding \".indexOn\": \"code/rcode\" at /boxes to your security rules for better performance. "}}
+[info] >  [Error Handler] AppError: You cannot be both sender and receiver for the same box {"user":"[Error Handler] AppError: You cannot be both sender and receiver for the same box","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m [Error Handler] AppError: You cannot be both sender and receiver for the same box"}}
+[info] >      at BoxService.pairBox (P:\coddd\sendove-box\sendlove_backend\lib\services\box.service.js:35:19) {"user":"    at BoxService.pairBox (P:\\coddd\\sendove-box\\sendlove_backend\\lib\\services\\box.service.js:35:19)","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m     at BoxService.pairBox (P:\\coddd\\sendove-box\\sendlove_backend\\lib\\services\\box.service.js:35:19)"}}
+[info] >      at process.processTicksAndRejections (node:internal/process/task_queues:103:5) {"user":"    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)"}}
+[info] >      at async BoxController.pairBox (P:\coddd\sendove-box\sendlove_backend\lib\controllers\box.controller.js:11:30) { {"user":"    at async BoxController.pairBox (P:\\coddd\\sendove-box\\sendlove_backend\\lib\\controllers\\box.controller.js:11:30) {","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m     at async BoxController.pairBox (P:\\coddd\\sendove-box\\sendlove_backend\\lib\\controllers\\box.controller.js:11:30) {"}}
+[info] >    statusCode: 400, {"user":"  statusCode: 400,","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m   statusCode: 400,"}}
+[info] >    code: 'conflict_role' {"user":"  code: 'conflict_role'","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m   code: 'conflict_role'"}}
+[info] >  } {"user":"}","metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"\u001b[90m> \u001b[39m }"}}
+[debug] [2026-07-07T18:25:33.742Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 69.2584ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 69.2584ms"}}
+[debug] [2026-07-07T18:25:33.742Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:25:33.742Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:25:33.742Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:25:33.743Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:26:03.223Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:26:03.223Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:26:03.224Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:26:03.223Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:26:03.225Z] Accepted request OPTIONS /iot-app-839a2/us-central1/api/users/me --> us-central1-api
+[debug] [2026-07-07T18:26:03.233Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:26:03.234Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me"}}
+[debug] [2026-07-07T18:26:03.234Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:26:03.236Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[debug] [2026-07-07T18:26:03.241Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 5.6482ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 5.6482ms"}}
+[debug] [2026-07-07T18:26:03.242Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:26:03.242Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:26:03.243Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:26:03.243Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:26:03.260Z] [work-queue] {"queuedWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:26:03.260Z"],"queueLength":1,"runningWork":[],"workRunningCount":0}
+[debug] [2026-07-07T18:26:03.261Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":["/iot-app-839a2/us-central1/api/users/me-2026-07-07T18:26:03.260Z"],"workRunningCount":1}
+[debug] [2026-07-07T18:26:03.261Z] Accepted request GET /iot-app-839a2/us-central1/api/users/me --> us-central1-api
+[debug] [2026-07-07T18:26:03.269Z] [functions] Runtime ready! Sending request! {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Runtime ready! Sending request!"}}
+[debug] [2026-07-07T18:26:03.270Z] [functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me {"metadata":{"emulator":{"name":"functions"},"message":"[functions] Got req.url=/iot-app-839a2/us-central1/api/users/me, mapping to path=/users/me"}}
+[debug] [2026-07-07T18:26:03.270Z] [worker-pool] submitRequest(triggerId=us-central1-api) {"metadata":{"emulator":{"name":"functions"},"message":"[worker-pool] submitRequest(triggerId=us-central1-api)"}}
+[info] i  functions: Beginning execution of "us-central1-api" {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Beginning execution of \"us-central1-api\""}}
+[debug] [2026-07-07T18:26:03.272Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: BUSY"}}
+[debug] [2026-07-07T18:26:03.403Z] Finishing up request with event=pause {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=pause"}}
+[info] i  functions: Finished "us-central1-api" in 132.4636ms {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finished \"us-central1-api\" in 132.4636ms"}}
+[debug] [2026-07-07T18:26:03.406Z] [worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"[worker-us-central1-api-b03349c9-d57e-46ee-84b2-a507e89904ab]: IDLE"}}
+[debug] [2026-07-07T18:26:03.407Z] Finishing up request with event=finish {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=finish"}}
+[debug] [2026-07-07T18:26:03.407Z] Finishing up request with event=close {"metadata":{"emulator":{"name":"functions"},"function":{"name":"us-central1-api"},"extension":{},"message":"Finishing up request with event=close"}}
+[debug] [2026-07-07T18:26:03.408Z] [work-queue] {"queuedWork":[],"queueLength":0,"runningWork":[],"workRunningCount":0}

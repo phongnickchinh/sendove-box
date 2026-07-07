@@ -16,10 +16,10 @@ const requireRole = (requiredRole) => {
             const box = await boxRepo.getById(boxId);
             if (!box)
                 throw new error_handler_middleware_1.AppError(404, 'box_not_found', 'Box not found');
-            if (requiredRole === 'sender' && box.pairingInfo.senderUid !== uid) {
+            if (requiredRole === 'sender' && box.pairing.sender_id !== uid) {
                 throw new error_handler_middleware_1.AppError(403, 'forbidden', 'Only sender can perform this action');
             }
-            if (requiredRole === 'receiver' && box.pairingInfo.receiverUid !== uid) {
+            if (requiredRole === 'receiver' && box.pairing.receiver_id !== uid) {
                 throw new error_handler_middleware_1.AppError(403, 'forbidden', 'Only receiver can perform this action');
             }
             next();

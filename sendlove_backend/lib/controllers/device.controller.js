@@ -33,17 +33,6 @@ class DeviceController {
                 next(error);
             }
         };
-        this.ackMessage = async (req, res, next) => {
-            try {
-                const boxId = `box_${req.deviceId}`;
-                const { msgId } = req.params;
-                await this.deviceService.ackMessage(boxId, msgId, req.body.status);
-                res.status(200).json({ success: true, data: { messageId: msgId, status: 'delivered' } });
-            }
-            catch (error) {
-                next(error);
-            }
-        };
         this.deviceService = new device_service_1.DeviceService();
     }
 }

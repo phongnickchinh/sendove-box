@@ -23,7 +23,7 @@ export class FirebaseBaseRepository<T> implements IRepository<T> {
     if (!snapshot.exists()) {
       return null;
     }
-    return snapshot.val() as T;
+    return { ...snapshot.val(), id } as T;
   }
 
   async update(id: string, data: Partial<T>): Promise<T> {

@@ -3,11 +3,9 @@ import { AuthenticatedRequest, ApiResponse } from '../types/api.types';
 import { AuthService } from '../services/auth.service';
 
 export class AuthController {
-  private authService: AuthService;
-
-  constructor() {
-    this.authService = new AuthService();
-  }
+  constructor(
+    private authService: AuthService = new AuthService()
+  ) {}
 
   // Not used directly if relying on Firebase Auth SDK on frontend, 
   // but useful if you want to sync users explicitly

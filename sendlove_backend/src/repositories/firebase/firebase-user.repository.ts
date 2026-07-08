@@ -1,7 +1,8 @@
 import { User, UserBoxEntry } from '../../types/user.types';
 import { FirebaseBaseRepository } from './firebase-base.repository';
+import { IUserRepository } from '../interfaces/user.repository.interface';
 
-export class FirebaseUserRepository extends FirebaseBaseRepository<User> {
+export class FirebaseUserRepository extends FirebaseBaseRepository<User> implements IUserRepository {
   constructor() {
     super('users');
   }
@@ -27,5 +28,17 @@ export class FirebaseUserRepository extends FirebaseBaseRepository<User> {
    */
   async updateLastLogin(uid: string): Promise<void> {
     await this.getRef(`${uid}/last_login_at`).set(Date.now());
+  }
+
+  /**
+   * Xoá mềm user: set deleted_at thay vì xoá hoàn toàn.
+   * Dữ liệu user vẫn được giữ lại cho mục đích audit/history.
+   */
+  async softDelete(uid: string): Promise<void> {
+    const now = Date.now();
+    await this.getRef(uid).update({
+      deleted_at: now,
+      updated_at: now,
+    });
   }
 }

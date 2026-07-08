@@ -3,7 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MusicController = void 0;
 const music_service_1 = require("../services/music.service");
 class MusicController {
-    constructor() {
+    constructor(musicService = new music_service_1.MusicService()) {
+        this.musicService = musicService;
         this.getMusicLibrary = async (req, res, next) => {
             try {
                 const data = await this.musicService.getMusicLibrary();
@@ -27,7 +28,6 @@ class MusicController {
                 next(error);
             }
         };
-        this.musicService = new music_service_1.MusicService();
     }
 }
 exports.MusicController = MusicController;

@@ -4,8 +4,8 @@ exports.UserService = void 0;
 const firebase_user_repository_1 = require("../repositories/firebase/firebase-user.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
 class UserService {
-    constructor() {
-        this.userRepo = new firebase_user_repository_1.FirebaseUserRepository();
+    constructor(userRepo = new firebase_user_repository_1.FirebaseUserRepository()) {
+        this.userRepo = userRepo;
     }
     async getOrCreateUserProfile(uid, email, name, picture) {
         let user = await this.userRepo.getById(uid);

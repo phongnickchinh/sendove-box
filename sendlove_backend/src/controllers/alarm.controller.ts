@@ -3,11 +3,9 @@ import { AuthenticatedRequest, ApiResponse } from '../types/api.types';
 import { AlarmService } from '../services/alarm.service';
 
 export class AlarmController {
-  private alarmService: AlarmService;
-
-  constructor() {
-    this.alarmService = new AlarmService();
-  }
+  constructor(
+    private alarmService: AlarmService = new AlarmService()
+  ) {}
 
   public createAlarm = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {

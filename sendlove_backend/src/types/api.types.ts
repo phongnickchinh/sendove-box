@@ -14,6 +14,8 @@ export interface AuthenticatedRequest extends Request {
   user?: {
     uid: string;
     email?: string;
+    name?: string;
+    picture?: string;
   };
   deviceId?: string; // For ESP32 requests
 }

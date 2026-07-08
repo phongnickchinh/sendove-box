@@ -49,9 +49,9 @@ const requireAuth = async (req, res, next) => {
         req.user = {
             uid: decodedToken.uid,
             email: decodedToken.email,
+            name: decodedToken.name,
+            picture: decodedToken.picture,
         };
-        req.user.name = decodedToken.name;
-        req.user.picture = decodedToken.picture;
         next();
     }
     catch (error) {

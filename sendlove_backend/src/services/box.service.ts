@@ -1,16 +1,14 @@
+import { IBoxRepository } from '../repositories/interfaces/box.repository.interface';
+import { IUserRepository } from '../repositories/interfaces/user.repository.interface';
 import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { FirebaseUserRepository } from '../repositories/firebase/firebase-user.repository';
-import { Box } from '../types/box.types';
 import { AppError } from '../middleware/error-handler.middleware';
 
 export class BoxService {
-  private boxRepo: FirebaseBoxRepository;
-  private userRepo: FirebaseUserRepository;
-
-  constructor() {
-    this.boxRepo = new FirebaseBoxRepository();
-    this.userRepo = new FirebaseUserRepository();
-  }
+  constructor(
+    private boxRepo: IBoxRepository = new FirebaseBoxRepository(),
+    private userRepo: IUserRepository = new FirebaseUserRepository()
+  ) {}
 
   /**
    * Pairing: User nhập mã pairing code → liên kết user với box.
@@ -38,7 +36,9 @@ export class BoxService {
     }
 
     // Kiểm tra user không thể vừa sender vừa receiver trên cùng 1 box
-    if ((isSender && pairing.receiver_id === uid) || (!isSender && pairing.sender_id === uid)) {
+    const isAlreadyReceiver = isSender && (pairing.receiver_id === uid);
+    const isAlreadySender = !isSender && (pairing.sender_id === uid);
+    if (isAlreadyReceiver || isAlreadySender) {
       throw new AppError(400, 'conflict_role', 'You cannot be both sender and receiver for the same box');
     }
 
@@ -96,9 +96,10 @@ export class BoxService {
   }
 
   /**
-   * Xem chi tiết box (chỉ user đã pair mới xem được)
+   * Xem chi tiết box (chỉ user đã pair mới xem được).
+   * Lọc bỏ device_secret và wifi password trước khi trả về.
    */
-  async getBoxDetails(uid: string, boxId: string): Promise<Box> {
+  async getBoxDetails(uid: string, boxId: string) {
     const box = await this.boxRepo.getById(boxId);
     if (!box) throw new AppError(404, 'box_not_found', 'Box not found');
 
@@ -108,7 +109,16 @@ export class BoxService {
       throw new AppError(403, 'unauthorized', 'You are not paired to this box');
     }
 
-    return box;
+    // Sanitize: loại bỏ sensitive fields trước khi trả về API
+    const { device_secret, config, ...rest } = box;
+    const safeConfig = config ? {
+      ...config,
+      wifi_config: config.wifi_config
+        ? { ssid: config.wifi_config.ssid }
+        : undefined,
+    } : undefined;
+
+    return { ...rest, config: safeConfig };
   }
 
   /**

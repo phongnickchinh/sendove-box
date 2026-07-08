@@ -39,6 +39,42 @@ class FirebaseRateLimitRepository {
             window_start: Date.now(),
         });
     }
+    /**
+     * Atomic check-and-increment sử dụng Firebase transaction.
+     * Kết hợp đọc → kiểm tra → tăng count trong 1 bước duy nhất,
+     * tránh race condition khi nhiều request đồng thời.
+     *
+     * Trả về { allowed: true } nếu dưới limit, { allowed: false, remainingMs } nếu bị giới hạn.
+     */
+    async checkAndIncrement(senderId, boxId, maxCount, windowMs) {
+        const key = this.getKey(senderId, boxId);
+        const ref = firebase_1.db.ref(`${this.basePath}/${key}`);
+        const now = Date.now();
+        const result = await ref.transaction((current) => {
+            // Chưa có record → tạo mới, cho qua
+            if (!current) {
+                return { count: 1, window_start: now };
+            }
+            // Window hết hạn → reset, cho qua
+            if (now - current.window_start > windowMs) {
+                return { count: 1, window_start: now };
+            }
+            // Đã đạt giới hạn → abort transaction (return undefined)
+            if (current.count >= maxCount) {
+                return undefined;
+            }
+            // Dưới limit → tăng count
+            return { count: current.count + 1, window_start: current.window_start };
+        });
+        if (!result.committed) {
+            // Transaction bị abort = đã đạt rate limit
+            const snapshot = await ref.once('value');
+            const data = snapshot.val();
+            const remainingMs = data ? windowMs - (now - data.window_start) : 0;
+            return { allowed: false, remainingMs: Math.max(0, remainingMs) };
+        }
+        return { allowed: true };
+    }
 }
 exports.FirebaseRateLimitRepository = FirebaseRateLimitRepository;
 //# sourceMappingURL=firebase-rate-limit.repository.js.map

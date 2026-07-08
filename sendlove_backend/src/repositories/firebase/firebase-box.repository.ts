@@ -1,8 +1,9 @@
 import { Box, BoxFlags, BoxStatus } from '../../types/box.types';
 import { FirebaseBaseRepository } from './firebase-base.repository';
+import { IBoxRepository } from '../interfaces/box.repository.interface';
 import { db } from '../../firebase';
 
-export class FirebaseBoxRepository extends FirebaseBaseRepository<Box> {
+export class FirebaseBoxRepository extends FirebaseBaseRepository<Box> implements IBoxRepository {
   constructor() {
     super('boxes');
   }

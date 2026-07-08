@@ -52,6 +52,32 @@ export default function Navbar({ user }) {
               style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover' }} 
             />
           )}
+          <button
+            onClick={handleLogout}
+            style={{
+              background: 'none',
+              border: '1px solid var(--color-glass-border)',
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-pill)',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: 500,
+              color: 'var(--color-text-muted)',
+              transition: 'var(--transition-smooth)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 59, 48, 0.1)';
+              e.currentTarget.style.color = '#ff3b30';
+              e.currentTarget.style.borderColor = '#ff3b30';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'none';
+              e.currentTarget.style.color = 'var(--color-text-muted)';
+              e.currentTarget.style.borderColor = 'var(--color-glass-border)';
+            }}
+          >
+            Đăng xuất
+          </button>
         </div>
       </div>
     </nav>

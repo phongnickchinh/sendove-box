@@ -3,11 +3,9 @@ import { AuthenticatedRequest, ApiResponse } from '../types/api.types';
 import { BoxService } from '../services/box.service';
 
 export class BoxController {
-  private boxService: BoxService;
-
-  constructor() {
-    this.boxService = new BoxService();
-  }
+  constructor(
+    private boxService: BoxService = new BoxService()
+  ) {}
 
   public pairBox = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {

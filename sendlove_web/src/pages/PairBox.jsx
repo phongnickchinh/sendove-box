@@ -81,7 +81,7 @@ export default function PairBox() {
               <input 
                 type="text" 
                 className="glass-input" 
-                placeholder="Ví dụ: S1A2B3C" 
+                placeholder="Ví dụ: SABC12DEF9" 
                 value={pairingCode}
                 onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
                 style={{ textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 600 }}

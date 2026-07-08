@@ -3,11 +3,9 @@ import { AuthenticatedRequest, ApiResponse } from '../types/api.types';
 import { MusicService } from '../services/music.service';
 
 export class MusicController {
-  private musicService: MusicService;
-
-  constructor() {
-    this.musicService = new MusicService();
-  }
+  constructor(
+    private musicService: MusicService = new MusicService()
+  ) {}
 
   public getMusicLibrary = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {

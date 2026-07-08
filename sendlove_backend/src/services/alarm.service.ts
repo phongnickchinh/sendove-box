@@ -1,13 +1,12 @@
+import { IAlarmRepository } from '../repositories/interfaces/alarm.repository.interface';
 import { FirebaseAlarmRepository } from '../repositories/firebase/firebase-alarm.repository';
 import { Alarm } from '../types/alarm.types';
 import { AppError } from '../middleware/error-handler.middleware';
 
 export class AlarmService {
-  private alarmRepo: FirebaseAlarmRepository;
-
-  constructor() {
-    this.alarmRepo = new FirebaseAlarmRepository();
-  }
+  constructor(
+    private alarmRepo: IAlarmRepository = new FirebaseAlarmRepository()
+  ) {}
 
   /**
    * Tạo alarm mới (max 10 alarms / box).

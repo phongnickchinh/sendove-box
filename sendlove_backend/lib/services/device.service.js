@@ -12,12 +12,12 @@ const firebase_ota_repository_1 = require("../repositories/firebase/firebase-ota
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
 const crypto_1 = __importDefault(require("crypto"));
 class DeviceService {
-    constructor() {
-        this.boxRepo = new firebase_box_repository_1.FirebaseBoxRepository();
-        this.msgRepo = new firebase_message_repository_1.FirebaseMessageRepository();
-        this.alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository();
-        this.fwRepo = new firebase_firmware_repository_1.FirebaseFirmwareRepository();
-        this.otaRepo = new firebase_ota_repository_1.FirebaseOtaRepository();
+    constructor(boxRepo = new firebase_box_repository_1.FirebaseBoxRepository(), msgRepo = new firebase_message_repository_1.FirebaseMessageRepository(), alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository(), fwRepo = new firebase_firmware_repository_1.FirebaseFirmwareRepository(), otaRepo = new firebase_ota_repository_1.FirebaseOtaRepository()) {
+        this.boxRepo = boxRepo;
+        this.msgRepo = msgRepo;
+        this.alarmRepo = alarmRepo;
+        this.fwRepo = fwRepo;
+        this.otaRepo = otaRepo;
     }
     /**
      * ESP32 đăng ký lần đầu
@@ -25,9 +25,14 @@ class DeviceService {
     async registerDevice(data) {
         const boxId = `box_${data.deviceId}`;
         const now = Date.now();
-        // Sinh pairing codes
-        const rcode = `R${crypto_1.default.randomBytes(3).toString('hex').toUpperCase()}`;
-        const scode = `S${crypto_1.default.randomBytes(3).toString('hex').toUpperCase()}`;
+        // Sinh pairing codes: 9 ký tự alphanumeric (A-Z, 0-9) → 36^9 ≈ 101 nghìn tỷ combinations
+        const alphanumChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        const generateCode = (length) => {
+            const bytes = crypto_1.default.randomBytes(length);
+            return Array.from(bytes).map(b => alphanumChars[b % alphanumChars.length]).join('');
+        };
+        const rcode = `R${generateCode(9)}`;
+        const scode = `S${generateCode(9)}`;
         const deviceSecret = crypto_1.default.randomBytes(16).toString('hex');
         await this.boxRepo.create(boxId, {
             id: boxId,

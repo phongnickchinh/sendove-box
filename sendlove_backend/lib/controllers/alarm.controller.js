@@ -3,7 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AlarmController = void 0;
 const alarm_service_1 = require("../services/alarm.service");
 class AlarmController {
-    constructor() {
+    constructor(alarmService = new alarm_service_1.AlarmService()) {
+        this.alarmService = alarmService;
         this.createAlarm = async (req, res, next) => {
             try {
                 const { boxId } = req.params;
@@ -44,7 +45,6 @@ class AlarmController {
                 next(error);
             }
         };
-        this.alarmService = new alarm_service_1.AlarmService();
     }
 }
 exports.AlarmController = AlarmController;

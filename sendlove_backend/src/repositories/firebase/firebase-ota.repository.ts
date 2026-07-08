@@ -1,8 +1,9 @@
 import { OtaTask, OtaStatus } from '../../types/box.types';
 import { FirebaseBaseRepository } from './firebase-base.repository';
 import { db } from '../../firebase';
+import { IOtaRepository } from '../interfaces/ota.repository.interface';
 
-export class FirebaseOtaRepository extends FirebaseBaseRepository<OtaTask> {
+export class FirebaseOtaRepository extends FirebaseBaseRepository<OtaTask> implements IOtaRepository {
   constructor() {
     super('ota_tasks');
   }

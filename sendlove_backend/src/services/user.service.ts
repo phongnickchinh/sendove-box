@@ -1,13 +1,12 @@
+import { IUserRepository } from '../repositories/interfaces/user.repository.interface';
 import { FirebaseUserRepository } from '../repositories/firebase/firebase-user.repository';
 import { User } from '../types/user.types';
 import { AppError } from '../middleware/error-handler.middleware';
 
 export class UserService {
-  private userRepo: FirebaseUserRepository;
-
-  constructor() {
-    this.userRepo = new FirebaseUserRepository();
-  }
+  constructor(
+    private userRepo: IUserRepository = new FirebaseUserRepository()
+  ) {}
 
   async getOrCreateUserProfile(uid: string, email: string, name?: string, picture?: string): Promise<User> {
     let user = await this.userRepo.getById(uid);

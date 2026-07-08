@@ -1,7 +1,8 @@
 import { Firmware } from '../../types/box.types';
 import { FirebaseBaseRepository } from './firebase-base.repository';
+import { IFirmwareRepository } from '../interfaces/firmware.repository.interface';
 
-export class FirebaseFirmwareRepository extends FirebaseBaseRepository<Firmware> {
+export class FirebaseFirmwareRepository extends FirebaseBaseRepository<Firmware> implements IFirmwareRepository {
   constructor() {
     super('firmware');
   }

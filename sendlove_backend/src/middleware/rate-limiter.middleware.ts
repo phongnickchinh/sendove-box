@@ -30,28 +30,14 @@ export const messageSendRateLimit = async (
     if (!boxId) throw new AppError(400, 'bad_request', 'Missing boxId');
 
     const { maxMessagesPerWindow, windowDurationMs } = config.rateLimit;
-    const now = Date.now();
 
-    const record = await rateLimitRepo.get(senderId, boxId);
+    // Atomic: check + increment trong 1 transaction duy nhất → tránh race condition
+    const result = await rateLimitRepo.checkAndIncrement(
+      senderId, boxId, maxMessagesPerWindow, windowDurationMs
+    );
 
-    if (!record) {
-      // Lần gửi đầu tiên → tạo record mới
-      await rateLimitRepo.reset(senderId, boxId);
-      return next();
-    }
-
-    // Kiểm tra window đã hết hạn chưa
-    if (now - record.window_start > windowDurationMs) {
-      // Hết hạn → reset window mới
-      await rateLimitRepo.reset(senderId, boxId);
-      return next();
-    }
-
-    // Còn trong window → kiểm tra count
-    if (record.count >= maxMessagesPerWindow) {
-      const remainingMs = windowDurationMs - (now - record.window_start);
-      const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
-
+    if (!result.allowed) {
+      const remainingHours = Math.ceil((result.remainingMs || 0) / (60 * 60 * 1000));
       throw new AppError(
         429,
         'rate_limit_exceeded',
@@ -59,8 +45,6 @@ export const messageSendRateLimit = async (
       );
     }
 
-    // Dưới limit → tăng count và cho qua
-    await rateLimitRepo.increment(senderId, boxId);
     next();
   } catch (error) {
     next(error);

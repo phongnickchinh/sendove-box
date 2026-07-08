@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { ApiResponse } from '../types/api.types';
 
 export const errorHandler = (err: any, req: Request, res: Response<ApiResponse>, next: NextFunction) => {
+  // TODO: In production, limit error logging to safe fields only (code, message, path).
+  // Avoid logging full error objects which may contain sensitive data (stack traces, secrets, user data).
   console.error('[Error Handler]', err);
 
   const statusCode = err.statusCode || 500;

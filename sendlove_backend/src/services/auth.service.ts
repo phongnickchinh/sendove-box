@@ -1,13 +1,17 @@
+import * as admin from 'firebase-admin';
+import { IUserRepository } from '../repositories/interfaces/user.repository.interface';
+import { IBoxRepository } from '../repositories/interfaces/box.repository.interface';
 import { FirebaseUserRepository } from '../repositories/firebase/firebase-user.repository';
+import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { User } from '../types/user.types';
 import { AppError } from '../middleware/error-handler.middleware';
+import { db } from '../firebase';
 
 export class AuthService {
-  private userRepo: FirebaseUserRepository;
-
-  constructor() {
-    this.userRepo = new FirebaseUserRepository();
-  }
+  constructor(
+    private userRepo: IUserRepository = new FirebaseUserRepository(),
+    private boxRepo: IBoxRepository = new FirebaseBoxRepository()
+  ) {}
 
   /**
    * Xử lý đăng nhập Google OAuth.
@@ -51,15 +55,69 @@ export class AuthService {
 
     const deletedBoxes: string[] = [];
 
-    // Thu thập danh sách box cần unpair
+    // 1. Hard delete: Unpair từ tất cả các box (xoá dữ liệu nhân bản)
     if (user.boxes_list) {
       for (const boxId of Object.keys(user.boxes_list)) {
+        try {
+          const box = await this.boxRepo.getById(boxId);
+          if (box) {
+            const pairing = box.pairing || {};
+            const now = Date.now();
+
+            if (pairing.sender_id === uid) {
+              await this.boxRepo.update(boxId, {
+                'pairing/sender_id': null,
+                'pairing/sender_paired_time': null,
+                updated_at: now,
+              } as any);
+            }
+            if (pairing.receiver_id === uid) {
+              await this.boxRepo.update(boxId, {
+                'pairing/receiver_id': null,
+                'pairing/receiver_paired_time': null,
+                updated_at: now,
+              } as any);
+            }
+
+            // Thông báo device có thay đổi pairing
+            await this.boxRepo.updateFlags(boxId, { p_flag: true });
+          }
+        } catch (error) {
+          console.warn(`[AuthService] Failed to unpair box ${boxId}:`, error);
+        }
         deletedBoxes.push(boxId);
       }
     }
 
-    // Xoá user khỏi RTDB
-    await this.userRepo.delete(uid);
+    // 2. Hard delete: Xoá rate limit records cho user này
+    try {
+      const rateLimitsSnapshot = await db.ref('rate_limits')
+        .orderByKey()
+        .startAt(`${uid}_`)
+        .endAt(`${uid}_\uffff`)
+        .once('value');
+
+      if (rateLimitsSnapshot.exists()) {
+        const updates: Record<string, null> = {};
+        rateLimitsSnapshot.forEach((child) => {
+          updates[`rate_limits/${child.key}`] = null;
+          return false;
+        });
+        await db.ref().update(updates);
+      }
+    } catch (error) {
+      console.warn(`[AuthService] Failed to clean rate limits for ${uid}:`, error);
+    }
+
+    // 3. Soft delete: Đánh dấu user đã xoá (giữ data cho audit/history)
+    await this.userRepo.softDelete(uid);
+
+    // 4. Hard delete: Xoá Firebase Auth user (ngăn đăng nhập lại)
+    try {
+      await admin.auth().deleteUser(uid);
+    } catch (error) {
+      console.warn(`[AuthService] Failed to delete Firebase Auth user ${uid}:`, error);
+    }
 
     return deletedBoxes;
   }

@@ -3,7 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DeviceController = void 0;
 const device_service_1 = require("../services/device.service");
 class DeviceController {
-    constructor() {
+    constructor(deviceService = new device_service_1.DeviceService()) {
+        this.deviceService = deviceService;
         this.register = async (req, res, next) => {
             try {
                 const data = await this.deviceService.registerDevice(req.body);
@@ -16,7 +17,10 @@ class DeviceController {
         this.poll = async (req, res, next) => {
             try {
                 const boxId = `box_${req.deviceId}`;
-                const data = await this.deviceService.poll(boxId);
+                const lastDownloadTs = req.query.last_download_ts
+                    ? parseInt(req.query.last_download_ts, 10)
+                    : undefined;
+                const data = await this.deviceService.poll(boxId, lastDownloadTs);
                 res.status(200).json({ success: true, data });
             }
             catch (error) {
@@ -33,7 +37,6 @@ class DeviceController {
                 next(error);
             }
         };
-        this.deviceService = new device_service_1.DeviceService();
     }
 }
 exports.DeviceController = DeviceController;

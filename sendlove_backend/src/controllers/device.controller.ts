@@ -3,11 +3,9 @@ import { AuthenticatedRequest, ApiResponse } from '../types/api.types';
 import { DeviceService } from '../services/device.service';
 
 export class DeviceController {
-  private deviceService: DeviceService;
-
-  constructor() {
-    this.deviceService = new DeviceService();
-  }
+  constructor(
+    private deviceService: DeviceService = new DeviceService()
+  ) {}
 
   public register = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
@@ -21,7 +19,10 @@ export class DeviceController {
   public poll = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
       const boxId = `box_${req.deviceId}`;
-      const data = await this.deviceService.poll(boxId);
+      const lastDownloadTs = req.query.last_download_ts
+        ? parseInt(req.query.last_download_ts as string, 10)
+        : undefined;
+      const data = await this.deviceService.poll(boxId, lastDownloadTs);
       res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);

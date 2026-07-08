@@ -3,12 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MessageController = void 0;
 const message_service_1 = require("../services/message.service");
 class MessageController {
-    constructor() {
+    constructor(msgService = new message_service_1.MessageService()) {
+        this.msgService = msgService;
         this.initiateMessage = async (req, res, next) => {
             try {
                 const { boxId } = req.params;
                 const uid = req.user.uid;
-                const data = await this.msgService.initiateMessage(boxId, uid);
+                const { types } = req.body;
+                const data = await this.msgService.initiateMessage(boxId, uid, types);
                 res.status(201).json({ success: true, data });
             }
             catch (error) {
@@ -50,7 +52,6 @@ class MessageController {
                 next(error);
             }
         };
-        this.msgService = new message_service_1.MessageService();
     }
 }
 exports.MessageController = MessageController;

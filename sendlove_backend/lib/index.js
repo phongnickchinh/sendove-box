@@ -40,6 +40,7 @@ exports.api = void 0;
 const functions = __importStar(require("firebase-functions"));
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const helmet_1 = __importDefault(require("helmet"));
 const error_handler_middleware_1 = require("./middleware/error-handler.middleware");
 // Initialize Firebase App
 require("./firebase");
@@ -49,20 +50,34 @@ const user_routes_1 = __importDefault(require("./routes/user.routes"));
 const box_routes_1 = __importDefault(require("./routes/box.routes"));
 const device_routes_1 = __importDefault(require("./routes/device.routes"));
 const music_routes_1 = __importDefault(require("./routes/music.routes"));
+const message_routes_1 = __importDefault(require("./routes/message.routes"));
+const alarm_routes_1 = __importDefault(require("./routes/alarm.routes"));
+// Import DI Container
+const container_1 = require("./di/container");
 const app = (0, express_1.default)();
+// Initialize DI Container
+const container = (0, container_1.createContainer)();
 // Middleware
+// Security headers (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.)
+app.use((0, helmet_1.default)());
+// TODO: Restrict CORS origins before production deployment.
+// Current config allows all origins for development/testing convenience.
+// Example: app.use(cors({ origin: ['https://iot-app-839a2.web.app'] }));
 app.use((0, cors_1.default)({ origin: true }));
-app.use(express_1.default.json());
+// Parse JSON with explicit body size limit to prevent DoS via large payloads
+app.use(express_1.default.json({ limit: '10kb' }));
 // Basic health check
 app.get('/health', (req, res) => {
     res.status(200).json({ success: true, message: 'Sendove Box API is running' });
 });
-// Setup Routes
-app.use('/auth', auth_routes_1.default);
-app.use('/users', user_routes_1.default);
-app.use('/boxes', box_routes_1.default);
-app.use('/device', device_routes_1.default);
-app.use('/music', music_routes_1.default);
+// Setup Routes with Injected Controllers
+app.use('/auth', (0, auth_routes_1.default)(container.authController));
+app.use('/users', (0, user_routes_1.default)(container.userController));
+const msgRouter = (0, message_routes_1.default)(container.messageController);
+const alrmRouter = (0, alarm_routes_1.default)(container.alarmController);
+app.use('/boxes', (0, box_routes_1.default)(container.boxController, msgRouter, alrmRouter));
+app.use('/device', (0, device_routes_1.default)(container.deviceController));
+app.use('/music', (0, music_routes_1.default)(container.musicController));
 // Error Handling Middleware (must be the last middleware)
 app.use(error_handler_middleware_1.errorHandler);
 // Export the API as a Firebase Cloud Function

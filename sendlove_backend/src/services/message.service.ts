@@ -1,46 +1,44 @@
+import { IMessageRepository } from '../repositories/interfaces/message.repository.interface';
+import { IStorageRepository } from '../repositories/interfaces/storage.repository.interface';
 import { FirebaseMessageRepository } from '../repositories/firebase/firebase-message.repository';
 import { FirebaseStorageRepository } from '../repositories/firebase/firebase-storage.repository';
 import { Message } from '../types/message.types';
 import { AppError } from '../middleware/error-handler.middleware';
 
 export class MessageService {
-  private msgRepo: FirebaseMessageRepository;
-  private storageRepo: FirebaseStorageRepository;
-
-  constructor() {
-    this.msgRepo = new FirebaseMessageRepository();
-    this.storageRepo = new FirebaseStorageRepository();
-  }
+  constructor(
+    private msgRepo: IMessageRepository = new FirebaseMessageRepository(),
+    private storageRepo: IStorageRepository = new FirebaseStorageRepository()
+  ) {}
 
   /**
    * Bước 1: Sender yêu cầu gửi tin nhắn → backend tạo signed upload URLs.
-   * Sender chưa biết URL cuối cùng, chỉ nhận URL tạm để upload file.
+   * Chỉ tạo URL cho các loại file mà sender yêu cầu (tiết kiệm GCS API calls).
    */
-  async initiateMessage(boxId: string, senderId: string): Promise<{
+  async initiateMessage(boxId: string, senderId: string, requestedTypes: string[]): Promise<{
     message_id: string;
-    upload_urls: { bin?: string; voice?: string; gif?: string; bg_music?: string; image?: string };
+    upload_urls: Record<string, string>;
   }> {
     const messageId = `msg_${Date.now()}`;
     const basePath = `media/${boxId}/${messageId}`;
 
+    // Map loại file → đường dẫn Storage + content type
+    const typeMap: Record<string, { path: string; contentType: string }> = {
+      video: { path: `${basePath}/video.bin`, contentType: 'application/octet-stream' },
+      voice: { path: `${basePath}/voice.wav`, contentType: 'audio/wav' },
+      gif: { path: `${basePath}/animation.gif`, contentType: 'image/gif' },
+      bg_music: { path: `${basePath}/bgmusic.mp3`, contentType: 'audio/mpeg' },
+      image: { path: `${basePath}/photo.jpg`, contentType: 'image/jpeg' },
+    };
+
     const upload_urls: Record<string, string> = {};
 
-    // Tạo signed upload URL cho mỗi loại file có thể có
-    upload_urls.bin = await this.storageRepo.generateUploadUrl(
-      `${basePath}/video.bin`, 'application/octet-stream'
-    );
-    upload_urls.voice = await this.storageRepo.generateUploadUrl(
-      `${basePath}/voice.wav`, 'audio/wav'
-    );
-    upload_urls.gif = await this.storageRepo.generateUploadUrl(
-      `${basePath}/animation.gif`, 'image/gif'
-    );
-    upload_urls.bg_music = await this.storageRepo.generateUploadUrl(
-      `${basePath}/bgmusic.mp3`, 'audio/mpeg'
-    );
-    upload_urls.image = await this.storageRepo.generateUploadUrl(
-      `${basePath}/photo.jpg`, 'image/jpeg'
-    );
+    for (const type of requestedTypes) {
+      const config = typeMap[type];
+      if (config) {
+        upload_urls[type] = await this.storageRepo.generateUploadUrl(config.path, config.contentType);
+      }
+    }
 
     return { message_id: messageId, upload_urls };
   }

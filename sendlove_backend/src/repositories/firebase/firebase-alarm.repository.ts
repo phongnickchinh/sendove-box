@@ -1,11 +1,12 @@
 import { Alarm } from '../../types/alarm.types';
 import { db } from '../../firebase';
+import { IAlarmRepository } from '../interfaces/alarm.repository.interface';
 
 /**
  * Alarm được lưu tại: boxes/{boxId}/config/alarm_list/{alarmId}
  * Khi thay đổi alarm list, cần set flags/a_flag = true để ESP32 biết.
  */
-export class FirebaseAlarmRepository {
+export class FirebaseAlarmRepository implements IAlarmRepository {
   private getBasePath(boxId: string): string {
     return `boxes/${boxId}/config/alarm_list`;
   }

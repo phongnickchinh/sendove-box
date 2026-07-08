@@ -4,8 +4,8 @@ exports.AlarmService = void 0;
 const firebase_alarm_repository_1 = require("../repositories/firebase/firebase-alarm.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
 class AlarmService {
-    constructor() {
-        this.alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository();
+    constructor(alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository()) {
+        this.alarmRepo = alarmRepo;
     }
     /**
      * Tạo alarm mới (max 10 alarms / box).

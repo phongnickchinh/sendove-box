@@ -1,3 +1,8 @@
+import { IBoxRepository } from '../repositories/interfaces/box.repository.interface';
+import { IMessageRepository } from '../repositories/interfaces/message.repository.interface';
+import { IAlarmRepository } from '../repositories/interfaces/alarm.repository.interface';
+import { IFirmwareRepository } from '../repositories/interfaces/firmware.repository.interface';
+import { IOtaRepository } from '../repositories/interfaces/ota.repository.interface';
 import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { FirebaseMessageRepository } from '../repositories/firebase/firebase-message.repository';
 import { FirebaseAlarmRepository } from '../repositories/firebase/firebase-alarm.repository';
@@ -7,19 +12,13 @@ import { AppError } from '../middleware/error-handler.middleware';
 import crypto from 'crypto';
 
 export class DeviceService {
-  private boxRepo: FirebaseBoxRepository;
-  private msgRepo: FirebaseMessageRepository;
-  private alarmRepo: FirebaseAlarmRepository;
-  private fwRepo: FirebaseFirmwareRepository;
-  private otaRepo: FirebaseOtaRepository;
-
-  constructor() {
-    this.boxRepo = new FirebaseBoxRepository();
-    this.msgRepo = new FirebaseMessageRepository();
-    this.alarmRepo = new FirebaseAlarmRepository();
-    this.fwRepo = new FirebaseFirmwareRepository();
-    this.otaRepo = new FirebaseOtaRepository();
-  }
+  constructor(
+    private boxRepo: IBoxRepository = new FirebaseBoxRepository(),
+    private msgRepo: IMessageRepository = new FirebaseMessageRepository(),
+    private alarmRepo: IAlarmRepository = new FirebaseAlarmRepository(),
+    private fwRepo: IFirmwareRepository = new FirebaseFirmwareRepository(),
+    private otaRepo: IOtaRepository = new FirebaseOtaRepository()
+  ) {}
 
   /**
    * ESP32 đăng ký lần đầu
@@ -32,9 +31,15 @@ export class DeviceService {
     const boxId = `box_${data.deviceId}`;
     const now = Date.now();
 
-    // Sinh pairing codes
-    const rcode = `R${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    const scode = `S${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+    // Sinh pairing codes: 9 ký tự alphanumeric (A-Z, 0-9) → 36^9 ≈ 101 nghìn tỷ combinations
+    const alphanumChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const generateCode = (length: number): string => {
+      const bytes = crypto.randomBytes(length);
+      return Array.from(bytes).map(b => alphanumChars[b % alphanumChars.length]).join('');
+    };
+
+    const rcode = `R${generateCode(9)}`;
+    const scode = `S${generateCode(9)}`;
     const deviceSecret = crypto.randomBytes(16).toString('hex');
 
     await this.boxRepo.create(boxId, {

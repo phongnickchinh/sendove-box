@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# sendlove_web/.gitignore — thêm rule:
++.env
++.env.*

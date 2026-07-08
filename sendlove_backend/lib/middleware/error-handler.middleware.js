@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppError = exports.errorHandler = void 0;
 const errorHandler = (err, req, res, next) => {
+    // TODO: In production, limit error logging to safe fields only (code, message, path).
+    // Avoid logging full error objects which may contain sensitive data (stack traces, secrets, user data).
     console.error('[Error Handler]', err);
     const statusCode = err.statusCode || 500;
     const message = err.message || 'Internal Server Error';

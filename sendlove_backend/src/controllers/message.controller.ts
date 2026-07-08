@@ -3,17 +3,16 @@ import { AuthenticatedRequest, ApiResponse } from '../types/api.types';
 import { MessageService } from '../services/message.service';
 
 export class MessageController {
-  private msgService: MessageService;
-
-  constructor() {
-    this.msgService = new MessageService();
-  }
+  constructor(
+    private msgService: MessageService = new MessageService()
+  ) {}
 
   public initiateMessage = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
       const { boxId } = req.params;
       const uid = req.user!.uid;
-      const data = await this.msgService.initiateMessage(boxId, uid);
+      const { types } = req.body;
+      const data = await this.msgService.initiateMessage(boxId, uid, types);
       res.status(201).json({ success: true, data });
     } catch (error) {
       next(error);

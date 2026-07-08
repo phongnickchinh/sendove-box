@@ -1,7 +1,8 @@
 import { Message } from '../../types/message.types';
 import { db } from '../../firebase';
+import { IMessageRepository } from '../interfaces/message.repository.interface';
 
-export class FirebaseMessageRepository {
+export class FirebaseMessageRepository implements IMessageRepository {
   /**
    * Tạo message mới dưới node messages/{boxId}/{messageId}
    */

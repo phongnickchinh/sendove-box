@@ -3,7 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BoxController = void 0;
 const box_service_1 = require("../services/box.service");
 class BoxController {
-    constructor() {
+    constructor(boxService = new box_service_1.BoxService()) {
+        this.boxService = boxService;
         this.pairBox = async (req, res, next) => {
             try {
                 const uid = req.user.uid;
@@ -52,7 +53,6 @@ class BoxController {
                 next(error);
             }
         };
-        this.boxService = new box_service_1.BoxService();
     }
 }
 exports.BoxController = BoxController;

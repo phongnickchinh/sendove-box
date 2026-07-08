@@ -1,6 +1,7 @@
 import { storage } from '../../firebase';
+import { IStorageRepository } from '../interfaces/storage.repository.interface';
 
-export class FirebaseStorageRepository {
+export class FirebaseStorageRepository implements IStorageRepository {
   /**
    * Generates a signed URL for uploading a file directly to Firebase Storage.
    */

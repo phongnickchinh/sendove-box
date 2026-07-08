@@ -19,7 +19,7 @@ class FirebaseBaseRepository {
         if (!snapshot.exists()) {
             return null;
         }
-        return snapshot.val();
+        return { ...snapshot.val(), id };
     }
     async update(id, data) {
         const ref = this.getRef(id);

@@ -27,7 +27,7 @@ export const config = {
 
   // 5. Rate Limit: Giới hạn gửi tin nhắn (per sender + box)
   rateLimit: {
-    maxMessagesPerWindow: 3,       // Tối đa 3 tin nhắn
+    maxMessagesPerWindow: 100,       // Tối đa 100 tin nhắn (để test)
     windowDurationMs: 24 * 60 * 60 * 1000, // Trong 24 giờ
   },
 };

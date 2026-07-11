@@ -3,11 +3,13 @@ import { IMessageRepository } from '../repositories/interfaces/message.repositor
 import { IAlarmRepository } from '../repositories/interfaces/alarm.repository.interface';
 import { IFirmwareRepository } from '../repositories/interfaces/firmware.repository.interface';
 import { IOtaRepository } from '../repositories/interfaces/ota.repository.interface';
+import { IStorageRepository } from '../repositories/interfaces/storage.repository.interface';
 import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { FirebaseMessageRepository } from '../repositories/firebase/firebase-message.repository';
 import { FirebaseAlarmRepository } from '../repositories/firebase/firebase-alarm.repository';
 import { FirebaseFirmwareRepository } from '../repositories/firebase/firebase-firmware.repository';
 import { FirebaseOtaRepository } from '../repositories/firebase/firebase-ota.repository';
+import { FirebaseStorageRepository } from '../repositories/firebase/firebase-storage.repository';
 import { AppError } from '../middleware/error-handler.middleware';
 import crypto from 'crypto';
 
@@ -17,7 +19,8 @@ export class DeviceService {
     private msgRepo: IMessageRepository = new FirebaseMessageRepository(),
     private alarmRepo: IAlarmRepository = new FirebaseAlarmRepository(),
     private fwRepo: IFirmwareRepository = new FirebaseFirmwareRepository(),
-    private otaRepo: IOtaRepository = new FirebaseOtaRepository()
+    private otaRepo: IOtaRepository = new FirebaseOtaRepository(),
+    private storageRepo: IStorageRepository = new FirebaseStorageRepository()
   ) {}
 
   /**
@@ -94,7 +97,7 @@ export class DeviceService {
    * ESP32 poll định kỳ: kiểm tra flags, lấy messages mới, lấy alarm list nếu cần.
    * ESP32 gửi last_download_ts → backend trả messages có timestamp > last_download_ts.
    */
-  async poll(boxId: string, lastDownloadTs?: number): Promise<any> {
+  async poll(boxId: string, lastDownloadTs?: number, availableSlots: number = 3): Promise<any> {
     const box = await this.boxRepo.getById(boxId);
     if (!box) throw new AppError(404, 'box_not_found', 'Box not found');
 
@@ -105,20 +108,38 @@ export class DeviceService {
 
     // Nếu có tin nhắn mới (ESP32 gửi last_download_ts)
     if (lastDownloadTs !== undefined) {
-      const allMessages = await this.msgRepo.listMessages(boxId, 20);
-      const newMessages = allMessages.filter(m => m.timestamp > lastDownloadTs);
+      const allMessages = await this.msgRepo.listMessages(boxId, 50);
+      
+      const newMessages = allMessages
+        .filter(m => m.timestamp > lastDownloadTs)
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .slice(0, availableSlots);
 
       if (newMessages.length > 0) {
-        response.new_messages = newMessages.map(m => ({
-          id: m.id,
-          timestamp: m.timestamp,
-          text: m.text,
-          bin_url: m.bin_url,
-          voice_url: m.voice_url,
-          gif_url: m.gif_url,
-          bg_music_url: m.bg_music_url,
-          image_url: m.image_url,
-          total_size: m.total_size,
+        response.new_messages = await Promise.all(newMessages.map(async m => {
+          let signedBinUrl = undefined;
+          let signedVoiceUrl = undefined;
+          
+          if (m.bin_url) {
+            signedBinUrl = await this.storageRepo.generateDownloadUrl(m.bin_url, 15);
+          }
+          if (m.voice_url) {
+            signedVoiceUrl = await this.storageRepo.generateDownloadUrl(m.voice_url, 15);
+          }
+
+          return {
+            id: m.id,
+            timestamp: m.timestamp,
+            type: m.type,
+            duration: m.duration,
+            frame_count: m.frame_count,
+            width: m.width,
+            height: m.height,
+            text: m.text,
+            bin_url: signedBinUrl,
+            voice_url: signedVoiceUrl,
+            total_size: m.total_size,
+          };
         }));
       }
     }

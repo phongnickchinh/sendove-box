@@ -3,20 +3,26 @@ import { IStorageRepository } from '../interfaces/storage.repository.interface';
 
 export class FirebaseStorageRepository implements IStorageRepository {
   /**
-   * Generates a signed URL for uploading a file directly to Firebase Storage.
+   * Generates a signed POST policy for uploading a file directly to Firebase Storage with size limits.
    */
-  async generateUploadUrl(filePath: string, contentType: string, expiresInMinutes: number = 60): Promise<string> {
+  async generateUploadPolicy(filePath: string, contentType: string, maxSizeInBytes: number, expiresInMinutes: number = 60): Promise<{ url: string; fields: Record<string, string> }> {
     const bucket = storage.bucket();
     const file = bucket.file(filePath);
 
-    const [url] = await file.getSignedUrl({
-      version: 'v4',
-      action: 'write',
+    const [response] = await file.generateSignedPostPolicyV4({
       expires: Date.now() + expiresInMinutes * 60 * 1000,
-      contentType,
+      conditions: [
+        ['content-length-range', 0, maxSizeInBytes],
+      ],
+      fields: {
+        'Content-Type': contentType,
+      },
     });
 
-    return url;
+    return {
+      url: response.url,
+      fields: response.fields,
+    };
   }
 
   /**
@@ -76,5 +82,25 @@ export class FirebaseStorageRepository implements IStorageRepository {
       destination: destinationPath,
       metadata: contentType ? { contentType } : undefined,
     });
+  }
+
+  /**
+   * Retrieves metadata of a file.
+   */
+  async getFileMetadata(filePath: string): Promise<any> {
+    const bucket = storage.bucket();
+    const file = bucket.file(filePath);
+    const [metadata] = await file.getMetadata();
+    return metadata;
+  }
+
+  /**
+   * Checks if a file exists.
+   */
+  async fileExists(filePath: string): Promise<boolean> {
+    const bucket = storage.bucket();
+    const file = bucket.file(filePath);
+    const [exists] = await file.exists();
+    return exists;
   }
 }

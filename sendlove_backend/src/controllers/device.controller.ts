@@ -22,7 +22,10 @@ export class DeviceController {
       const lastDownloadTs = req.query.last_download_ts
         ? parseInt(req.query.last_download_ts as string, 10)
         : undefined;
-      const data = await this.deviceService.poll(boxId, lastDownloadTs);
+      const availableSlots = req.query.available_slots
+        ? parseInt(req.query.available_slots as string, 10)
+        : 3;
+      const data = await this.deviceService.poll(boxId, lastDownloadTs, availableSlots);
       res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);

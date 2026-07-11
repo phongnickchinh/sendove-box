@@ -21,6 +21,7 @@ export class UserService {
         last_login_at: now,
         created_at: now,
         updated_at: now,
+        is_deleted: false,
         boxes_list: {}
       };
       user = await this.userRepo.create(uid, newUser);

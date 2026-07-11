@@ -35,10 +35,20 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.storage = exports.db = void 0;
 const admin = __importStar(require("firebase-admin"));
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 if (!admin.apps.length) {
-    admin.initializeApp({
-        databaseURL: 'https://iot-app-839a2.asia-southeast1.firebasedatabase.app'
-    });
+    const config = {
+        databaseURL: 'https://iot-app-839a2.asia-southeast1.firebasedatabase.app',
+        storageBucket: 'iot-app-839a2.firebasestorage.app'
+    };
+    // Explicitly load the service account to bypass Firebase Emulator's ADC
+    const serviceAccountPath = path.resolve(__dirname, '../serviceAccountKey.json');
+    if (fs.existsSync(serviceAccountPath)) {
+        const serviceAccount = require(serviceAccountPath);
+        config.credential = admin.credential.cert(serviceAccount);
+    }
+    admin.initializeApp(config);
 }
 exports.db = admin.database();
 exports.storage = admin.storage();

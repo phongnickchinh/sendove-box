@@ -125,14 +125,13 @@ export const initiateMessageSchema: ValidationSchema = {
 /** POST /boxes/:boxId/messages/confirm */
 export const confirmMessageSchema: ValidationSchema = {
   message_id: { type: 'string', required: true },
+  type: { type: 'string', required: true, enum: ['video', 'image', 'gif', 'voice', 'text'] },
   text: { type: 'string', maxLength: 500 },
-  bin_url: { type: 'string', maxLength: 2048 },
-  voice_url: { type: 'string', maxLength: 2048 },
-  gif_url: { type: 'string', maxLength: 2048 },
-  bg_music_url: { type: 'string', maxLength: 2048 },
-  image_url: { type: 'string', maxLength: 2048 },
-  total_size: { type: 'number', min: 0 },
-  thumbnail_url: { type: 'string', maxLength: 2048 },
+  duration: { type: 'number', min: 0, max: 60 },
+  frame_count: { type: 'number', min: 0, max: 1500 },
+  width: { type: 'number', min: 1, max: 320 },
+  height: { type: 'number', min: 1, max: 320 },
+  uploaded_files: { type: 'array', itemType: 'string' },
 };
 
 /** PATCH /users/me — chỉ cho phép sửa display_name và avatar_url */

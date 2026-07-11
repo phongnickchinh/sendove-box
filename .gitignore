@@ -28,3 +28,4 @@ build/
 local.ini
 
 node_modules/
+serviceAccountKey.json

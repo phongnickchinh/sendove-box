@@ -4,18 +4,24 @@ exports.FirebaseStorageRepository = void 0;
 const firebase_1 = require("../../firebase");
 class FirebaseStorageRepository {
     /**
-     * Generates a signed URL for uploading a file directly to Firebase Storage.
+     * Generates a signed POST policy for uploading a file directly to Firebase Storage with size limits.
      */
-    async generateUploadUrl(filePath, contentType, expiresInMinutes = 60) {
+    async generateUploadPolicy(filePath, contentType, maxSizeInBytes, expiresInMinutes = 60) {
         const bucket = firebase_1.storage.bucket();
         const file = bucket.file(filePath);
-        const [url] = await file.getSignedUrl({
-            version: 'v4',
-            action: 'write',
+        const [response] = await file.generateSignedPostPolicyV4({
             expires: Date.now() + expiresInMinutes * 60 * 1000,
-            contentType,
+            conditions: [
+                ['content-length-range', 0, maxSizeInBytes],
+            ],
+            fields: {
+                'Content-Type': contentType,
+            },
         });
-        return url;
+        return {
+            url: response.url,
+            fields: response.fields,
+        };
     }
     /**
      * Generates a signed URL for downloading a file.
@@ -69,6 +75,24 @@ class FirebaseStorageRepository {
             destination: destinationPath,
             metadata: contentType ? { contentType } : undefined,
         });
+    }
+    /**
+     * Retrieves metadata of a file.
+     */
+    async getFileMetadata(filePath) {
+        const bucket = firebase_1.storage.bucket();
+        const file = bucket.file(filePath);
+        const [metadata] = await file.getMetadata();
+        return metadata;
+    }
+    /**
+     * Checks if a file exists.
+     */
+    async fileExists(filePath) {
+        const bucket = firebase_1.storage.bucket();
+        const file = bucket.file(filePath);
+        const [exists] = await file.exists();
+        return exists;
     }
 }
 exports.FirebaseStorageRepository = FirebaseStorageRepository;

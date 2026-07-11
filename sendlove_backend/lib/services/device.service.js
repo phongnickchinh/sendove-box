@@ -9,15 +9,17 @@ const firebase_message_repository_1 = require("../repositories/firebase/firebase
 const firebase_alarm_repository_1 = require("../repositories/firebase/firebase-alarm.repository");
 const firebase_firmware_repository_1 = require("../repositories/firebase/firebase-firmware.repository");
 const firebase_ota_repository_1 = require("../repositories/firebase/firebase-ota.repository");
+const firebase_storage_repository_1 = require("../repositories/firebase/firebase-storage.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
 const crypto_1 = __importDefault(require("crypto"));
 class DeviceService {
-    constructor(boxRepo = new firebase_box_repository_1.FirebaseBoxRepository(), msgRepo = new firebase_message_repository_1.FirebaseMessageRepository(), alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository(), fwRepo = new firebase_firmware_repository_1.FirebaseFirmwareRepository(), otaRepo = new firebase_ota_repository_1.FirebaseOtaRepository()) {
+    constructor(boxRepo = new firebase_box_repository_1.FirebaseBoxRepository(), msgRepo = new firebase_message_repository_1.FirebaseMessageRepository(), alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository(), fwRepo = new firebase_firmware_repository_1.FirebaseFirmwareRepository(), otaRepo = new firebase_ota_repository_1.FirebaseOtaRepository(), storageRepo = new firebase_storage_repository_1.FirebaseStorageRepository()) {
         this.boxRepo = boxRepo;
         this.msgRepo = msgRepo;
         this.alarmRepo = alarmRepo;
         this.fwRepo = fwRepo;
         this.otaRepo = otaRepo;
+        this.storageRepo = storageRepo;
     }
     /**
      * ESP32 đăng ký lần đầu
@@ -79,7 +81,7 @@ class DeviceService {
      * ESP32 poll định kỳ: kiểm tra flags, lấy messages mới, lấy alarm list nếu cần.
      * ESP32 gửi last_download_ts → backend trả messages có timestamp > last_download_ts.
      */
-    async poll(boxId, lastDownloadTs) {
+    async poll(boxId, lastDownloadTs, availableSlots = 3) {
         const box = await this.boxRepo.getById(boxId);
         if (!box)
             throw new error_handler_middleware_1.AppError(404, 'box_not_found', 'Box not found');
@@ -89,19 +91,34 @@ class DeviceService {
         };
         // Nếu có tin nhắn mới (ESP32 gửi last_download_ts)
         if (lastDownloadTs !== undefined) {
-            const allMessages = await this.msgRepo.listMessages(boxId, 20);
-            const newMessages = allMessages.filter(m => m.timestamp > lastDownloadTs);
+            const allMessages = await this.msgRepo.listMessages(boxId, 50);
+            const newMessages = allMessages
+                .filter(m => m.timestamp > lastDownloadTs)
+                .sort((a, b) => a.timestamp - b.timestamp)
+                .slice(0, availableSlots);
             if (newMessages.length > 0) {
-                response.new_messages = newMessages.map(m => ({
-                    id: m.id,
-                    timestamp: m.timestamp,
-                    text: m.text,
-                    bin_url: m.bin_url,
-                    voice_url: m.voice_url,
-                    gif_url: m.gif_url,
-                    bg_music_url: m.bg_music_url,
-                    image_url: m.image_url,
-                    total_size: m.total_size,
+                response.new_messages = await Promise.all(newMessages.map(async (m) => {
+                    let signedBinUrl = undefined;
+                    let signedVoiceUrl = undefined;
+                    if (m.bin_url) {
+                        signedBinUrl = await this.storageRepo.generateDownloadUrl(m.bin_url, 15);
+                    }
+                    if (m.voice_url) {
+                        signedVoiceUrl = await this.storageRepo.generateDownloadUrl(m.voice_url, 15);
+                    }
+                    return {
+                        id: m.id,
+                        timestamp: m.timestamp,
+                        type: m.type,
+                        duration: m.duration,
+                        frame_count: m.frame_count,
+                        width: m.width,
+                        height: m.height,
+                        text: m.text,
+                        bin_url: signedBinUrl,
+                        voice_url: signedVoiceUrl,
+                        total_size: m.total_size,
+                    };
                 }));
             }
         }

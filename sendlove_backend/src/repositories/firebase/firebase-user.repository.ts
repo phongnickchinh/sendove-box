@@ -31,12 +31,13 @@ export class FirebaseUserRepository extends FirebaseBaseRepository<User> impleme
   }
 
   /**
-   * Xoá mềm user: set deleted_at thay vì xoá hoàn toàn.
+   * Xoá mềm user: set is_deleted = true và deleted_at.
    * Dữ liệu user vẫn được giữ lại cho mục đích audit/history.
    */
   async softDelete(uid: string): Promise<void> {
     const now = Date.now();
     await this.getRef(uid).update({
+      is_deleted: true,
       deleted_at: now,
       updated_at: now,
     });

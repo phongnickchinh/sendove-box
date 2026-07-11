@@ -14,6 +14,7 @@ export interface User extends BaseModel {
   is_admin: boolean;
   avatar_url: string | null;
   last_login_at: number;
+  is_deleted: boolean;
 
   /**
    * Denormalized copy: danh sách box mà user được pairing.

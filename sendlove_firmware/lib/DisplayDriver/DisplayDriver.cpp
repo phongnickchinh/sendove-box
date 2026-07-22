@@ -2,41 +2,28 @@
 #include "config.h"
 
 // ============================================================================
-// DisplayDriver Implementation
+// DisplayDriver Implementation — LovyanGFX
 // ============================================================================
 
-// LEDC PWM config cho backlight
-static constexpr uint32_t BLK_PWM_FREQ       = 5000; // 5kHz
-static constexpr uint8_t  BLK_PWM_RESOLUTION = 8;    // 8-bit (0–255)
-
-bool DisplayDriver::init(uint8_t backlightPin, SemaphoreHandle_t spiMutex) {
-    _backlightPin = backlightPin;
+bool DisplayDriver::init(SemaphoreHandle_t spiMutex) {
     _spiMutex = spiMutex;
 
-    // Cấu hình LEDC PWM cho backlight
-    _backlightChannel = 0;
-    ledcSetup(_backlightChannel, BLK_PWM_FREQ, BLK_PWM_RESOLUTION);
-    ledcAttachPin(_backlightPin, _backlightChannel);
-    ledcWrite(_backlightChannel, 0); // Bắt đầu với backlight tắt
+    // Khởi tạo LGFX (SPI bus + Panel + Backlight tự động cấu hình)
+    _tft.init();
+    _tft.setRotation(0);
+    _tft.setSwapBytes(true);     // Cần cho pushImage RGB565
+    _tft.fillScreen(TFT_BLACK);
+    _tft.setBrightness(0);       // Bắt đầu với backlight tắt
 
-    // Khởi tạo TFT
-    if (acquireSPI()) {
-        _tft.init();
-        _tft.setRotation(0); // Portrait
-        _tft.fillScreen(TFT_BLACK);
-        releaseSPI();
-    }
-
-    Serial.println(F("[Display] TFT initialized"));
+    Serial.println(F("[Display] LGFX initialized (ST7789 240x240, SPI Mode 3, bus_shared)"));
     return true;
 }
 
-void DisplayDriver::pushFrameBuffer(const uint16_t* buffer, uint16_t w, uint16_t h) {
-    if (!acquireSPI()) return;
-
-    _tft.pushImage(0, 0, w, h, buffer);
-
-    releaseSPI();
+void DisplayDriver::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* pixels) {
+    // Gọi trực tiếp — KHÔNG acquire mutex ở đây
+    // Vì JPEGDEC callback gọi pushImage nhiều lần liên tục trong 1 frame,
+    // caller (MediaPlayer) phải acquire mutex 1 lần trước khi decode toàn bộ frame.
+    _tft.pushImage(x, y, w, h, pixels);
 }
 
 void DisplayDriver::drawClockFace(uint8_t hour, uint8_t minute) {
@@ -46,12 +33,12 @@ void DisplayDriver::drawClockFace(uint8_t hour, uint8_t minute) {
 
     // Vẽ giờ:phút ở giữa màn hình, font lớn
     _tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    _tft.setTextDatum(MC_DATUM); // Middle Center
+    _tft.setTextDatum(lgfx::middle_center);
 
     char timeStr[6];
     snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
 
-    // Sử dụng font lớn (font 7 = 7-segment, 48px)
+    // Font 7 = 7-segment, 48px height
     _tft.setTextFont(7);
     _tft.drawString(timeStr, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
 
@@ -64,7 +51,7 @@ void DisplayDriver::drawStatusBar(uint8_t batteryPercent, bool wifiConnected) {
     // Thanh trạng thái ở top, cao 16px
     _tft.fillRect(0, 0, SCREEN_WIDTH, 16, TFT_BLACK);
     _tft.setTextFont(1);
-    _tft.setTextDatum(TL_DATUM);
+    _tft.setTextDatum(lgfx::top_left);
 
     // Icon Wi-Fi (trái)
     _tft.setTextColor(wifiConnected ? TFT_GREEN : TFT_RED, TFT_BLACK);
@@ -75,7 +62,7 @@ void DisplayDriver::drawStatusBar(uint8_t batteryPercent, bool wifiConnected) {
     _tft.setTextColor(batColor, TFT_BLACK);
     char batStr[8];
     snprintf(batStr, sizeof(batStr), "%3d%%", batteryPercent);
-    _tft.setTextDatum(TR_DATUM);
+    _tft.setTextDatum(lgfx::top_right);
     _tft.drawString(batStr, SCREEN_WIDTH - 2, 2);
 
     releaseSPI();
@@ -86,25 +73,25 @@ void DisplayDriver::showMessage(const char* message) {
 
     _tft.fillScreen(TFT_BLACK);
     _tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    _tft.setTextDatum(MC_DATUM);
-    _tft.setTextFont(2); // Font 2 = 16px
+    _tft.setTextDatum(lgfx::middle_center);
+    _tft.setTextSize(2);
     _tft.drawString(message, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+    _tft.setTextSize(1);
 
     releaseSPI();
 }
 
 void DisplayDriver::setBacklight(uint8_t percent) {
-    // Map 0–100% → 0–255
-    uint8_t duty = map(percent, 0, 100, 0, 255);
-    ledcWrite(_backlightChannel, duty);
+    // LovyanGFX setBrightness: 0–255
+    uint8_t brightness = map(percent, 0, 100, 0, 255);
+    _tft.setBrightness(brightness);
 }
 
 void DisplayDriver::turnOff() {
     setBacklight(0);
 
     if (acquireSPI()) {
-        // Gửi lệnh sleep cho TFT controller (ST7735)
-        _tft.writecommand(0x10); // SLPIN (Sleep In)
+        _tft.sleep();
         releaseSPI();
     }
 
@@ -113,11 +100,11 @@ void DisplayDriver::turnOff() {
 
 void DisplayDriver::turnOn() {
     if (acquireSPI()) {
-        _tft.writecommand(0x11); // SLPOUT (Sleep Out)
+        _tft.wakeup();
         releaseSPI();
     }
 
-    delay(120); // Datasheet: chờ 120ms sau SLPOUT
+    delay(120); // Datasheet: chờ 120ms sau wake up
     Serial.println(F("[Display] TFT on"));
 }
 
@@ -128,7 +115,7 @@ void DisplayDriver::clear() {
     }
 }
 
-TFT_eSPI* DisplayDriver::getTFT() {
+LGFX* DisplayDriver::getTFT() {
     return &_tft;
 }
 

@@ -12,43 +12,47 @@
 // ĐẶT TRONG include/ ĐỂ CẢ src/ VÀ lib/ ĐỀU TRUY CẬP ĐƯỢC.
 // ============================================================================
 
-// --- SPI Bus (Chia sẻ giữa TFT và SD Card) ---------------------------------
-// TODO: Cập nhật pinout theo thiết kế phần cứng thực tế
+// --- Hardware SPI2 Bus (Chia sẻ giữa TFT và NAND Flash) -------------------
 static constexpr uint8_t PIN_SPI_MOSI = 6;
-static constexpr uint8_t PIN_SPI_MISO = 5;
+static constexpr uint8_t PIN_SPI_MISO = 5;   // NAND MISO (TFT không dùng MISO)
 static constexpr uint8_t PIN_SPI_SCK  = 4;
 
-// --- TFT Display (ST7735 1.77 inch) -----------------------------------------
-static constexpr uint8_t PIN_TFT_CS   = 7;
-static constexpr uint8_t PIN_TFT_DC   = 8;   // Data/Command
-static constexpr uint8_t PIN_TFT_RST  = 10;
+// --- TFT Display (ST7789 240x240 IPS, không CS) ----------------------------
+static constexpr int8_t  PIN_TFT_CS   = -1;  // Màn hình không có chân CS
+static constexpr uint8_t PIN_TFT_DC   = 7;   // Data/Command
+static constexpr uint8_t PIN_TFT_RST  = 9;
 static constexpr uint8_t PIN_TFT_BLK  = 3;   // Backlight (PWM)
 
-// Kích thước màn hình (đặt tên SCREEN_ để tránh xung đột với TFT_eSPI macros)
-static constexpr uint16_t SCREEN_WIDTH  = 128;
-static constexpr uint16_t SCREEN_HEIGHT = 160;
+// Kích thước màn hình
+static constexpr uint16_t SCREEN_WIDTH  = 240;
+static constexpr uint16_t SCREEN_HEIGHT = 240;
 
-// --- MicroSD Card Module ----------------------------------------------------
-static constexpr uint8_t PIN_SD_CS    = 9;
-
-// --- I2S Audio (MAX98357A) --------------------------------------------------
-static constexpr uint8_t PIN_I2S_BCLK = 2;   // Bit Clock
-static constexpr uint8_t PIN_I2S_LRC  = 1;   // Left/Right Clock (Word Select)
-static constexpr uint8_t PIN_I2S_DOUT = 0;   // Data Out
+// --- NAND Flash W25Q128 (Shared Hardware SPI2) -----------------------------
+static constexpr uint8_t PIN_NAND_CS  = 8;   // Chip Select riêng cho NAND
 
 // --- Touch Sensor (TTP223) --------------------------------------------------
-static constexpr uint8_t PIN_TOUCH    = 20;   // GPIO Interrupt
+static constexpr uint8_t PIN_TOUCH    = 10;   // Active HIGH (INPUT_PULLDOWN)
 
-// --- LED Indicator ----------------------------------------------------------
-static constexpr uint8_t PIN_LED      = 21;   // Breathing LED (PWM)
+// ============================================================================
+// Phase 2 — Chưa triển khai (chân dự trữ)
+// ============================================================================
+// --- I2S Audio (MAX98357A) --- Cần GPIO 0, 1, 2 rảnh
+// static constexpr uint8_t PIN_I2S_BCLK = 2;   // Bit Clock
+// static constexpr uint8_t PIN_I2S_LRC  = 1;   // Left/Right Clock (Word Select)
+// static constexpr uint8_t PIN_I2S_DOUT = 0;   // Data Out
 
-// --- Battery ADC ------------------------------------------------------------
-static constexpr uint8_t PIN_BATTERY_ADC = 4; // ADC1 channel
-// Voltage divider: R1 = 100kΩ, R2 = 100kΩ → ratio = 2.0
-static constexpr float BATTERY_VOLTAGE_DIVIDER_RATIO = 2.0f;
-static constexpr float BATTERY_FULL_VOLTAGE  = 4.2f;
-static constexpr float BATTERY_EMPTY_VOLTAGE = 3.0f;
-static constexpr uint8_t BATTERY_LOW_THRESHOLD = 10; // percent
+// --- LED Indicator ---
+// static constexpr uint8_t PIN_LED      = 20;  // Breathing LED (PWM)
+
+// --- Battery ADC ---
+// static constexpr uint8_t PIN_BATTERY_ADC = 2; // ADC1_CH2
+// static constexpr float BATTERY_VOLTAGE_DIVIDER_RATIO = 2.0f;
+// static constexpr float BATTERY_FULL_VOLTAGE  = 4.2f;
+// static constexpr float BATTERY_EMPTY_VOLTAGE = 3.0f;
+// static constexpr uint8_t BATTERY_LOW_THRESHOLD = 10; // percent
+
+// --- MicroSD Card Module --- (giữ cho tương lai, chưa gán chân cụ thể)
+// static constexpr uint8_t PIN_SD_CS    = ???;
 
 // ============================================================================
 // Timing & Power Constants
@@ -71,12 +75,15 @@ static constexpr uint8_t BACKLIGHT_OFF           = 0;
 // ============================================================================
 static constexpr uint8_t  TARGET_FPS            = 15;
 static constexpr uint32_t FRAME_DURATION_MS     = 1000 / TARGET_FPS; // ~66ms
-static constexpr uint16_t I2S_SAMPLE_RATE       = 16000; // 16kHz WAV
-static constexpr uint8_t  I2S_BITS_PER_SAMPLE   = 16;
+// I2S Audio — Phase 2
+// static constexpr uint16_t I2S_SAMPLE_RATE       = 16000; // 16kHz WAV
+// static constexpr uint8_t  I2S_BITS_PER_SAMPLE   = 16;
 
-// File paths on SD card
-static constexpr const char* SD_VIDEO_PATH = "/media/video.bin";
-static constexpr const char* SD_AUDIO_PATH = "/media/voice.wav";
+// NAND Slot Config
+static constexpr uint8_t  NAND_SLOT_COUNT       = 5;
+static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
+    0x010000, 0x340000, 0x670000, 0x9A0000, 0xCD0000
+};
 
 // ============================================================================
 // Firebase Configuration
@@ -100,7 +107,7 @@ static constexpr UBaseType_t TASK_PRIORITY_NETWORK        = 2;
 static constexpr UBaseType_t TASK_PRIORITY_UI_CONTROLLER  = 1; // Thấp nhất
 
 static constexpr uint32_t TASK_STACK_POWER_MANAGER = 4096;
-static constexpr uint32_t TASK_STACK_MEDIA_PLAYER  = 8192;  // Cần nhiều cho DMA buffer
+static constexpr uint32_t TASK_STACK_MEDIA_PLAYER  = 8192;  // Cần nhiều cho JPEG buffer
 static constexpr uint32_t TASK_STACK_NETWORK       = 8192;  // Cần nhiều cho HTTP/TLS
 static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
 
@@ -114,10 +121,7 @@ static constexpr const char* NVS_NAMESPACE = "sendlove";
 // ============================================================================
 #ifdef WOKWI_SIMULATION
 // Active buzzer thay thế loa I2S (MAX98357A)
-// Dùng chân DOUT cũ (GPIO 0) để đơn giản hóa wiring
 static constexpr uint8_t PIN_BUZZER = 0;
-
-// Thời gian buzzer kêu khi mô phỏng phát tin nhắn (ms)
 static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;
 #endif // WOKWI_SIMULATION
 

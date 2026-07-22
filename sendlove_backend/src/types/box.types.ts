@@ -29,14 +29,10 @@ export interface BoxConfig {
 }
 
 export interface BoxFlags {
-  /** Cờ báo alarm list đã thay đổi — ESP32 cần đọc lại */
-  a_flag: boolean;
 
-  /** Cờ báo có OTA firmware đang chờ */
-  ota_flag: boolean;
-
-  /** Cờ báo có thay đổi pairing (thêm/ngắt kết nối) */
-  p_flag: boolean;
+  a_flag: boolean; /** Cờ báo alarm list đã thay đổi — ESP32 cần đọc lại */
+  ota_flag: boolean; /** Cờ báo có OTA firmware đang chờ */ 
+  p_flag: boolean; /** Cờ báo có thay đổi pairing (thêm/ngắt kết nối) */
 }
 
 export interface BoxStatus {

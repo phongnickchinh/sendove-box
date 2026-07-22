@@ -2,98 +2,77 @@
 #define MEDIA_PLAYER_H
 
 #include <Arduino.h>
+#include <JPEGDEC.h>
 #include "config.h"
 
-#ifndef WOKWI_SIMULATION
-#include "driver/i2s.h"
-#endif
-
 // Forward declarations
-class SDCardManager;
+class NandStorage;
 class DisplayDriver;
 
 // ============================================================================
-// MediaPlayer — Phát video (SPI) + âm thanh (I2S) đồng bộ
+// MediaPlayer — Phát video VJPG / ảnh VIMG từ NAND Flash
 // ============================================================================
-// Phục vụ Task 3: Task_MediaPlayer
+// Phục vụ Task_MediaPlayer trong kiến trúc FreeRTOS.
 //
 // Cơ chế hoạt động:
-// - Đọc file .bin (video RGB565) và .wav (audio PCM) từ thẻ SD
-// - Sử dụng double-buffering: đọc block tiếp theo từ SD
-//   trong khi block hiện tại đang được đẩy ra SPI/I2S
-// - Đồng bộ hình-tiếng dựa trên frame timing
+// - Đọc JPEG frame từ NandStorage (NAND Flash W25Q128)
+// - Giải mã bằng JPEGDEC → callback pushImage lên DisplayDriver
+// - Hỗ trợ 2 mode: VJPG (video lặp vô hạn) và VIMG (ảnh tĩnh)
+//
+// Phase 1: Chỉ phát video/ảnh, chưa có I2S audio.
 // ============================================================================
 
 /// Trạng thái phát
 enum class PlaybackState : uint8_t {
     IDLE,       // Chưa bắt đầu / đã kết thúc
-    PLAYING,    // Đang phát
-    ERROR       // Lỗi (file không tồn tại, lỗi đọc SD, ...)
-};
-
-/// WAV file header (44 bytes chuẩn)
-struct WAVHeader {
-    char     riff[4];        // "RIFF"
-    uint32_t fileSize;       // Kích thước file - 8
-    char     wave[4];        // "WAVE"
-    char     fmt[4];         // "fmt "
-    uint32_t fmtSize;        // Kích thước fmt chunk (16 cho PCM)
-    uint16_t audioFormat;    // 1 = PCM
-    uint16_t numChannels;    // 1 = Mono, 2 = Stereo
-    uint32_t sampleRate;     // VD: 16000
-    uint32_t byteRate;       // sampleRate * numChannels * bitsPerSample/8
-    uint16_t blockAlign;     // numChannels * bitsPerSample/8
-    uint16_t bitsPerSample;  // VD: 16
-    char     data[4];        // "data"
-    uint32_t dataSize;       // Kích thước dữ liệu audio
+    PLAYING,    // Đang phát video (lặp vô hạn)
+    SHOWING,    // Đang hiển thị ảnh tĩnh
+    ERROR       // Lỗi
 };
 
 class MediaPlayer {
 public:
-    /// Khởi tạo I2S driver và liên kết với SDCard + Display
-    /// @param sdCard Con trỏ tới SDCardManager
+    /// Khởi tạo MediaPlayer
+    /// @param nand Con trỏ tới NandStorage
     /// @param display Con trỏ tới DisplayDriver
-    /// @param bclkPin Chân I2S BCLK (Bit Clock)
-    /// @param lrcPin Chân I2S LRC (Word Select)
-    /// @param doutPin Chân I2S Data Out
     /// @return true nếu khởi tạo thành công
-    bool init(SDCardManager* sdCard, DisplayDriver* display,
-              uint8_t bclkPin, uint8_t lrcPin, uint8_t doutPin);
+    bool init(NandStorage* nand, DisplayDriver* display);
 
-    /// Phát tin nhắn (video + audio đồng bộ)
-    /// @param videoPath Đường dẫn file .bin trên SD
-    /// @param audioPath Đường dẫn file .wav trên SD
-    /// @return true nếu phát thành công
-    bool playMessage(const char* videoPath, const char* audioPath);
+    /// Bắt đầu phát slot (video hoặc ảnh)
+    /// @param slot Index slot (0-4)
+    /// @return true nếu bắt đầu thành công
+    bool playSlot(uint8_t slot);
 
-    /// Dừng phát (nếu đang phát)
+    /// Cập nhật playback — gọi mỗi vòng loop
+    /// Decode 1 frame (VJPG) hoặc no-op (VIMG đã hiển thị)
+    void update();
+
+    /// Dừng phát
     void stop();
 
     /// Lấy trạng thái hiện tại
     PlaybackState getState() const;
 
+    /// Lấy slot đang phát (-1 nếu idle)
+    int8_t getCurrentSlot() const;
+
 private:
-    SDCardManager*  _sdCard  = nullptr;
+    NandStorage*    _nand    = nullptr;
     DisplayDriver*  _display = nullptr;
     PlaybackState   _state   = PlaybackState::IDLE;
 
-#ifdef WOKWI_SIMULATION
-    // Buzzer thay thế I2S trong giả lập Wokwi
-    uint8_t _buzzerPin = 0;
-#else
-    // I2S config
-    i2s_port_t _i2sPort = I2S_NUM_0;
+    JPEGDEC _jpeg;
+    int8_t  _currentSlot   = -1;
+    uint16_t _fps          = 10;
+    uint16_t _totalFrames  = 0;
+    uint16_t _currentFrame = 0;
 
-    /// Khởi tạo I2S driver
-    bool initI2S(uint8_t bclkPin, uint8_t lrcPin, uint8_t doutPin,
-                 uint32_t sampleRate, uint8_t bitsPerSample);
+    /// Decode và hiển thị 1 JPEG frame
+    /// @return true nếu decode thành công
+    bool decodeOneFrame();
 
-    /// Dọn dẹp I2S driver
-    void deinitI2S();
-
-    /// Parse WAV header và validate
-    bool parseWAVHeader(const uint8_t* headerData, WAVHeader* header);
-#endif
+    /// JPEGDEC callback — pushImage lên display
+    static int jpegDrawCallback(JPEGDRAW* pDraw);
 };
 
 #endif // MEDIA_PLAYER_H

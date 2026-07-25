@@ -76,6 +76,7 @@ private:
     bool     _lastTouchState   = false;
     bool     _touchConfirmed   = false;
     uint32_t _lastDebounceTime = 0;
+    uint32_t _touchStartTime    = 0;
 };
 
 #endif // UI_CONTROLLER_H

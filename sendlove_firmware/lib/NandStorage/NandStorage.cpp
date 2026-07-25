@@ -9,8 +9,8 @@ static constexpr uint8_t W25Q_READ_DATA      = 0x03;
 static constexpr uint8_t W25Q_READ_STATUS_1  = 0x05;
 
 // SPI transaction settings cho NAND 
-// ĐỔI SANG MODE 3 ĐỂ CÙNG CLOCK POLARITY VỚI ST7789 (Tránh lệch bit khi nhảy SCK)
-static const SPISettings NAND_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE3);
+// Giảm xuống 4MHz để dây cắm breadboard không bị suy hao tín hiệu (trước đây Software SPI rất chậm)
+static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
 // ============================================================================
 // Init

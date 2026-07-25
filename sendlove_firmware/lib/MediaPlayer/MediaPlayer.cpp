@@ -73,8 +73,9 @@ bool MediaPlayer::playSlot(uint8_t slot) {
         return false;
     }
 
-    // Bật màn hình
+    // Bật màn hình & xóa màn hình sạch trước khi phát slot mới
     _display->turnOn();
+    _display->clear();
     _display->setBacklight(BACKLIGHT_DAY_PERCENT);
 
     if (_nand->isSlotImage(slot)) {
@@ -173,7 +174,13 @@ bool MediaPlayer::decodeOneFrame() {
 
     if (_jpeg.openRAM(s_jpegBuffer, jpegSize, jpegDrawCallback)) {
         _jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
+
+        // Bọc trong startWrite() / endWrite() để LovyanGFX giữ luồng SPI ghi liên tục cho toàn bộ MCU blocks.
+        // Điều này ngăn chặn hiện tượng nháy từng khối (MCU flicker) và dư ảnh ở góc dưới màn hình.
+        _display->getTFT()->startWrite();
         _jpeg.decode(0, 0, 0);
+        _display->getTFT()->endWrite();
+
         _jpeg.close();
     }
 

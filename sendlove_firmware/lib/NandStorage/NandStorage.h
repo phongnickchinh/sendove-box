@@ -31,7 +31,8 @@ public:
     /// Khởi tạo NAND: cấu hình CS pin, đọc Slot Table
     /// @param spiMutex Mutex chia sẻ bus SPI2 với DisplayDriver
     /// @return true nếu đọc được Slot Table hợp lệ ("NSLT")
-    bool init(SemaphoreHandle_t spiMutex);
+    bool init(SemaphoreHandle_t spiMutex = nullptr);
+    void readRaw(uint32_t addr, uint8_t* data, uint32_t len);
 
     // --- Slot Query (read-only) ---
 
@@ -82,9 +83,6 @@ private:
     uint32_t _slotSize = 0;     // Kích thước slot data
 
     // --- Low-level SPI (có mutex) ---
-
-    /// Đọc raw bytes từ NAND
-    void readRaw(uint32_t addr, uint8_t* data, uint32_t len);
 
     /// Acquire/Release SPI bus mutex
     bool acquireSPI();

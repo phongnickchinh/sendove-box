@@ -44,26 +44,22 @@ void UIController::setLEDState(LEDState state) {
 bool UIController::isTouched() {
     bool currentState = digitalRead(_touchPin) == HIGH;
     uint32_t now = millis();
+    bool triggered = false;
 
-    // Nếu trạng thái thay đổi, reset timer debounce
-    if (currentState != _lastTouchState) {
-        _lastDebounceTime = now;
-        _lastTouchState = currentState;
-    }
-
-    // Nếu tín hiệu ổn định hơn TOUCH_DEBOUNCE_MS
-    if ((now - _lastDebounceTime) > TOUCH_DEBOUNCE_MS) {
-        if (currentState && !_touchConfirmed) {
+    if (currentState) {
+        if (_touchStartTime == 0) {
+            _touchStartTime = now;
+        } else if ((now - _touchStartTime) >= 30 && !_touchConfirmed) {
+            // Chỉ công nhận là chạm thật khi giữ HIGH liên tục >= 30ms
             _touchConfirmed = true;
-            return true; // Sự kiện chạm hợp lệ (rising edge)
+            triggered = true;
         }
-
-        if (!currentState) {
-            _touchConfirmed = false; // Đã thả tay
-        }
+    } else {
+        _touchStartTime = 0;
+        _touchConfirmed = false;
     }
 
-    return false;
+    return triggered;
 }
 
 void UIController::resetTouch() {

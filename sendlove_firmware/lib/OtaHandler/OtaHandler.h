@@ -17,10 +17,10 @@
 
 class OtaHandler {
 public:
-    /// Đăng ký OTA routes vào WebServer
+    /// Register OTA endpoints to WebServer
     void registerRoutes(WebServer& server);
 
-    /// Kiểm tra OTA đang diễn ra (các task khác nên tạm dừng)
+    /// Check if OTA update is currently in progress
     bool isUpdating() const { return _isUpdating; }
 
 private:

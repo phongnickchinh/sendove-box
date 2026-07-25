@@ -5,7 +5,6 @@
 #include <JPEGDEC.h>
 #include "config.h"
 
-// Forward declarations
 class NandStorage;
 class DisplayDriver;
 
@@ -24,36 +23,31 @@ class DisplayDriver;
 
 /// Trạng thái phát
 enum class PlaybackState : uint8_t {
-    IDLE,       // Chưa bắt đầu / đã kết thúc
-    PLAYING,    // Đang phát video (lặp vô hạn)
-    SHOWING,    // Đang hiển thị ảnh tĩnh
-    ERROR       // Lỗi
+    IDLE,
+    PLAYING,
+    SHOWING,
+    ERROR
 };
 
+/// Video (VJPG) and Image (VIMG) player from NAND Flash
 class MediaPlayer {
 public:
-    /// Khởi tạo MediaPlayer
-    /// @param nand Con trỏ tới NandStorage
-    /// @param display Con trỏ tới DisplayDriver
-    /// @return true nếu khởi tạo thành công
+    /// Initialize MediaPlayer instance
     bool init(NandStorage* nand, DisplayDriver* display);
 
-    /// Bắt đầu phát slot (video hoặc ảnh)
-    /// @param slot Index slot (0-4)
-    /// @return true nếu bắt đầu thành công
+    /// Start playing media from specified slot
     bool playSlot(uint8_t slot);
 
-    /// Cập nhật playback — gọi mỗi vòng loop
-    /// Decode 1 frame (VJPG) hoặc no-op (VIMG đã hiển thị)
+    /// Update playback loop frame timing
     void update();
 
-    /// Dừng phát
+    /// Stop current playback
     void stop();
 
-    /// Lấy trạng thái hiện tại
+    /// Get current playback state
     PlaybackState getState() const;
 
-    /// Lấy slot đang phát (-1 nếu idle)
+    /// Get current active slot index (-1 if IDLE)
     int8_t getCurrentSlot() const;
 
 private:
@@ -67,11 +61,10 @@ private:
     uint16_t _totalFrames  = 0;
     uint16_t _currentFrame = 0;
 
-    /// Decode và hiển thị 1 JPEG frame
-    /// @return true nếu decode thành công
+    /// Decode and render single JPEG frame
     bool decodeOneFrame();
 
-    /// JPEGDEC callback — pushImage lên display
+    /// Callback function for JPEGDEC pixel output
     static int jpegDrawCallback(JPEGDRAW* pDraw);
 };
 

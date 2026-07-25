@@ -1,14 +1,9 @@
 #include "LayoutEngine.h"
 
 uint16_t LayoutEngine::hexToColor(const char* hex) {
-    if (hex == nullptr || strlen(hex) < 7 || hex[0] != '#') {
-        return TFT_WHITE; // Default color
-    }
+    if (hex == nullptr || strlen(hex) < 7 || hex[0] != '#') return TFT_WHITE;
     long rgb = strtol(hex + 1, nullptr, 16);
-    uint8_t r = (rgb >> 16) & 0xFF;
-    uint8_t g = (rgb >> 8) & 0xFF;
-    uint8_t b = rgb & 0xFF;
-    return lgfx::color565(r, g, b);
+    return lgfx::color565((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
 }
 
 bool LayoutEngine::loadConfig(const char* jsonString) {
@@ -16,16 +11,7 @@ bool LayoutEngine::loadConfig(const char* jsonString) {
     
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, jsonString);
-
-    if (error) {
-        Serial.print(F("[LayoutEngine] deserializeJson() failed: "));
-        Serial.println(error.c_str());
-        return false;
-    }
-
-    if (doc["background"]) {
-        // Tương lai: Xử lý background image
-    }
+    if (error) return false;
 
     JsonArray widgets = doc["widgets"];
     for (JsonObject widget : widgets) {
@@ -37,7 +23,7 @@ bool LayoutEngine::loadConfig(const char* jsonString) {
         else if (strcmp(type, "wifi_icon") == 0) cfg.type = WIDGET_WIFI_ICON;
         else if (strcmp(type, "battery_icon") == 0) cfg.type = WIDGET_BATTERY_ICON;
         else if (strcmp(type, "image") == 0) cfg.type = WIDGET_IMAGE;
-        else continue; // Unknown widget
+        else continue;
 
         cfg.x = widget["x"] | 0;
         cfg.y = widget["y"] | 0;
@@ -50,7 +36,6 @@ bool LayoutEngine::loadConfig(const char* jsonString) {
         _widgets.push_back(cfg);
     }
     
-    Serial.printf("[LayoutEngine] Loaded %d widgets\n", _widgets.size());
     return true;
 }
 
@@ -58,12 +43,9 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver* display, NetworkManager* n
     if (!display || !network) return;
 
     LGFX* tft = display->getTFT();
-    
     display->acquireSPI();
 
-    if (fullRedraw) {
-        tft->fillScreen(_bgColor);
-    }
+    if (fullRedraw) tft->fillScreen(_bgColor);
 
     for (const auto& cfg : _widgets) {
         switch (cfg.type) {
@@ -99,11 +81,8 @@ void LayoutEngine::drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkM
     else if (cfg.align == "right") canvas->setTextDatum(lgfx::middle_right);
     else canvas->setTextDatum(lgfx::middle_left);
 
-    // Dùng setTextColor(fg, bg) để text tự ghi đè nền cũ, chống nháy không cần sprite
     canvas->setTextColor(cfg.color, _bgColor);
     String timeStr = network->getTimeString();
-    
-    // Thêm khoảng trắng (padding) để xoá sạch số cũ nếu độ dài bị thay đổi (vd: 12:00 sang 9:00)
     canvas->drawString(timeStr.c_str(), cfg.x, cfg.y);
     
     canvas->setTextSize(1);
@@ -123,19 +102,13 @@ void LayoutEngine::drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkM
 
     canvas->setTextColor(cfg.color, _bgColor);
     String dateStr = network->getDateString();
-    
     canvas->drawString(dateStr.c_str(), cfg.x, cfg.y);
-    
     canvas->setFont(nullptr);
 }
 
 void LayoutEngine::drawWifiIcon(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network) {
     int rssi = network->getWifiRSSI();
-    int bars = 0;
-    if (rssi > -60) bars = 4;
-    else if (rssi > -70) bars = 3;
-    else if (rssi > -80) bars = 2;
-    else if (rssi > -100) bars = 1;
+    int bars = (rssi > -60) ? 4 : (rssi > -70) ? 3 : (rssi > -80) ? 2 : (rssi > -100) ? 1 : 0;
 
     for (int i = 0; i < 4; i++) {
         uint16_t color = (i < bars) ? cfg.color : TFT_DARKGREY;
@@ -150,9 +123,7 @@ void LayoutEngine::drawBatteryIcon(LGFX* canvas, const WidgetConfig& cfg) {
     canvas->fillRect(cfg.x + 24, cfg.y + 3, 2, 6, cfg.color);
     
     uint16_t color = (percentage <= 20) ? TFT_RED : TFT_GREEN;
-    
     int fillWidth = (20 * percentage) / 100;
     canvas->fillRect(cfg.x + 2, cfg.y + 2, fillWidth, 8, color);
-    // Xóa phần nền bên trong nếu pin tụt (anti flicker)
     canvas->fillRect(cfg.x + 2 + fillWidth, cfg.y + 2, 20 - fillWidth, 8, _bgColor);
 }

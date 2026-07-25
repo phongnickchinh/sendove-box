@@ -4,63 +4,59 @@
 #include <Arduino.h>
 #include "DisplayDriver.h"
 
-/// Nguyên nhân thức dậy
+/// System wakeup cause
 enum class WakeupCause : uint8_t {
-    POWER_ON,       // Khởi động lần đầu hoặc reset
-    TIMER,          // Hết timer wakeup (5ph / 15ph)
-    TOUCH,          // Cảm biến chạm TTP223
-    UNKNOWN         // Không xác định
+    POWER_ON,
+    TIMER,
+    TOUCH,
+    UNKNOWN
 };
 
-/// Chế độ ngủ hỗ trợ
+/// Supported sleep modes
 enum class SleepMode : uint8_t {
-    LIGHT_SLEEP,    // Tạm dừng CPU, giữ RAM, thức dậy tức thì (1ms)
-    DEEP_SLEEP      // Tắt CPU/RAM/Wi-Fi (5µA), reboot khi thức dậy
+    LIGHT_SLEEP,
+    DEEP_SLEEP
 };
 
+/// Power and sleep management driver
 class PowerManager {
 public:
     PowerManager() = default;
 
-    /// Khởi tạo module PowerManager, cấu hình chân GPIO cho touch wakeup
+    /// Initialize PowerManager and configure touch wakeup GPIO
     void init(gpio_num_t touchPin);
 
-    /// Khởi tạo chân ADC đọc dung lượng Pin
+    /// Initialize battery ADC monitoring pin
     void initBattery(uint8_t adcPin, float dividerRatio = 2.0f);
 
-    /// Đọc điện áp pin (Volt)
+    /// Read battery voltage in Volts
     float getBatteryVoltage();
 
-    /// Quy đổi điện áp → phần trăm pin (0-100%)
+    /// Convert battery voltage to percentage (0-100%)
     uint8_t getBatteryPercentage();
 
-    /// Kiểm tra pin yếu
+    /// Check if battery is low
     bool isLowBattery(uint8_t threshold = 10);
 
-    /// Tự động gợi ý chế độ ngủ tối ưu dựa trên % pin hiện tại
-    /// @param lowBatteryThreshold Ngưỡng chuyển sang Deep Sleep (mặc định 30%)
+    /// Get recommended sleep mode based on current battery percentage
     SleepMode getRecommendedSleepMode(uint8_t lowBatteryThreshold = 30);
 
-    /// Đưa ESP32 vào chế độ ngủ tương ứng (LIGHT_SLEEP hoặc DEEP_SLEEP)
-    /// Tự động tắt màn hình TFT trước khi ngủ và bật lại sau khi thức dậy (với Light-sleep)
-    /// @param mode Chế độ ngủ
-    /// @param sleepDurationUs Thời gian ngủ (microseconds)
-    /// @param display Pointer đến DisplayDriver để tắt/bật màn hình (tùy chọn)
+    /// Enter specified sleep mode
     void enterSleep(SleepMode mode, uint64_t sleepDurationUs, DisplayDriver* display = nullptr);
 
-    /// Đưa ESP32 vào Light-sleep
+    /// Enter Light Sleep mode
     void enterLightSleep(uint64_t sleepDurationUs, DisplayDriver* display = nullptr);
 
-    /// Đưa ESP32 vào Deep-sleep (reboot khi thức dậy)
+    /// Enter Deep Sleep mode (reboots on wakeup)
     void enterDeepSleep(uint64_t sleepDurationUs, DisplayDriver* display = nullptr);
 
-    /// Cấu hình timer wakeup
+    /// Configure timer wakeup source
     void configureTimerWakeup(uint64_t sleepDurationUs);
 
-    /// Cấu hình GPIO wakeup cho cảm biến chạm
+    /// Configure touch GPIO wakeup source
     void configureTouchWakeup(gpio_num_t touchPin);
 
-    /// Xác định nguyên nhân thức dậy
+    /// Get cause of current system wakeup
     WakeupCause getWakeupCause();
 
 private:

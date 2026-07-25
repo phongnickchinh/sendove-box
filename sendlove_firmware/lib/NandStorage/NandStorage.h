@@ -19,57 +19,53 @@
 
 /// Thông tin 1 slot (16 bytes, giữ nguyên binary format từ test project)
 struct SlotEntry {
-    char     magic[4];       // "VJPG" = video, "VIMG" = ảnh tĩnh, "\0" = trống
-    uint32_t dataSize;       // Kích thước dữ liệu (bytes)
-    uint16_t fps;            // FPS (dùng cho video)
-    uint16_t totalFrames;    // Tổng số frame
-    uint32_t reserved;       // Dự trữ
+    char     magic[4];       // "VJPG" for video, "VIMG" for static image, "\0" for empty
+    uint32_t dataSize;       // Data size in bytes
+    uint16_t fps;            // Frame rate (video)
+    uint16_t totalFrames;    // Total frame count
+    uint32_t reserved;
 };
 
+/// Hardware SPI driver for W25Q128 NAND Flash storage
 class NandStorage {
 public:
-    /// Khởi tạo NAND: cấu hình CS pin, đọc Slot Table
-    /// @param spiMutex Mutex chia sẻ bus SPI2 với DisplayDriver
-    /// @return true nếu đọc được Slot Table hợp lệ ("NSLT")
+    /// Initialize NAND storage and parse slot table
     bool init(SemaphoreHandle_t spiMutex = nullptr);
+
+    /// Read raw data bytes from specified Flash address
     void readRaw(uint32_t addr, uint8_t* data, uint32_t len);
 
-    // --- Slot Query (read-only) ---
-
-    /// Lấy thông tin slot
+    /// Get slot metadata entry
     SlotEntry getSlotInfo(uint8_t slot) const;
 
-    /// Kiểm tra slot có dữ liệu hợp lệ (VJPG hoặc VIMG)
+    /// Check if slot contains valid data (VJPG or VIMG)
     bool isSlotValid(uint8_t slot) const;
 
-    /// Kiểm tra slot là video (VJPG)
+    /// Check if slot is video (VJPG)
     bool isSlotVideo(uint8_t slot) const;
 
-    /// Kiểm tra slot là ảnh tĩnh (VIMG)
+    /// Check if slot is static image (VIMG)
     bool isSlotImage(uint8_t slot) const;
 
-    /// Tìm slot hợp lệ đầu tiên. Trả về -1 nếu không có.
+    /// Find first valid slot index (-1 if none)
     int8_t findFirstValidSlot() const;
 
-    /// Tìm slot hợp lệ tiếp theo (vòng tròn). Trả về -1 nếu không có.
+    /// Find next valid slot index sequentially (-1 if none)
     int8_t findNextValidSlot(int8_t currentSlot) const;
 
-    // --- Sequential Read (cho playback) ---
-
-    /// Mở slot để đọc tuần tự
+    /// Open slot for sequential reading
     bool openSlot(uint8_t slot);
 
-    /// Đọc dữ liệu tuần tự từ slot đang mở
-    /// @return Số bytes thực tế đã đọc
+    /// Read sequential data bytes from opened slot
     int readData(uint8_t* buf, uint32_t len);
 
-    /// Seek tới offset tương đối trong slot data (0 = đầu data)
+    /// Seek to offset within current opened slot
     void seekSlot(uint32_t offset);
 
-    /// Đóng slot
+    /// Close currently opened slot
     void closeSlot();
 
-    /// Lấy slot index đang mở (-1 nếu chưa mở)
+    /// Get currently opened slot index (-1 if none)
     int8_t getCurrentSlot() const;
 
 private:
@@ -77,14 +73,10 @@ private:
     SlotEntry _slots[NAND_SLOT_COUNT];
     bool _tableValid = false;
 
-    // Cursor cho slot đang đọc
     int8_t   _currentSlot = -1;
-    uint32_t _cursor = 0;       // Offset tương đối trong slot data
-    uint32_t _slotSize = 0;     // Kích thước slot data
+    uint32_t _cursor = 0;
+    uint32_t _slotSize = 0;
 
-    // --- Low-level SPI (có mutex) ---
-
-    /// Acquire/Release SPI bus mutex
     bool acquireSPI();
     void releaseSPI();
 };

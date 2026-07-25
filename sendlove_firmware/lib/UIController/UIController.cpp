@@ -2,23 +2,11 @@
 #include "DisplayDriver.h"
 #include "config.h"
 
-// ============================================================================
-// UIController Implementation — Phase 1
-// ============================================================================
-
 void UIController::init(uint8_t touchPin, DisplayDriver* display) {
     _touchPin = touchPin;
     _display  = display;
-
-    // Cấu hình chân touch: INPUT_PULLDOWN vì TTP223 active HIGH
     pinMode(_touchPin, INPUT_PULLDOWN);
-
-    Serial.println(F("[UI] Initialized (Touch + Display)"));
 }
-
-// ============================================================================
-// LED Control — Phase 2 (no-op stubs)
-// ============================================================================
 
 void UIController::startBreathingLED() {
     _ledState = LEDState::BREATHING;
@@ -37,10 +25,6 @@ void UIController::setLEDState(LEDState state) {
     _ledState = state;
 }
 
-// ============================================================================
-// Touch Debounce
-// ============================================================================
-
 bool UIController::isTouched() {
     bool currentState = digitalRead(_touchPin) == HIGH;
     uint32_t now = millis();
@@ -50,7 +34,6 @@ bool UIController::isTouched() {
         if (_touchStartTime == 0) {
             _touchStartTime = now;
         } else if ((now - _touchStartTime) >= 30 && !_touchConfirmed) {
-            // Chỉ công nhận là chạm thật khi giữ HIGH liên tục >= 30ms
             _touchConfirmed = true;
             triggered = true;
         }
@@ -65,10 +48,6 @@ bool UIController::isTouched() {
 void UIController::resetTouch() {
     _touchConfirmed = false;
 }
-
-// ============================================================================
-// Display UI
-// ============================================================================
 
 void UIController::showConnecting() {
     if (_display == nullptr) return;
@@ -96,5 +75,5 @@ void UIController::showBootScreen() {
     _display->clear();
     _display->showMessage("Sendlove Box");
     _display->setBacklight(BACKLIGHT_DAY_PERCENT);
-    vTaskDelay(pdMS_TO_TICKS(2000)); // Hiển thị 2 giây
+    vTaskDelay(pdMS_TO_TICKS(2000));
 }

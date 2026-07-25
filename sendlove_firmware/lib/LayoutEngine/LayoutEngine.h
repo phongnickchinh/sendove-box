@@ -26,24 +26,24 @@ struct WidgetConfig {
     String src;
 };
 
+/// Dynamic UI layout engine for rendering JSON-configured widgets
 class LayoutEngine {
 public:
     LayoutEngine() = default;
 
-    // Load cấu hình JSON từ chuỗi (hoặc sau này từ file)
+    /// Parse JSON configuration string into widget list
     bool loadConfig(const char* jsonString);
 
-    // Render toàn bộ màn hình chờ
+    /// Render standby UI screen widgets
     void renderStandbyScreen(DisplayDriver* display, NetworkManager* network, bool fullRedraw = false);
 
 private:
     std::vector<WidgetConfig> _widgets;
     uint16_t _bgColor = TFT_BLACK;
     
-    // Hàm chuyển mã màu HEX (#FFFFFF) sang màu RGB565
+    /// Convert HEX color string (#FFFFFF) to RGB565 format
     uint16_t hexToColor(const char* hex);
 
-    // Vẽ từng widget con
     void drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network);
     void drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network);
     void drawWifiIcon(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network);

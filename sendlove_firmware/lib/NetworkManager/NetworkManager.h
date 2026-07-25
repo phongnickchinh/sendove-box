@@ -7,68 +7,65 @@
 #include <ESPmDNS.h>
 #include "config.h"
 
-/// Kết quả kết nối Wi-Fi
+/// Wi-Fi connection result status
 enum class WiFiConnectResult : uint8_t {
-    CONNECTED,          // Kết nối thành công
-    FAILED,             // Thất bại
-    NO_CREDENTIALS,     // Không có credentials trong NVS
-    TIMEOUT             // Hết thời gian chờ
+    CONNECTED,
+    FAILED,
+    NO_CREDENTIALS,
+    TIMEOUT
 };
 
+/// Wi-Fi, NTP time sync and OTA web server manager
 class NetworkManager {
 public:
     NetworkManager() = default;
 
-    /// Khởi tạo kết nối WiFi STA
+    /// Initialize Wi-Fi STA mode
     void init();
 
-    /// Kết nối Wi-Fi với SSID và Password cụ thể
+    /// Connect to Wi-Fi network with specified credentials
     WiFiConnectResult connectWiFi(const char* ssid, const char* password);
 
-    /// Ngắt kết nối Wi-Fi (tiết kiệm năng lượng)
+    /// Disconnect Wi-Fi and power down RF
     void disconnectWiFi();
 
-    /// Kiểm tra đã có mạng và giờ NTP đồng bộ thành công chưa
+    /// Check if Wi-Fi connected and time is synchronized
     bool isReady() const;
 
-    /// Kiểm tra Wi-Fi đã được kết nối chưa
+    /// Check if Wi-Fi is connected
     bool isConnected() const;
 
-    /// Ép khôi phục kết nối Wi-Fi nếu bị ngắt sau khi tỉnh giấc từ Sleep
+    /// Force RF reconnect if Wi-Fi is disconnected
     void ensureConnected();
 
-    /// Lấy chuỗi hiển thị giờ hiện tại (VD: "14:30")
+    /// Get current formatted time string ("14:30")
     String getTimeString() const;
 
-    /// Lấy chuỗi hiển thị ngày hiện tại (VD: "THỨ BẢY, 26/07/2026")
+    /// Get current formatted date string
     String getDateString() const;
 
-    /// Lấy RSSI (VD: -50 dBm)
+    /// Get Wi-Fi RSSI signal strength
     int getWifiRSSI() const;
 
-    /// Update định kỳ (nếu cần gọi trong loop/task)
+    /// Periodic update task for NTP and web server
     void update();
 
-    // --- OTA Web Server (STA mode) ---
-
-    /// Khởi tạo WebServer trên port 80 + mDNS (chạy khi đã có WiFi STA)
+    /// Start OTA WebServer on port 80 and mDNS
     void startWebServer(const char* hostname = "sendlovebox");
 
-    /// Dừng WebServer và giải phóng memory
+    /// Stop WebServer and free resources
     void stopWebServer();
 
-    /// Lấy pointer đến WebServer (để OtaHandler đăng ký routes)
+    /// Get pointer to WebServer instance
     WebServer* getWebServer();
 
-    /// Kiểm tra WebServer đang chạy không
+    /// Check if WebServer is running
     bool isWebServerRunning() const;
 
-    // --- Wi-Fi Provisioning (SoftAP + Captive Portal) ---
-
-    /// Bắt đầu chế độ SoftAP Captive Portal để cấu hình WiFi qua Web
+    /// Start SoftAP Captive Portal for Wi-Fi provisioning
     void startProvisioningAP(const char* apSsid = "SendloveBox-Setup", const char* apPassword = "");
 
-    /// Kiểm tra provisioning đã hoàn tất chưa
+    /// Check if Wi-Fi provisioning complete
     bool isProvisioningDone() const;
 
 private:
@@ -76,11 +73,9 @@ private:
     uint32_t _lastTimeSync = 0;
     void syncTime();
 
-    // OTA Web Server (STA mode)
     WebServer* _webServer = nullptr;
     bool _webServerRunning = false;
 
-    // SoftAP Provisioning
     WebServer* _captiveServer = nullptr;
     bool _provisioningDone = false;
     String _provisionedSsid;

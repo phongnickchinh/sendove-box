@@ -23,60 +23,50 @@ class DisplayDriver;
 
 /// Trạng thái hiển thị LED (giữ enum cho Phase 2)
 enum class LEDState : uint8_t {
-    OFF,            // Tắt hoàn toàn
-    BREATHING,      // Nhịp thở (có tin nhắn mới)
-    SOLID,          // Sáng liên tục
-    BLINK_FAST      // Nhấp nháy nhanh (lỗi)
+    OFF,
+    BREATHING,
+    SOLID,
+    BLINK_FAST
 };
 
+/// UI controller and touch debounce manager
 class UIController {
 public:
-    /// Khởi tạo module (Phase 1: chỉ touch + display)
-    /// @param touchPin Chân GPIO cho cảm biến TTP223
-    /// @param display Con trỏ tới DisplayDriver
+    /// Initialize touch sensor pin and display reference
     void init(uint8_t touchPin, DisplayDriver* display);
 
-    // --- LED Control (Phase 2 — no-op hiện tại) ---
     void startBreathingLED();
     void stopBreathingLED();
     void updateLED();
     void setLEDState(LEDState state);
 
-    // --- Touch Debounce ---
-
-    /// Đọc trạng thái chạm đã debounce
-    /// @return true nếu có sự kiện chạm hợp lệ (rising edge, ổn định > DEBOUNCE_MS)
+    /// Read debounced touch sensor state
     bool isTouched();
 
-    /// Reset trạng thái touch (gọi sau khi đã xử lý sự kiện chạm)
+    /// Reset touch confirmation state
     void resetTouch();
 
-    // --- Display UI ---
-
-    /// Hiển thị trạng thái "đang kết nối Wi-Fi"
+    /// Show Wi-Fi connecting screen
     void showConnecting();
 
-    /// Hiển thị trạng thái "đang tải dữ liệu"
+    /// Show data downloading screen
     void showDownloading();
 
-    /// Hiển thị lỗi
+    /// Show error message on display
     void showError(const char* message);
 
-    /// Hiển thị trang chào khi khởi động
+    /// Show startup boot logo screen
     void showBootScreen();
 
 private:
     uint8_t _touchPin = 0;
-
-    DisplayDriver*  _display = nullptr;
-
+    DisplayDriver* _display = nullptr;
     LEDState _ledState = LEDState::OFF;
 
-    // Touch debounce state
     bool     _lastTouchState   = false;
     bool     _touchConfirmed   = false;
     uint32_t _lastDebounceTime = 0;
-    uint32_t _touchStartTime    = 0;
+    uint32_t _touchStartTime   = 0;
 };
 
 #endif // UI_CONTROLLER_H

@@ -47,7 +47,13 @@ public:
     /// Get Wi-Fi RSSI signal strength
     int getWifiRSSI() const;
 
-    /// Periodic update task for NTP and web server
+    /// Trigger non-blocking NTP time sync in background task
+    void triggerNtpSync();
+
+    /// Check if time has been synchronized at least once
+    bool isTimeSynced() const;
+
+    /// Periodic update task for web server only (NTP logic moved to background task)
     void update();
 
     /// Start OTA WebServer on port 80 and mDNS
@@ -70,8 +76,10 @@ public:
 
 private:
     bool _isTimeSynced = false;
+    volatile bool _isNtpSyncing = false;
     uint32_t _lastTimeSync = 0;
-    void syncTime();
+
+    static void ntpTaskWorker(void* param);
 
     WebServer* _webServer = nullptr;
     bool _webServerRunning = false;

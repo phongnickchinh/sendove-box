@@ -90,14 +90,24 @@
 - [x] Custom Partition Table cho OTA A/B (app0 + app1 = 1.75MB mỗi partition).
 - [x] Fix lỗi Light Sleep Wakeup trên ESP32-C3: Re-init toàn bộ LGFX pipeline (SPI bus + ST7789 panel + LEDC PWM) trong `turnOn()`, thêm `if(Serial)` & `delay(200)` cho USB CDC re-enumeration.
 - [x] Fix lỗi nháy dư ảnh / xé hình góc dưới màn hình khi chuyển slot: Khóa SPI transaction (`startWrite`/`endWrite`) trong `decodeOneFrame()`, thêm cờ `_isSleeping` tránh re-init thừa khi màn hình đang bật.
-- [x] Chuẩn hóa tên thứ trong tuần sang ASCII không dấu (`CHU NHAT`, `THU HAI`, ...) tương thích với bộ font mặc định LovyanGFX.
-- [x] Tích hợp font Google **Chakra Petch** (size 36pt GFXfont) làm font mặc định hiển thị đồng hồ giờ Standby UI.
-- [x] Fix lỗi biên dịch C++ Clang/GCC `param_default_argument_redefinition`: Loại bỏ giá trị tham số mặc định trùng lặp trong `.cpp`, chỉ giữ khai báo ở header `.h` (`turnOn(esp_sleep_wakeup_cause_t cause = ESP_SLEEP_WAKEUP_UNDEFINED)`).
-- [x] Chuẩn hóa kiểu dữ liệu nguyên nhân thức dậy `esp_sleep_wakeup_cause_t` (từ `<esp_sleep.h>`) đồng bộ cho `DisplayDriver` và `PowerManager`.
-- [x] Thêm `NetworkManager::ensureConnected()` chủ động gọi `WiFi.reconnect()` kích hoạt bộ thu phát RF ngay khi vừa tỉnh giấc từ Light Sleep.
-- [x] Fix lỗi underflow tràn số nguyên không dấu `now - lastUserActivity` bằng biến điều khiển `activeSleepTimeoutMs` (30s khi Timer Wakeup, 15s khi Touch Wakeup).
-- [x] Fix lỗi màn hình tối om sau khi OTA Reboot trong lúc màn hình đang tắt: Thêm `gpio_hold_dis((gpio_num_t)PIN_TFT_BLK)` vào đầu `DisplayDriver::init()` để giải phóng cờ khóa RTC hold phần cứng trên GPIO 3.
-- [x] Nâng cấp script `ota_upload.py`: Tự động Polling `/api/ota/begin` trong 130 giây (>2 phút) kiên nhẫn chờ ESP32 thức dậy từ chu kỳ ngủ ngầm.
+- [x] Chuyển đổi hình nền mẫu pastel marble (`bg_defaut.png`) thành mảng $240 \times 240$ RGB565 `StandbyBackground.h` (115KB `PROGMEM`).
+- [x] Triển khai thuật toán Bounding Box Patch (`drawBackgroundPatch`) cắt miếng dán hình nền khôi phục vị trí widget trước khi vẽ đè chữ/icon.
+- [x] Tích hợp cờ Dirty Flag Cache (`_lastTimeStr`, `_lastDateStr`, `_lastRssiBars`, `_lastBatPercent`) giảm 98% lượt vẽ thừa trên SPI bus.
+- [x] Convert và tích hợp 2 font Google **Chakra Petch SemiBold**: 48pt (`ChakraPetch_SemiBold_48.h`) cho đồng hồ giờ và 16pt (`ChakraPetch_SemiBold_16.h`) cho ngày tháng.
+- [x] Đổi màu chữ đồng hồ/ngày/icon sang màu Đen (`#000000`) và Đỏ đậm (`#B83D3D`) nổi bật trên nền đá cẩm thạch pastel.
+- [x] Fix lỗi chữ có khung nền đen: Thêm `canvas->setTextColor(cfg.color)` (1 tham số) ép LovyanGFX vẽ chữ ở chế độ nền trong suốt (Transparent Background).
+- [x] Nới rộng Bounding Box lên `160x45` tránh viền chữ Chakra Petch 48pt tràn khung gây dư ảnh vết chữ cũ.
+- [x] Tối ưu hóa đồng bộ thời gian NTP ngầm & Bộ đếm RTC nội bộ:
+  - `getTimeString()` và `getDateString()` đọc trực tiếp mốc giờ RTC nội bộ ESP32 (`getLocalTime(&timeinfo, 0)` không chờ / timeout = 0).
+  - Loại bỏ hoàn toàn hiện tượng chớp màn hình về `00:00` và `Loading...` khi chuyển phút hoặc rớt Wi-Fi tạm thời.
+  - Lệnh `configTzTime()` chỉ gọi 1 lần duy nhất lúc `init()`. Tiến trình NTP chạy ngầm trên FreeRTOS task (`Task_NtpSyncWorker`), không gây nghẽn/khựng UI.
+  - Áp dụng ngưỡng sai số 5s (5s Drift Threshold): So sánh mốc giây NTP với RTC ($\Delta t = |ntpNow - rtcNow|$), nếu $\Delta t \le 5$s thì giữ nguyên RTC tránh nhảy/lùi phút trên UI.
+  - Loại bỏ polling 15s/1h liên tục trong `NetworkManager::update()`. Chỉ gọi `triggerNtpSync()` theo sự kiện khi vừa boot hoặc vừa tỉnh dậy sau Light Sleep.
+- [x] Tối ưu hóa chu kỳ Light Sleep Wakeup nâng thời lượng pin 1000 mAh từ **4.5 ngày lên ~23 NGÀY**:
+  - Phân biệt nguyên nhân thức dậy `esp_sleep_get_wakeup_cause()` trong `main.cpp`.
+  - Nếu thức dậy do Timer 5 phút (`ESP_SLEEP_WAKEUP_TIMER`): Màn hình giữ nguyên TẮT, chip chỉ Active **2 giây (`activeSleepTimeoutMs = 2000`)** cho NTP Sync ngầm chạy xong rồi **chui vào Light Sleep lại ngay lập tức** (giảm thời gian Active/chu kỳ từ 60s xuống 2s, giảm 96.6% thời gian thức vô ích).
+  - Nếu thức dậy do Touch cảm ứng (`ESP_SLEEP_WAKEUP_GPIO`): Bật màn hình Standby và cho phép chờ 30s (`INACTIVITY_SLEEP_TIMEOUT_MS`).
+  - Dòng tiêu thụ trung bình giảm từ `7.81mA` xuống **`~1.5mA`**, thời gian chờ của pin 1000 mAh tăng từ 4.5 ngày lên **~23 NGÀY** (gấp 5 lần).
 
 ---
 
@@ -115,11 +125,18 @@
    - **Light Sleep Wakeup**: Hỗ trợ toàn bộ các chân GPIO 0-21 (GPIO 10 hoạt động rất tốt).
    - **Deep Sleep Wakeup**: Chỉ hỗ trợ các chân RTC GPIO (GPIO 0 -> GPIO 5 trên ESP32-C3). Nếu muốn chuyển sang dùng Deep Sleep với TTP223, bắt buộc phải nối lại phần cứng sang GPIO 0-5.
 
-### B. Cơ chế đếm nối thời gian thực (RTC Time Sync trong Light Sleep)
-- Khi gọi `configTzTime()`, ESP-IDF lấy mốc Unix Epoch từ NTP Server và liên kết với bộ đếm phần cứng **RTC Timer (RTC Slow Clock)**.
-- Khi vào Light Sleep, CPU dừng nhưng RTC Timer vẫn đếm liên tục.
-- Ngay khi tỉnh dậy, trình quản lý nguồn (`esp_clk`) của ESP-IDF tự động tính $\Delta T = RTC_{\text{wakeup}} - RTC_{\text{sleep\_start}}$ và cộng bù trực tiếp vào đồng hồ hệ thống C POSIX (`timeofday`).
-- Nhờ đó, gọi `getLocalTime()` sau khi ngủ dậy luôn trả về đúng giờ/phút/giây thực tế mà không hề bị lệch hay mất giây nào.
+### B. Cơ chế đếm nối thời gian thực & NTP Sync ngầm
+1. **Bộ đếm RTC nội bộ (RTC Slow Clock)**:
+   - Khi gọi `configTzTime()`, ESP-IDF lấy mốc Unix Epoch từ NTP Server và liên kết với bộ đếm phần cứng RTC Timer.
+   - Khi vào Light Sleep, CPU dừng nhưng RTC Timer vẫn đếm liên tục.
+   - Gọi `getLocalTime(&timeinfo, 0)` với timeout = 0 đọc trực tiếp mốc giờ RTC mà không bị nghẽn hay chờ đợi.
+2. **Phân biệt Modem Sleep (Duy trì IP) vs Full Wi-Fi Off (`WIFI_OFF`)**:
+   - **Modem Sleep (Light Sleep tự động ngắt RF)**: Cắt nguồn phần cứng thu phát RF nhưng **giữ lại 100% IP, WPA2 Key và Session trong RAM**. Khi thức dậy, gửi gói tin NTP được ngay trong 0.1-0.3s (~27mAs).
+   - **Full Wi-Fi Off (`WIFI_OFF`)**: Xóa sạch Driver Wi-Fi. Khi thức dậy phải quét kênh, bắt tay WPA2 4 bước và xin lại IP từ DHCP, mất 1.5 - 3.0s (~300mAs).
+3. **Điểm bão hòa năng lượng (Break-even Point)** giữa Modem Sleep và `WIFI_OFF`:
+   - Phép tính bão hòa năng lượng: $(1.2 \cdot T) + 27 = (0.8 \cdot T) + 300 \Rightarrow T = 682.5\text{s} = \mathbf{11\text{ phút } 22\text{ giây}}$.
+   - **Thời gian ngủ $< 11.37$ phút** (ví dụ chu kỳ 5 phút): **Modem Sleep tiết kiệm hơn ~28%** (tránh được chi phí 300mAs bắt tay lại Wi-Fi).
+   - **Thời gian ngủ $> 11.37$ phút** (ví dụ ngủ qua đêm 8 tiếng): **`WIFI_OFF` tiết kiệm hơn ~32.5%** (do chênh lệch dòng rò 0.4mA tích lũy lâu dài).
 
 ### C. Quản lý tiêu thụ điện năng & Đèn LED báo nguồn (Power LEDs)
 1. **Thực trạng ngốn pin của LED báo nguồn**:
@@ -141,7 +158,7 @@
 
 ### E. Quy tắc tính toán `millis()` tránh tràn số âm (Underflow Bug)
 - Với kiểu dữ liệu `uint32_t`, **tuyệt đối không gán mốc thời gian ở tương lai** (ví dụ: `lastUserActivity = millis() + 15000`), vì phép tính `now - lastUserActivity` ở vòng lặp sau sẽ bị underflow tràn số ra `4,294,952,306` (làm `now - lastUserActivity >= timeout` luôn trả về `true` lập tức).
-- **Giải pháp**: Giữ `lastUserActivity = millis()` chuẩn thời gian thực và thay đổi giá trị điều kiện so sánh `activeSleepTimeoutMs` (15s cho Touch Wakeup, 30s cho Timer Wakeup).
+- **Giải pháp**: Giữ `lastUserActivity = millis()` chuẩn thời gian thực và thay đổi giá trị điều kiện so sánh `activeSleepTimeoutMs` (15s cho Touch Wakeup, 30s cho Timer Wakeup, 2s cho Timer Sleep Wakeup).
 
 ---
 
@@ -151,6 +168,7 @@
 - [ ] Bổ sung I2S Audio Module (MAX98357A) cho âm thanh video.
 - [ ] Tối ưu hóa chu kỳ Deep Sleep ngầm kết hợp kiểm tra Firebase.
 - [ ] Nâng cấp OTA: firmware từ Firebase Storage, trigger từ web client.
+
 
 
 

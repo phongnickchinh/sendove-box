@@ -2,6 +2,7 @@
 #include "ChakraPetch_SemiBold_48.h"
 #include "ChakraPetch_SemiBold_16.h"
 #include "CustomWifiIcons.h"
+#include "CustomBatteryIcons.h"
 #include "StandbyBackground.h"
 
 uint16_t LayoutEngine::hexToColor(const char* hex) {
@@ -31,7 +32,9 @@ bool LayoutEngine::loadConfig(const char* jsonString) {
 
         cfg.x = widget["x"] | 0;
         cfg.y = widget["y"] | 0;
-        cfg.color = hexToColor(widget["color"] | "#FFFFFF");
+        cfg.w = widget["w"] | 0;
+        cfg.h = widget["h"] | 0;
+        cfg.color = hexToColor(widget["color"] | "#000000");
         cfg.align = widget["align"] | "left";
         cfg.font = widget["font"] | "default";
         cfg.format = widget["format"] | "";
@@ -103,11 +106,11 @@ void LayoutEngine::drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkM
     String timeStr = network->getTimeString();
     if (!force && timeStr == _lastTimeStr) return;
 
-    // Bounding Box cho đồng hồ (48pt SemiBold, tâm cfg.x, cfg.y)
-    int32_t boxW = 200;
-    int32_t boxH = 60;
-    int32_t boxX = cfg.x - (boxW / 2);
-    int32_t boxY = cfg.y - (boxH / 2);
+    // Tọa độ góc trên-trái (cfg.x, cfg.y) & Bounding Box (cfg.w x cfg.h)
+    int32_t boxX = cfg.x;
+    int32_t boxY = cfg.y;
+    int32_t boxW = (cfg.w > 0) ? cfg.w : 132;
+    int32_t boxH = (cfg.h > 0) ? cfg.h : 35;
 
     canvas->startWrite();
     drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
@@ -119,17 +122,28 @@ void LayoutEngine::drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkM
         canvas->setFont(&fonts::Font7);
         canvas->setTextSize(2);
     } else {
-        // Mặc định hoặc "ChakraPetch_48" / "ChakraPetch"
+        // Mặc định hoặc "ChakraPetch_48"
         canvas->setFont(&ChakraPetch_SemiBold_48);
         canvas->setTextSize(1);
     }
 
-    if (cfg.align == "center") canvas->setTextDatum(lgfx::middle_center);
-    else if (cfg.align == "right") canvas->setTextDatum(lgfx::middle_right);
-    else canvas->setTextDatum(lgfx::middle_left);
+    // Căn giữa Bounding Box tại (boxX + boxW/2, boxY + boxH/2)
+    int32_t centerX = boxX + (boxW / 2);
+    int32_t centerY = boxY + (boxH / 2);
 
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(timeStr.c_str(), cfg.x, cfg.y);
+    if (cfg.align == "left") {
+        canvas->setTextDatum(lgfx::middle_left);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(timeStr.c_str(), boxX, centerY);
+    } else if (cfg.align == "right") {
+        canvas->setTextDatum(lgfx::middle_right);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(timeStr.c_str(), boxX + boxW, centerY);
+    } else {
+        canvas->setTextDatum(lgfx::middle_center);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(timeStr.c_str(), centerX, centerY);
+    }
 
     canvas->setTextSize(1);
     canvas->setFont(nullptr);
@@ -142,11 +156,11 @@ void LayoutEngine::drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkM
     String dateStr = network->getDateString();
     if (!force && dateStr == _lastDateStr) return;
 
-    // Bounding Box cho ngày tháng (16pt SemiBold, tâm cfg.x, cfg.y)
-    int32_t boxW = 230;
-    int32_t boxH = 30;
-    int32_t boxX = cfg.x - (boxW / 2);
-    int32_t boxY = cfg.y - (boxH / 2);
+    // Tọa độ góc trên-trái (cfg.x, cfg.y) & Bounding Box (cfg.w x cfg.h)
+    int32_t boxX = cfg.x;
+    int32_t boxY = cfg.y;
+    int32_t boxW = (cfg.w > 0) ? cfg.w : 140;
+    int32_t boxH = (cfg.h > 0) ? cfg.h : 16;
 
     canvas->startWrite();
     drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
@@ -160,12 +174,23 @@ void LayoutEngine::drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkM
         canvas->setFont(&ChakraPetch_SemiBold_16);
     }
 
-    if (cfg.align == "center") canvas->setTextDatum(lgfx::middle_center);
-    else if (cfg.align == "right") canvas->setTextDatum(lgfx::middle_right);
-    else canvas->setTextDatum(lgfx::middle_left);
+    // Căn lề trái & căn giữa dọc theo Y tại (boxX, boxY + boxH/2)
+    int32_t centerY = boxY + (boxH / 2);
 
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(dateStr.c_str(), cfg.x, cfg.y);
+    if (cfg.align == "center") {
+        canvas->setTextDatum(lgfx::middle_center);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(dateStr.c_str(), boxX + (boxW / 2), centerY);
+    } else if (cfg.align == "right") {
+        canvas->setTextDatum(lgfx::middle_right);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(dateStr.c_str(), boxX + boxW, centerY);
+    } else {
+        canvas->setTextDatum(lgfx::middle_left);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(dateStr.c_str(), boxX, centerY);
+    }
+
     canvas->setFont(nullptr);
     canvas->endWrite();
 
@@ -191,20 +216,21 @@ void LayoutEngine::drawWifiIcon(LGFX* canvas, const WidgetConfig& cfg, NetworkMa
 }
 
 void LayoutEngine::drawBatteryIcon(LGFX* canvas, const WidgetConfig& cfg, bool force) {
-    int percentage = 80;
-    if (!force && percentage == _lastBatPercent) return;
+    // Giả lập nấc pin (4/4 = 100%, 3/4 = 75%, 2/4 = 50%, 1/4 = 25%, 0/4 = 10%)
+    int state = 4;
+    if (!force && state == _lastBatPercent) return;
+
+    int32_t boxX = cfg.x;
+    int32_t boxY = cfg.y;
+    int32_t boxW = (cfg.w > 0) ? cfg.w : BATTERY_ICON_WIDTH;
+    int32_t boxH = (cfg.h > 0) ? cfg.h : BATTERY_ICON_HEIGHT;
 
     canvas->startWrite();
-    drawBackgroundPatch(canvas, cfg.x, cfg.y, 28, 14);
+    drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
 
-    canvas->drawRect(cfg.x, cfg.y, 24, 12, cfg.color);
-    canvas->fillRect(cfg.x + 24, cfg.y + 3, 2, 6, cfg.color);
-    
-    uint16_t color = (percentage <= 20) ? TFT_RED : (cfg.color == TFT_BLACK ? TFT_BLACK : TFT_GREEN);
-    int fillWidth = (20 * percentage) / 100;
-    canvas->fillRect(cfg.x + 2, cfg.y + 2, fillWidth, 8, color);
-
+    // Vẽ icon pin 5 trạng thái (75x16 px)
+    canvas->pushImage(boxX, boxY, BATTERY_ICON_WIDTH, BATTERY_ICON_HEIGHT, BATTERY_ICONS[state], BATTERY_TRANSPARENT_COLOR);
     canvas->endWrite();
 
-    _lastBatPercent = percentage;
+    _lastBatPercent = state;
 }

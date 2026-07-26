@@ -10,6 +10,8 @@ static DNSServer dnsServer;
 void NetworkManager::init() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    // Initialize timezone once at boot
+    configTzTime("ICT-7", NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 }
 
 WiFiConnectResult NetworkManager::connectWiFi(const char* ssid, const char* password) {
@@ -22,7 +24,7 @@ WiFiConnectResult NetworkManager::connectWiFi(const char* ssid, const char* pass
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        syncTime();
+        triggerNtpSync();
         return WiFiConnectResult::CONNECTED;
     }
     return WiFiConnectResult::FAILED;
@@ -31,7 +33,6 @@ WiFiConnectResult NetworkManager::connectWiFi(const char* ssid, const char* pass
 void NetworkManager::disconnectWiFi() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    _isTimeSynced = false;
 }
 
 bool NetworkManager::isReady() const {
@@ -48,6 +49,10 @@ void NetworkManager::ensureConnected() {
     }
 }
 
+bool NetworkManager::isTimeSynced() const {
+    return _isTimeSynced;
+}
+
 void NetworkManager::update() {
     if (_captiveServer != nullptr) {
         dnsServer.processNextRequest();
@@ -58,33 +63,65 @@ void NetworkManager::update() {
     if (_webServerRunning && _webServer != nullptr) {
         _webServer->handleClient();
     }
+}
 
-    if (WiFi.status() != WL_CONNECTED) {
-        _isTimeSynced = false;
+void NetworkManager::triggerNtpSync() {
+    if (WiFi.status() != WL_CONNECTED) return;
+    if (_isNtpSyncing) return;
+
+    _isNtpSyncing = true;
+    xTaskCreate(ntpTaskWorker, "NtpSync", 4096, this, 1, nullptr);
+}
+
+void NetworkManager::ntpTaskWorker(void* param) {
+    NetworkManager* self = static_cast<NetworkManager*>(param);
+    if (self == nullptr) {
+        vTaskDelete(nullptr);
         return;
     }
 
-    uint32_t now = millis();
-    uint32_t syncInterval = _isTimeSynced ? 3600000 : 15000;
+    Serial.println("[NetworkManager] Background NTP sync started...");
 
-    if (now - _lastTimeSync >= syncInterval || _lastTimeSync == 0) {
-        _lastTimeSync = now;
-        syncTime();
-    }
-}
-
-void NetworkManager::syncTime() {
-    configTzTime("ICT-7", NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+    // Record RTC time BEFORE waiting for NTP response
+    time_t rtcBefore = time(nullptr);
 
     struct tm timeinfo;
-    _isTimeSynced = getLocalTime(&timeinfo, 10000);
+    // Wait for NTP update in background task (up to 10 seconds timeout)
+    bool syncOk = getLocalTime(&timeinfo, 10000);
+
+    if (syncOk) {
+        time_t ntpNow = mktime(&timeinfo);
+        time_t rtcNow = time(nullptr);
+
+        if (!self->_isTimeSynced) {
+            // First time sync after boot
+            self->_isTimeSynced = true;
+            Serial.printf("[NetworkManager] First NTP sync successful! Current year: %d\n", timeinfo.tm_year + 1900);
+        } else {
+            // Compare drift between NTP time and running RTC time
+            long diffSec = std::abs((long)(ntpNow - rtcNow));
+            Serial.printf("[NetworkManager] NTP Sync completed. RTC drift: %ld sec\n", diffSec);
+
+            // If drift is larger than 5 seconds, settimeofday was already applied by getLocalTime/sntp.
+            // If drift <= 5 seconds, settimeofday adjustment is minor and ignored to prevent screen jumps.
+            if (diffSec > 5) {
+                Serial.println("[NetworkManager] Large RTC drift detected (> 5s). System time updated.");
+            }
+        }
+    } else {
+        Serial.println("[NetworkManager] Background NTP sync timeout / failed.");
+    }
+
+    self->_isNtpSyncing = false;
+    vTaskDelete(nullptr);
 }
 
 String NetworkManager::getTimeString() const {
     if (!_isTimeSynced) return "00:00";
 
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo, 10)) return "00:00";
+    // Non-blocking read from internal ESP32 RTC (timeout = 0)
+    if (!getLocalTime(&timeinfo, 0)) return "00:00";
 
     char buffer[10];
     strftime(buffer, sizeof(buffer), "%H:%M", &timeinfo);
@@ -95,16 +132,16 @@ String NetworkManager::getDateString() const {
     if (!_isTimeSynced) return "Loading...";
 
     struct tm timeinfo;
-    if (!getLocalTime(&timeinfo, 10)) return "Loading...";
+    // Non-blocking read from internal ESP32 RTC (timeout = 0)
+    if (!getLocalTime(&timeinfo, 0)) return "Loading...";
 
     const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sar"};
 
     char buffer[32];
-    snprintf(buffer, sizeof(buffer), "%s, %02d.%02d.%04d",
+    snprintf(buffer, sizeof(buffer), "%s, %02d.%02d",
              days[timeinfo.tm_wday],
              timeinfo.tm_mday,
-             timeinfo.tm_mon + 1,
-             timeinfo.tm_year + 1900);
+             timeinfo.tm_mon + 1);
 
     return String(buffer);
 }

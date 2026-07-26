@@ -53,13 +53,13 @@ enum class AppState {
 AppState currentAppState = AppState::STATE_STANDBY;
 
 const char* defaultLayoutJson = R"({
-  "theme_name": "Cyberpunk Clock",
+  "theme_name": "Pastel Marble Clock",
   "background": "",
-  "widgets": [
-    { "type": "clock_time", "format": "HH:MM", "x": 120, "y": 90, "align": "center", "font": "Orbitron_32", "color": "#00FFFF" },
-    { "type": "clock_date", "format": "WEEKDAY, DD/MM/YYYY", "x": 120, "y": 150, "align": "center", "font": "Roboto_14", "color": "#FFFFFF" },
-    { "type": "wifi_icon", "x": 10, "y": 10, "color": "#00FF00" },
-    { "type": "battery_icon", "x": 200, "y": 10, "color": "#00FF00" }
+  "widgets": [dùng font Chakra Petch 16 semibold
+    { "type": "clock_time", "format": "HH:MM", "x": 120, "y": 95, "align": "center", "font": "ChakraPetch_48", "color": "#000000" },
+    { "type": "clock_date", "format": "WEEKDAY, DD/MM/YYYY", "x": 120, "y": 150, "align": "center", "font": "ChakraPetch_16", "color": "#000000" },
+    { "type": "wifi_icon", "x": 20, "y": 20, "color": "#000000" },
+    { "type": "battery_icon", "x": 195, "y": 20, "color": "#000000" }
   ]
 })";
 

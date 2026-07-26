@@ -91,6 +91,7 @@
 - [x] Fix lỗi Light Sleep Wakeup trên ESP32-C3: Re-init toàn bộ LGFX pipeline (SPI bus + ST7789 panel + LEDC PWM) trong `turnOn()`, thêm `if(Serial)` & `delay(200)` cho USB CDC re-enumeration.
 - [x] Fix lỗi nháy dư ảnh / xé hình góc dưới màn hình khi chuyển slot: Khóa SPI transaction (`startWrite`/`endWrite`) trong `decodeOneFrame()`, thêm cờ `_isSleeping` tránh re-init thừa khi màn hình đang bật.
 - [x] Chuẩn hóa tên thứ trong tuần sang ASCII không dấu (`CHU NHAT`, `THU HAI`, ...) tương thích với bộ font mặc định LovyanGFX.
+- [x] Tích hợp font Google **Chakra Petch** (size 36pt GFXfont) làm font mặc định hiển thị đồng hồ giờ Standby UI.
 - [x] Fix lỗi biên dịch C++ Clang/GCC `param_default_argument_redefinition`: Loại bỏ giá trị tham số mặc định trùng lặp trong `.cpp`, chỉ giữ khai báo ở header `.h` (`turnOn(esp_sleep_wakeup_cause_t cause = ESP_SLEEP_WAKEUP_UNDEFINED)`).
 - [x] Chuẩn hóa kiểu dữ liệu nguyên nhân thức dậy `esp_sleep_wakeup_cause_t` (từ `<esp_sleep.h>`) đồng bộ cho `DisplayDriver` và `PowerManager`.
 - [x] Thêm `NetworkManager::ensureConnected()` chủ động gọi `WiFi.reconnect()` kích hoạt bộ thu phát RF ngay khi vừa tỉnh giấc từ Light Sleep.

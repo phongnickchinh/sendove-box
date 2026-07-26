@@ -44,7 +44,7 @@ static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 
 // Timing & Power Constants
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
-static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 15000; // TODO: Increase to 60000-300000 for production
+static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 30000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr uint8_t WIFI_RETRY_MAX = 3;
 static constexpr uint32_t TOUCH_DEBOUNCE_MS = 50;

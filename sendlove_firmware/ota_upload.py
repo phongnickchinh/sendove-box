@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """
-OTA Push Upload Script cho Sendlove Box (ESP32-C3).
+OTA Push Upload Script for Sendlove Box (ESP32-C3).
 
-Cách dùng:
-  python ota_upload.py                         # Dùng mDNS mặc định
-  python ota_upload.py --host 192.168.1.100    # Chỉ định IP
-  python ota_upload.py --bin path/to/firmware.bin  # Chỉ định file firmware
+Usage:
+  python ota_upload.py                         # Default mDNS hostname
+  python ota_upload.py --host 192.168.1.100    # Specific IP address
+  python ota_upload.py --bin path/to/firmware.bin  # Specific firmware binary file
 
-Luồng:
-  1. Đọc firmware .bin, tính MD5
-  2. POST /api/ota/begin  → ESP32 chuẩn bị flash
-  3. POST /api/ota/upload → Gửi firmware binary
-  4. ESP32 tự restart với firmware mới
-
-Fork từ phong_ir/ota_upload.py, điều chỉnh cho ESP32-C3.
+Workflow:
+  1. Read firmware binary, compute MD5
+  2. POST /api/ota/begin  -> ESP32 prepares flash partition
+  3. POST /api/ota/upload -> Send firmware binary
+  4. ESP32 automatically restarts with new firmware
 """
 
 import argparse
@@ -25,12 +23,12 @@ import time
 try:
     import requests
 except ImportError:
-    print("ERROR: Cần cài thư viện 'requests'.")
+    print("ERROR: Missing 'requests' library.")
     print("       pip install requests")
     sys.exit(1)
 
-# ---------- defaults ----------
-DEFAULT_HOST = "sendlovebox"         # Sử dụng mDNS
+# Defaults
+DEFAULT_HOST = "sendlovebox"  # mDNS hostname
 DEFAULT_PORT = 80
 DEFAULT_BIN  = ".pio/build/esp32-c3-devkitm-1/firmware.bin"
 TIMEOUT      = 30  # seconds
@@ -47,9 +45,8 @@ def md5_of_file(path: str) -> str:
 def ota_upload(host: str, port: int, bin_path: str):
     base_url = f"http://{host}:{port}"
 
-    # --- Kiểm tra file ---
     if not os.path.isfile(bin_path):
-        print(f"[ERROR] Không tìm thấy firmware: {bin_path}")
+        print(f"[ERROR] Firmware binary file not found: {bin_path}")
         sys.exit(1)
 
     fw_size = os.path.getsize(bin_path)
@@ -64,15 +61,15 @@ def ota_upload(host: str, port: int, bin_path: str):
     print(f"  MD5  : {fw_md5}")
     print(f"============================================")
 
-    # --- Bước 1: POST /api/ota/begin (Tự động retry chờ ESP32 thức dậy từ Sleep) ---
-    print("\n[1/2] Đang chờ và kết nối tới ESP32 (/api/ota/begin)...")
-    print("      (Nếu ESP32 đang ngủ, script sẽ tự động thử lại trong 130s cho đến khi chip tỉnh)...")
-
-    max_wait_time = 130  # Chờ tối đa 130 giây (> 2 phút)
+    # Step 1: POST /api/ota/begin (Auto-retry loop while ESP32 is sleeping)
+    max_wait_time = 310  # Wait up to 310 seconds (> 5 minutes)
     start_time = time.time()
-    retry_interval = 3   # Thử lại mỗi 3 giây
+    retry_interval = 3   # Retry every 3 seconds
     connected = False
     r = None
+
+    print("\n[1/2] Connecting to ESP32 (/api/ota/begin)...")
+    print(f"      (If ESP32 is sleeping, script will auto-retry for {max_wait_time}s until device wakes)...")
 
     while time.time() - start_time < max_wait_time:
         try:
@@ -88,29 +85,29 @@ def ota_upload(host: str, port: int, bin_path: str):
             pass
 
         elapsed = int(time.time() - start_time)
-        print(f"      [Chờ ESP32 tỉnh...] Đang thử lại ({elapsed}s / {max_wait_time}s)...", end="\r", flush=True)
+        print(f"      [Waiting for ESP32...] Retrying ({elapsed}s / {max_wait_time}s)...", end="\r", flush=True)
         time.sleep(retry_interval)
 
-    print() # Xuống dòng sau tiến trình polling
+    print()  # New line after polling progress
 
     if not connected or r is None:
-        print(f"[ERROR] Không kết nối được tới {base_url} sau {max_wait_time} giây.")
-        print(f"        Kiểm tra ESP32 đã kết nối WiFi và IP đúng chưa.")
+        print(f"[ERROR] Could not connect to {base_url} after {max_wait_time} seconds.")
+        print(f"        Verify ESP32 is connected to Wi-Fi and IP/hostname is correct.")
         sys.exit(1)
 
     if r.status_code != 200:
-        print(f"[ERROR] ESP32 trả lời: {r.status_code} — {r.text}")
+        print(f"[ERROR] ESP32 returned status {r.status_code}: {r.text}")
         sys.exit(1)
 
     resp = r.json()
     if not resp.get("ready"):
-        print(f"[ERROR] ESP32 chưa sẵn sàng: {resp}")
+        print(f"[ERROR] ESP32 not ready: {resp}")
         sys.exit(1)
 
-    print("       -> ESP32 đã tỉnh và sẵn sàng nhận firmware (OK)")
+    print("       -> ESP32 awake and ready for firmware update (OK)")
 
-    # --- Bước 2: POST /api/ota/upload ---
-    print("[2/2] Dang truyen firmware ...")
+    # Step 2: POST /api/ota/upload
+    print("[2/2] Uploading firmware binary...")
     start = time.time()
 
     with open(bin_path, "rb") as f:
@@ -125,23 +122,23 @@ def ota_upload(host: str, port: int, bin_path: str):
     if r.status_code == 200:
         resp = r.json()
         print(f"\n============================================")
-        print(f"  [OK] OTA THANH CONG! ({elapsed:.1f}s)")
+        print(f"  [OK] OTA UPLOAD SUCCESSFUL! ({elapsed:.1f}s)")
         print(f"  -> {resp.get('msg', '')}")
-        print(f"  Sendlove Box dang restart...")
+        print(f"  Sendlove Box is restarting...")
         print(f"============================================")
     else:
-        print(f"\n[ERROR] Upload that bai: {r.status_code} — {r.text}")
+        print(f"\n[ERROR] Upload failed status {r.status_code}: {r.text}")
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Sendlove Box OTA Push Upload")
+    parser = argparse.ArgumentParser(description="Sendlove Box OTA Push Upload Script")
     parser.add_argument("--host", default=DEFAULT_HOST,
-                        help=f"Hostname/IP của ESP32 (mặc định: {DEFAULT_HOST})")
+                        help=f"ESP32 Hostname/IP address (default: {DEFAULT_HOST})")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"Port (mặc định: {DEFAULT_PORT})")
+                        help=f"Port number (default: {DEFAULT_PORT})")
     parser.add_argument("--bin", default=DEFAULT_BIN,
-                        help=f"Đường dẫn firmware .bin (mặc định: {DEFAULT_BIN})")
+                        help=f"Path to firmware .bin file (default: {DEFAULT_BIN})")
     args = parser.parse_args()
 
     ota_upload(args.host, args.port, args.bin)

@@ -97,10 +97,10 @@ String NetworkManager::getDateString() const {
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo, 10)) return "Loading...";
 
-    const char* days[] = {"CHU NHAT", "THU HAI", "THU BA", "THU TU", "THU NAM", "THU SAU", "THU BAY"};
+    const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sar"};
 
     char buffer[32];
-    snprintf(buffer, sizeof(buffer), "%s, %02d/%02d/%04d",
+    snprintf(buffer, sizeof(buffer), "%s, %02d.%02d.%04d",
              days[timeinfo.tm_wday],
              timeinfo.tm_mday,
              timeinfo.tm_mon + 1,

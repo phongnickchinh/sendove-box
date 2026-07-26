@@ -37,17 +37,29 @@ public:
     /// Render standby UI screen widgets
     void renderStandbyScreen(DisplayDriver* display, NetworkManager* network, bool fullRedraw = false);
 
+    /// Invalidate cached widget state to force full redraw of all widgets
+    void invalidateCache();
+
+    /// Draw a section of the static background image at (x, y, w, h)
+    void drawBackgroundPatch(LGFX* canvas, int32_t x, int32_t y, int32_t w, int32_t h);
+
 private:
     std::vector<WidgetConfig> _widgets;
     uint16_t _bgColor = TFT_BLACK;
+
+    // Cache variables for Dirty Flag optimization
+    String _lastTimeStr = "";
+    String _lastDateStr = "";
+    int    _lastRssiBars = -1;
+    int    _lastBatPercent = -1;
     
     /// Convert HEX color string (#FFFFFF) to RGB565 format
     uint16_t hexToColor(const char* hex);
 
-    void drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network);
-    void drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network);
-    void drawWifiIcon(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network);
-    void drawBatteryIcon(LGFX* canvas, const WidgetConfig& cfg);
+    void drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);
+    void drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);
+    void drawWifiIcon(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);
+    void drawBatteryIcon(LGFX* canvas, const WidgetConfig& cfg, bool force);
 };
 
 #endif // LAYOUT_ENGINE_H

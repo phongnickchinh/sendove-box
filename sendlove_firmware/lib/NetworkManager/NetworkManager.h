@@ -39,10 +39,10 @@ public:
     void ensureConnected();
 
     /// Get current formatted time string ("14:30")
-    String getTimeString() const;
+    void getTimeString(char* buffer, size_t maxLen) const;
 
     /// Get current formatted date string
-    String getDateString() const;
+    void getDateString(char* buffer, size_t maxLen) const;
 
     /// Get Wi-Fi RSSI signal strength
     int getWifiRSSI() const;

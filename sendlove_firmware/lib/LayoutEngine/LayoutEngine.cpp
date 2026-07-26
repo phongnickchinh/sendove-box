@@ -75,8 +75,8 @@ bool LayoutEngine::loadConfig(const char *jsonString) {
 }
 
 void LayoutEngine::invalidateCache() {
-  _lastTimeStr = "";
-  _lastDateStr = "";
+  _lastTimeStr[0] = '\0';
+  _lastDateStr[0] = '\0';
   _lastRssiBars = -1;
   _lastBatPercent = -1;
   _lastChipTemp = -999;
@@ -146,11 +146,10 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver *display,
   display->releaseSPI();
 }
 
-void LayoutEngine::drawClockTime(LGFX *canvas, const WidgetConfig &cfg,
-                                 NetworkManager *network, bool force) {
-  String timeStr = network->getTimeString();
-  if (!force && timeStr == _lastTimeStr)
-    return;
+void LayoutEngine::drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force) {
+    char timeStr[16];
+    network->getTimeString(timeStr, sizeof(timeStr));
+    if (!force && strcmp(timeStr, _lastTimeStr) == 0) return;
 
   // Tọa độ góc trên-trái (cfg.x, cfg.y) & Bounding Box (cfg.w x cfg.h)
   int32_t boxX = cfg.x;
@@ -177,32 +176,32 @@ void LayoutEngine::drawClockTime(LGFX *canvas, const WidgetConfig &cfg,
   int32_t centerX = boxX + (boxW / 2);
   int32_t centerY = boxY + (boxH / 2);
 
-  if (cfg.align == "left") {
-    canvas->setTextDatum(lgfx::middle_left);
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(timeStr.c_str(), boxX, centerY);
-  } else if (cfg.align == "right") {
-    canvas->setTextDatum(lgfx::middle_right);
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(timeStr.c_str(), boxX + boxW, centerY);
-  } else {
-    canvas->setTextDatum(lgfx::middle_center);
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(timeStr.c_str(), centerX, centerY);
-  }
+    if (cfg.align == "left") {
+        canvas->setTextDatum(lgfx::middle_left);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(timeStr, boxX, centerY);
+    } else if (cfg.align == "right") {
+        canvas->setTextDatum(lgfx::middle_right);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(timeStr, boxX + boxW, centerY);
+    } else {
+        canvas->setTextDatum(lgfx::middle_center);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(timeStr, centerX, centerY);
+    }
 
   canvas->setTextSize(1);
   canvas->setFont(nullptr);
   canvas->endWrite();
 
-  _lastTimeStr = timeStr;
+    strncpy(_lastTimeStr, timeStr, sizeof(_lastTimeStr) - 1);
+    _lastTimeStr[sizeof(_lastTimeStr) - 1] = '\0';
 }
 
-void LayoutEngine::drawClockDate(LGFX *canvas, const WidgetConfig &cfg,
-                                 NetworkManager *network, bool force) {
-  String dateStr = network->getDateString();
-  if (!force && dateStr == _lastDateStr)
-    return;
+void LayoutEngine::drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force) {
+    char dateStr[32];
+    network->getDateString(dateStr, sizeof(dateStr));
+    if (!force && strcmp(dateStr, _lastDateStr) == 0) return;
 
   // Tọa độ góc trên-trái (cfg.x, cfg.y) & Bounding Box (cfg.w x cfg.h)
   int32_t boxX = cfg.x;
@@ -225,24 +224,25 @@ void LayoutEngine::drawClockDate(LGFX *canvas, const WidgetConfig &cfg,
   // Căn lề trái & căn giữa dọc theo Y tại (boxX, boxY + boxH/2)
   int32_t centerY = boxY + (boxH / 2);
 
-  if (cfg.align == "center") {
-    canvas->setTextDatum(lgfx::middle_center);
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(dateStr.c_str(), boxX + (boxW / 2), centerY);
-  } else if (cfg.align == "right") {
-    canvas->setTextDatum(lgfx::middle_right);
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(dateStr.c_str(), boxX + boxW, centerY);
-  } else {
-    canvas->setTextDatum(lgfx::middle_left);
-    canvas->setTextColor(cfg.color);
-    canvas->drawString(dateStr.c_str(), boxX, centerY);
-  }
+    if (cfg.align == "center") {
+        canvas->setTextDatum(lgfx::middle_center);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(dateStr, boxX + (boxW / 2), centerY);
+    } else if (cfg.align == "right") {
+        canvas->setTextDatum(lgfx::middle_right);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(dateStr, boxX + boxW, centerY);
+    } else {
+        canvas->setTextDatum(lgfx::middle_left);
+        canvas->setTextColor(cfg.color);
+        canvas->drawString(dateStr, boxX, centerY);
+    }
 
   canvas->setFont(nullptr);
   canvas->endWrite();
 
-  _lastDateStr = dateStr;
+    strncpy(_lastDateStr, dateStr, sizeof(_lastDateStr) - 1);
+    _lastDateStr[sizeof(_lastDateStr) - 1] = '\0';
 }
 
 void LayoutEngine::drawWifiIcon(LGFX *canvas, const WidgetConfig &cfg,

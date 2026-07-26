@@ -51,8 +51,8 @@ private:
     uint16_t _bgColor = TFT_BLACK;
 
     // Cache variables for Dirty Flag optimization
-    String _lastTimeStr = "";
-    String _lastDateStr = "";
+    char _lastTimeStr[16] = "";
+    char _lastDateStr[32] = "";
     int    _lastRssiBars = -1;
     int    _lastBatPercent = -1;
     int    _lastChipTemp = -999;

@@ -2,7 +2,7 @@
 #include <Update.h>
 #include "config.h"
 
-void OtaHandler::sendJson(WebServer& server, int code, const String& body) {
+void OtaHandler::sendJson(WebServer& server, int code, const char* body) {
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.sendHeader("Connection", "close");
     server.send(code, "application/json", body);
@@ -23,8 +23,9 @@ void OtaHandler::handleBegin(WebServer& server) {
     }
 
     if (!Update.begin(fwSize)) {
-        String err = Update.errorString();
-        sendJson(server, 500, "{\"ready\":false,\"error\":\"" + err + "\"}");
+        char errBuf[128];
+        snprintf(errBuf, sizeof(errBuf), "{\"ready\":false,\"error\":\"%s\"}", Update.errorString());
+        sendJson(server, 500, errBuf);
         return;
     }
 
@@ -36,9 +37,10 @@ void OtaHandler::handleBegin(WebServer& server) {
 
 void OtaHandler::handleUploadDone(WebServer& server) {
     if (Update.hasError()) {
-        String err = Update.errorString();
+        char errBuf[128];
+        snprintf(errBuf, sizeof(errBuf), "{\"ok\":false,\"error\":\"%s\"}", Update.errorString());
         _isUpdating = false;
-        sendJson(server, 500, "{\"ok\":false,\"error\":\"" + err + "\"}");
+        sendJson(server, 500, errBuf);
     } else {
         sendJson(server, 200, "{\"ok\":true,\"msg\":\"Update success, restarting...\"}");
         delay(1000);
@@ -78,9 +80,9 @@ void OtaHandler::registerRoutes(WebServer& server) {
     );
 
     server.on("/api/status", HTTP_GET, [this, &server]() {
-        String body = "{\"ok\":true,\"version\":\"" + String(FW_VERSION) +
-                      "\",\"updating\":" + String(_isUpdating ? "true" : "false") +
-                      ",\"heap\":" + String(ESP.getFreeHeap()) + "}";
+        char body[128];
+        snprintf(body, sizeof(body), "{\"ok\":true,\"version\":\"%s\",\"updating\":%s,\"heap\":%u}",
+                 FW_VERSION, _isUpdating ? "true" : "false", ESP.getFreeHeap());
         sendJson(server, 200, body);
     });
 }

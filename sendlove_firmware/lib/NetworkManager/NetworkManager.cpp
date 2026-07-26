@@ -116,34 +116,43 @@ void NetworkManager::ntpTaskWorker(void* param) {
     vTaskDelete(nullptr);
 }
 
-String NetworkManager::getTimeString() const {
-    if (!_isTimeSynced) return "00:00";
+void NetworkManager::getTimeString(char* buffer, size_t maxLen) const {
+    if (buffer == nullptr || maxLen == 0) return;
+    if (!_isTimeSynced) {
+        snprintf(buffer, maxLen, "00:00");
+        return;
+    }
 
     struct tm timeinfo;
     // Non-blocking read from internal ESP32 RTC (timeout = 0)
-    if (!getLocalTime(&timeinfo, 0)) return "00:00";
+    if (!getLocalTime(&timeinfo, 0)) {
+        snprintf(buffer, maxLen, "00:00");
+        return;
+    }
 
-    char buffer[10];
-    strftime(buffer, sizeof(buffer), "%H:%M", &timeinfo);
-    return String(buffer);
+    strftime(buffer, maxLen, "%H:%M", &timeinfo);
 }
 
-String NetworkManager::getDateString() const {
-    if (!_isTimeSynced) return "Loading...";
+void NetworkManager::getDateString(char* buffer, size_t maxLen) const {
+    if (buffer == nullptr || maxLen == 0) return;
+    if (!_isTimeSynced) {
+        snprintf(buffer, maxLen, "Loading...");
+        return;
+    }
 
     struct tm timeinfo;
     // Non-blocking read from internal ESP32 RTC (timeout = 0)
-    if (!getLocalTime(&timeinfo, 0)) return "Loading...";
+    if (!getLocalTime(&timeinfo, 0)) {
+        snprintf(buffer, maxLen, "Loading...");
+        return;
+    }
 
     const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sar"};
 
-    char buffer[32];
-    snprintf(buffer, sizeof(buffer), "%s, %02d.%02d",
+    snprintf(buffer, maxLen, "%s, %02d.%02d",
              days[timeinfo.tm_wday],
              timeinfo.tm_mday,
              timeinfo.tm_mon + 1);
-
-    return String(buffer);
 }
 
 int NetworkManager::getWifiRSSI() const {

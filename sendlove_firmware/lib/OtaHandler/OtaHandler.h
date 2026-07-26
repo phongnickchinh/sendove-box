@@ -26,7 +26,7 @@ public:
 private:
     volatile bool _isUpdating = false;
 
-    static void sendJson(WebServer& server, int code, const String& body);
+    static void sendJson(WebServer& server, int code, const char* body);
     void handleBegin(WebServer& server);
     void handleUploadDone(WebServer& server);
     void handleUploadData(WebServer& server);

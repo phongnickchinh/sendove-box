@@ -9,7 +9,6 @@ static DNSServer dnsServer;
 
 void NetworkManager::init() {
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     // Initialize timezone once at boot
     configTzTime("ICT-7", NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 }
@@ -180,9 +179,15 @@ bool NetworkManager::isProvisioningDone() const {
     return _provisioningDone;
 }
 
+bool NetworkManager::isProvisioningActive() const {
+    return (_captiveServer != nullptr && !_provisioningDone);
+}
+
 void NetworkManager::handleCaptiveRoot() {
     if (_captiveServer) _captiveServer->send(200, "text/html", buildCaptivePortalHTML());
 }
+
+#include "ConfigManager.h"
 
 void NetworkManager::handleCaptiveSubmit() {
     if (!_captiveServer) return;
@@ -192,8 +197,18 @@ void NetworkManager::handleCaptiveSubmit() {
         _provisionedPass = _captiveServer->arg("password");
         _provisioningDone = true;
 
-        String html = "<html><body><h2>Success!</h2><p>Connecting Wi-Fi...</p></body></html>";
+        ConfigManager cfg;
+        if (cfg.init(NVS_NAMESPACE)) {
+            cfg.saveWiFi(_provisionedSsid.c_str(), _provisionedPass.c_str());
+            cfg.end();
+        }
+
+        String html = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head>"
+                      "<body style='font-family:sans-serif;text-align:center;padding-top:40px;'>"
+                      "<h2>Saved Wi-Fi!</h2><p>Sendlove Box is restarting...</p></body></html>";
         _captiveServer->send(200, "text/html", html);
+        delay(2000);
+        ESP.restart();
     } else {
         _captiveServer->send(400, "text/plain", "Missing SSID or Password!");
     }

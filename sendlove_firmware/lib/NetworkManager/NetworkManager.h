@@ -74,6 +74,9 @@ public:
     /// Check if Wi-Fi provisioning complete
     bool isProvisioningDone() const;
 
+    /// Check if Wi-Fi provisioning portal is currently active
+    bool isProvisioningActive() const;
+
 private:
     bool _isTimeSynced = false;
     volatile bool _isNtpSyncing = false;

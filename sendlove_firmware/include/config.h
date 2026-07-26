@@ -44,7 +44,8 @@ static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 
 // Timing & Power Constants
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
-static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 30000; // TODO: Increase to 60000-300000 for production
+static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS =
+    30000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr uint8_t WIFI_RETRY_MAX = 3;
 static constexpr uint32_t TOUCH_DEBOUNCE_MS = 50;
@@ -72,12 +73,12 @@ static constexpr const char *FIREBASE_API_KEY = "YOUR_API_KEY";
 static constexpr const char *BOX_ID = "box_id_001";
 
 // OTA Configuration
-static constexpr const char* OTA_HOSTNAME = "sendlovebox";
-static constexpr const char* FW_VERSION = "2.1.0";
+static constexpr const char *OTA_HOSTNAME = "sendlovebox";
+static constexpr const char *FW_VERSION = "2.1.0";
 
-// Wi-Fi & NTP Configuration
-static constexpr const char *WIFI_SSID = "@Ruijie-s4617";
-static constexpr const char *WIFI_PASSWORD = "56Daiyen";
+// Wi-Fi & NTP Configuration (Fallback credentials if NVS is empty)
+static constexpr const char *DEFAULT_WIFI_SSID = "@Ruijie-s4617";
+static constexpr const char *DEFAULT_WIFI_PASSWORD = "56Daiyen";
 
 static constexpr const char *NTP_SERVER_1 = "time.google.com";
 static constexpr const char *NTP_SERVER_2 = "asia.pool.ntp.org";

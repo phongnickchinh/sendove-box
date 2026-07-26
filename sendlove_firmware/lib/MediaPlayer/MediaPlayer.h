@@ -51,12 +51,15 @@ public:
     int8_t getCurrentSlot() const;
 
 private:
+    static constexpr size_t JPEG_BUFFER_SIZE = 48 * 1024;
+
     NandStorage*    _nand    = nullptr;
     DisplayDriver*  _display = nullptr;
     PlaybackState   _state   = PlaybackState::IDLE;
 
-    JPEGDEC _jpeg;
-    int8_t  _currentSlot   = -1;
+    JPEGDEC  _jpeg;
+    uint8_t* _jpegBuffer    = nullptr;
+    int8_t   _currentSlot   = -1;
     uint16_t _fps          = 10;
     uint16_t _totalFrames  = 0;
     uint16_t _currentFrame = 0;

@@ -105,11 +105,21 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
       </div>
       <div class="input-group">
         <label for="password">Mật khẩu Wi-Fi</label>
-        <input type="password" id="password" name="password" placeholder="Nhập mật khẩu Wi-Fi">
+        <div style="position: relative; display: flex; align-items: center;">
+          <input type="password" id="password" name="password" placeholder="Nhập mật khẩu Wi-Fi" style="padding-right: 40px;">
+          <button type="button" onclick="togglePass()" style="position: absolute; right: 10px; background: none; border: none; color: #a8a8b3; cursor: pointer; font-size: 16px; outline: none;">👁️</button>
+        </div>
       </div>
       <input type="submit" value="LƯU & KẾT NỐI">
     </form>
   </div>
+  <script>
+    function togglePass() {
+      var p = document.getElementById("password");
+      if (p.type === "password") { p.type = "text"; }
+      else { p.type = "password"; }
+    }
+  </script>
 </body>
 </html>
 )raw";

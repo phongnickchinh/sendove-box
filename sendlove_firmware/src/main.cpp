@@ -1,3 +1,4 @@
+#include "ConfigManager.h"
 #include "DisplayDriver.h"
 #include "LayoutEngine.h"
 #include "MediaPlayer.h"
@@ -16,13 +17,7 @@
 // Kiến trúc FreeRTOS Event-Driven:
 //   - Task_MediaPlayer: Decode + render video/ảnh từ NAND
 //   - Task_UIController: Đọc touch sensor + gửi event chuyển slot
-//
-// Phần cứng Phase 1:
-//   - ST7789 240x240 (LovyanGFX, Shared SPI2)
-//   - W25Q128 NAND Flash (Shared SPI2)
-//   - TTP223 Touch Sensor (GPIO 10)
-// ============================================================================
-// System Events
+//   - Task_NetworkController: Phục vụ WebServer / Captive Portal
 // ============================================================================
 enum class SystemEvent : uint8_t { NONE, TOUCH_NEXT_SLOT, TOUCH_TOGGLE_MODE };
 
@@ -34,6 +29,7 @@ NetworkManager network;
 LayoutEngine layoutEngine;
 OtaHandler otaHandler;
 PowerManager powerManager;
+ConfigManager configManager;
 
 static uint32_t lastUserActivity = 0;
 static volatile bool forceStandbyRedraw = false;
@@ -54,7 +50,7 @@ const char *defaultLayoutJson = R"({
     { "type": "battery_icon", "x": 154, "y": 10, "w": 75, "h": 16 }
   ]
 })";
-// { "type": "chip_temp", "x": 9, "y": 200, "w": 80, "h": 20, "align": "left", "font": "ChakraPetch_16", "color": "#f7f7f7ff" }
+
 void Task_MediaPlayer(void *pvParameters) {
   int8_t currentSlot = -1;
   uint32_t lastClockRender = 0;
@@ -116,7 +112,7 @@ void Task_UIController(void *pvParameters) {
     }
 
     uint32_t now = millis();
-    if (!otaHandler.isUpdating() &&
+    if (!otaHandler.isUpdating() && !network.isProvisioningActive() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
       powerManager.enterLightSleep(SLEEP_TIMER_US, &display);
 
@@ -167,6 +163,17 @@ void setup() {
   display.showMessage("Booting...");
 
   network.init();
+  configManager.init(NVS_NAMESPACE);
+
+  char wifiSsid[WIFI_SSID_MAX_LEN] = "";
+  char wifiPass[WIFI_PASS_MAX_LEN] = "";
+
+  if (!configManager.loadWiFi(wifiSsid, wifiPass)) {
+    strncpy(wifiSsid, DEFAULT_WIFI_SSID, sizeof(wifiSsid) - 1);
+    strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
+  }
+
+  network.connectWiFi(wifiSsid, wifiPass);
   layoutEngine.loadConfig(defaultLayoutJson);
 
   if (!nand.init(spiMutex)) {
@@ -184,25 +191,19 @@ void setup() {
   player.init(&nand, &display);
   ui.init(PIN_TOUCH, &display);
   powerManager.init((gpio_num_t)PIN_TOUCH);
-  // TODO: Init battery when hardware ADC voltage divider is attached:
-  // powerManager.initBattery(PIN_BATTERY_ADC);
   lastUserActivity = millis();
 
   ui.showBootScreen();
 
-  {
-    uint32_t wifiStart = millis();
-    while (!network.isConnected() &&
-           (millis() - wifiStart < WIFI_CONNECT_TIMEOUT_MS)) {
-      vTaskDelay(pdMS_TO_TICKS(100));
+  if (network.isConnected()) {
+    network.triggerNtpSync();
+    network.startWebServer(OTA_HOSTNAME);
+    if (network.getWebServer() != nullptr) {
+      otaHandler.registerRoutes(*network.getWebServer());
     }
-    if (network.isConnected()) {
-      network.triggerNtpSync();
-      network.startWebServer(OTA_HOSTNAME);
-      if (network.getWebServer() != nullptr) {
-        otaHandler.registerRoutes(*network.getWebServer());
-      }
-    }
+  } else {
+    display.showMessage("Setup Wi-Fi:\nSendloveBox-Setup");
+    network.startProvisioningAP("SendloveBox-Setup");
   }
 
   xTaskCreate(Task_MediaPlayer, "MediaPlayer", TASK_STACK_MEDIA_PLAYER, nullptr,

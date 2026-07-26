@@ -98,22 +98,7 @@ int8_t MediaPlayer::getCurrentSlot() const {
     return _currentSlot;
 }
 
-#include "driver/temp_sensor.h"
-
-static bool s_tempSensorInited = false;
-static float readChipTempForVideo() {
-    if (!s_tempSensorInited) {
-        temp_sensor_config_t temp_sensor = TSENS_CONFIG_DEFAULT();
-        temp_sensor_set_config(temp_sensor);
-        temp_sensor_start();
-        s_tempSensorInited = true;
-    }
-    float result = 0.0f;
-    if (temp_sensor_read_celsius(&result) == ESP_OK) {
-        return result;
-    }
-    return 0.0f;
-}
+#include "SystemMonitor.h"
 
 bool MediaPlayer::decodeOneFrame() {
     uint32_t jpegSize = 0;
@@ -133,7 +118,7 @@ bool MediaPlayer::decodeOneFrame() {
         _jpeg.decode(0, 0, 0);
 
         // Draw temperature overlay on top of video frame
-        float tempC = readChipTempForVideo();
+        float tempC = SystemMonitor::getChipTemperature();
         int tempInt = (int)(tempC + 0.5f);
         char tempBuf[16];
         snprintf(tempBuf, sizeof(tempBuf), "%d'C", tempInt);

@@ -4,23 +4,7 @@
 #include "CustomBatteryIcons.h"
 #include "CustomWifiIcons.h"
 #include "StandbyBackground.h"
-#include "driver/temp_sensor.h"
-
-static bool tempSensorInited = false;
-
-static float readChipTemp() {
-  if (!tempSensorInited) {
-    temp_sensor_config_t temp_sensor = TSENS_CONFIG_DEFAULT();
-    temp_sensor_set_config(temp_sensor);
-    temp_sensor_start();
-    tempSensorInited = true;
-  }
-  float result = 0.0f;
-  if (temp_sensor_read_celsius(&result) == ESP_OK) {
-    return result;
-  }
-  return 0.0f;
-}
+#include "SystemMonitor.h"
 
 uint16_t LayoutEngine::hexToColor(const char *hex) {
   if (hex == nullptr || strlen(hex) < 7 || hex[0] != '#')
@@ -146,53 +130,51 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver *display,
   display->releaseSPI();
 }
 
+void LayoutEngine::drawTextWidget(LGFX* canvas, const WidgetConfig& cfg, const char* text, int32_t defaultW, int32_t defaultH, const lgfx::IFont* font) {
+    int32_t boxX = cfg.x;
+    int32_t boxY = cfg.y;
+    int32_t boxW = (cfg.w > 0) ? cfg.w : defaultW;
+    int32_t boxH = (cfg.h > 0) ? cfg.h : defaultH;
+
+    canvas->startWrite();
+    drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
+
+    if (font != nullptr) {
+        canvas->setFont(font);
+    }
+
+    int32_t centerY = boxY + (boxH / 2);
+    canvas->setTextColor(cfg.color);
+
+    if (cfg.align == "center") {
+        canvas->setTextDatum(lgfx::middle_center);
+        canvas->drawString(text, boxX + (boxW / 2), centerY);
+    } else if (cfg.align == "right") {
+        canvas->setTextDatum(lgfx::middle_right);
+        canvas->drawString(text, boxX + boxW, centerY);
+    } else {
+        canvas->setTextDatum(lgfx::middle_left);
+        canvas->drawString(text, boxX, centerY);
+    }
+
+    canvas->setTextSize(1);
+    canvas->setFont(nullptr);
+    canvas->endWrite();
+}
+
 void LayoutEngine::drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force) {
     char timeStr[16];
     network->getTimeString(timeStr, sizeof(timeStr));
     if (!force && strcmp(timeStr, _lastTimeStr) == 0) return;
 
-  // Tọa độ góc trên-trái (cfg.x, cfg.y) & Bounding Box (cfg.w x cfg.h)
-  int32_t boxX = cfg.x;
-  int32_t boxY = cfg.y;
-  int32_t boxW = (cfg.w > 0) ? cfg.w : 132;
-  int32_t boxH = (cfg.h > 0) ? cfg.h : 35;
-
-  canvas->startWrite();
-  drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
-
-  if (cfg.font == "Orbitron_32") {
-    canvas->setFont(&fonts::Orbitron_Light_32);
-    canvas->setTextSize(1);
-  } else if (cfg.font == "Font7") {
-    canvas->setFont(&fonts::Font7);
-    canvas->setTextSize(2);
-  } else {
-    // Mặc định hoặc "ChakraPetch_48"
-    canvas->setFont(&ChakraPetch_SemiBold_48);
-    canvas->setTextSize(1);
-  }
-
-  // Căn giữa Bounding Box tại (boxX + boxW/2, boxY + boxH/2)
-  int32_t centerX = boxX + (boxW / 2);
-  int32_t centerY = boxY + (boxH / 2);
-
-    if (cfg.align == "left") {
-        canvas->setTextDatum(lgfx::middle_left);
-        canvas->setTextColor(cfg.color);
-        canvas->drawString(timeStr, boxX, centerY);
-    } else if (cfg.align == "right") {
-        canvas->setTextDatum(lgfx::middle_right);
-        canvas->setTextColor(cfg.color);
-        canvas->drawString(timeStr, boxX + boxW, centerY);
-    } else {
-        canvas->setTextDatum(lgfx::middle_center);
-        canvas->setTextColor(cfg.color);
-        canvas->drawString(timeStr, centerX, centerY);
+    const lgfx::IFont* selectedFont = &ChakraPetch_SemiBold_48;
+    if (cfg.font == "Orbitron_32") {
+        selectedFont = &fonts::Orbitron_Light_32;
+    } else if (cfg.font == "Font7") {
+        selectedFont = &fonts::Font7;
     }
 
-  canvas->setTextSize(1);
-  canvas->setFont(nullptr);
-  canvas->endWrite();
+    drawTextWidget(canvas, cfg, timeStr, 132, 35, selectedFont);
 
     strncpy(_lastTimeStr, timeStr, sizeof(_lastTimeStr) - 1);
     _lastTimeStr[sizeof(_lastTimeStr) - 1] = '\0';
@@ -203,43 +185,14 @@ void LayoutEngine::drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkM
     network->getDateString(dateStr, sizeof(dateStr));
     if (!force && strcmp(dateStr, _lastDateStr) == 0) return;
 
-  // Tọa độ góc trên-trái (cfg.x, cfg.y) & Bounding Box (cfg.w x cfg.h)
-  int32_t boxX = cfg.x;
-  int32_t boxY = cfg.y;
-  int32_t boxW = (cfg.w > 0) ? cfg.w : 140;
-  int32_t boxH = (cfg.h > 0) ? cfg.h : 16;
-
-  canvas->startWrite();
-  drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
-
-  if (cfg.font == "Roboto_14") {
-    canvas->setFont(&fonts::Roboto_Thin_24);
-  } else if (cfg.font == "FreeSans_12") {
-    canvas->setFont(&fonts::FreeSansBold12pt7b);
-  } else {
-    // Mặc định hoặc "ChakraPetch_16"
-    canvas->setFont(&ChakraPetch_SemiBold_16);
-  }
-
-  // Căn lề trái & căn giữa dọc theo Y tại (boxX, boxY + boxH/2)
-  int32_t centerY = boxY + (boxH / 2);
-
-    if (cfg.align == "center") {
-        canvas->setTextDatum(lgfx::middle_center);
-        canvas->setTextColor(cfg.color);
-        canvas->drawString(dateStr, boxX + (boxW / 2), centerY);
-    } else if (cfg.align == "right") {
-        canvas->setTextDatum(lgfx::middle_right);
-        canvas->setTextColor(cfg.color);
-        canvas->drawString(dateStr, boxX + boxW, centerY);
-    } else {
-        canvas->setTextDatum(lgfx::middle_left);
-        canvas->setTextColor(cfg.color);
-        canvas->drawString(dateStr, boxX, centerY);
+    const lgfx::IFont* selectedFont = &ChakraPetch_SemiBold_16;
+    if (cfg.font == "Roboto_14") {
+        selectedFont = &fonts::Roboto_Thin_24;
+    } else if (cfg.font == "FreeSans_12") {
+        selectedFont = &fonts::FreeSansBold12pt7b;
     }
 
-  canvas->setFont(nullptr);
-  canvas->endWrite();
+    drawTextWidget(canvas, cfg, dateStr, 140, 16, selectedFont);
 
     strncpy(_lastDateStr, dateStr, sizeof(_lastDateStr) - 1);
     _lastDateStr[sizeof(_lastDateStr) - 1] = '\0';
@@ -295,39 +248,15 @@ void LayoutEngine::drawBatteryIcon(LGFX *canvas, const WidgetConfig &cfg,
 
 void LayoutEngine::drawChipTemp(LGFX *canvas, const WidgetConfig &cfg,
                                 bool force) {
-  float tempC = readChipTemp();
+  float tempC = SystemMonitor::getChipTemperature();
   int tempInt = (int)(tempC + 0.5f);
   if (!force && tempInt == _lastChipTemp)
     return;
 
-  int32_t boxX = cfg.x;
-  int32_t boxY = cfg.y;
-  int32_t boxW = (cfg.w > 0) ? cfg.w : 100;
-  int32_t boxH = (cfg.h > 0) ? cfg.h : 20;
-
-  canvas->startWrite();
-  drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
-
-  canvas->setFont(&ChakraPetch_SemiBold_16);
-  canvas->setTextColor(cfg.color);
-
   char tempBuf[16];
   snprintf(tempBuf, sizeof(tempBuf), "%d'C", tempInt);
 
-  int32_t centerY = boxY + (boxH / 2);
-  if (cfg.align == "center") {
-    canvas->setTextDatum(lgfx::middle_center);
-    canvas->drawString(tempBuf, boxX + (boxW / 2), centerY);
-  } else if (cfg.align == "right") {
-    canvas->setTextDatum(lgfx::middle_right);
-    canvas->drawString(tempBuf, boxX + boxW, centerY);
-  } else {
-    canvas->setTextDatum(lgfx::middle_left);
-    canvas->drawString(tempBuf, boxX, centerY);
-  }
-
-  canvas->setFont(nullptr);
-  canvas->endWrite();
+  drawTextWidget(canvas, cfg, tempBuf, 100, 20, &ChakraPetch_SemiBold_16);
 
   _lastChipTemp = tempInt;
 }

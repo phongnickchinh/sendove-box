@@ -139,9 +139,15 @@ void Task_UIController(void *pvParameters) {
       }
     }
 
-    network.update();
     ui.updateLED();
     vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+void Task_NetworkController(void *pvParameters) {
+  for (;;) {
+    network.update();
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
@@ -203,6 +209,8 @@ void setup() {
               TASK_PRIORITY_MEDIA_PLAYER, nullptr);
   xTaskCreate(Task_UIController, "UIController", TASK_STACK_UI_CONTROLLER,
               nullptr, TASK_PRIORITY_UI_CONTROLLER, nullptr);
+  xTaskCreate(Task_NetworkController, "NetworkController", TASK_STACK_NETWORK,
+              nullptr, TASK_PRIORITY_NETWORK, nullptr);
 }
 
 void loop() { vTaskDelay(pdMS_TO_TICKS(500)); }

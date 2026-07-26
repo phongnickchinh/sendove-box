@@ -60,6 +60,7 @@ private:
     /// Convert HEX color string (#FFFFFF) to RGB565 format
     uint16_t hexToColor(const char* hex);
 
+    void drawTextWidget(LGFX* canvas, const WidgetConfig& cfg, const char* text, int32_t defaultW, int32_t defaultH, const lgfx::IFont* font = nullptr);
     void drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);
     void drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);
     void drawWifiIcon(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);

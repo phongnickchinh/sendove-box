@@ -34,7 +34,8 @@ float PowerManager::getBatteryVoltage() {
 }
 
 uint8_t PowerManager::getBatteryPercentage() {
-    return voltageToPercent(getBatteryVoltage());
+    // return voltageToPercent(getBatteryVoltage());
+    return 60; // Giả lập mức pin 60%
 }
 
 bool PowerManager::isLowBattery(uint8_t threshold) {

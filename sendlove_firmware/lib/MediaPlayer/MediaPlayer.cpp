@@ -98,6 +98,23 @@ int8_t MediaPlayer::getCurrentSlot() const {
     return _currentSlot;
 }
 
+#include "driver/temp_sensor.h"
+
+static bool s_tempSensorInited = false;
+static float readChipTempForVideo() {
+    if (!s_tempSensorInited) {
+        temp_sensor_config_t temp_sensor = TSENS_CONFIG_DEFAULT();
+        temp_sensor_set_config(temp_sensor);
+        temp_sensor_start();
+        s_tempSensorInited = true;
+    }
+    float result = 0.0f;
+    if (temp_sensor_read_celsius(&result) == ESP_OK) {
+        return result;
+    }
+    return 0.0f;
+}
+
 bool MediaPlayer::decodeOneFrame() {
     uint32_t jpegSize = 0;
     int bytesRead = _nand->readData((uint8_t*)&jpegSize, 4);
@@ -111,9 +128,23 @@ bool MediaPlayer::decodeOneFrame() {
 
     if (_jpeg.openRAM(s_jpegBuffer, jpegSize, jpegDrawCallback)) {
         _jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
-        _display->getTFT()->startWrite();
+        LGFX* tft = _display->getTFT();
+        tft->startWrite();
         _jpeg.decode(0, 0, 0);
-        _display->getTFT()->endWrite();
+
+        // Draw temperature overlay on top of video frame
+        float tempC = readChipTempForVideo();
+        int tempInt = (int)(tempC + 0.5f);
+        char tempBuf[16];
+        snprintf(tempBuf, sizeof(tempBuf), "%d'C", tempInt);
+
+        tft->setTextDatum(lgfx::bottom_left);
+        tft->setTextColor(TFT_WHITE, TFT_BLACK);
+        tft->setFont(&fonts::FreeSansBold9pt7b);
+        tft->drawString(tempBuf, 8, 234);
+        tft->setFont(nullptr);
+
+        tft->endWrite();
         _jpeg.close();
     }
 

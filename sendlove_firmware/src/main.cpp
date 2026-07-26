@@ -54,7 +54,7 @@ const char *defaultLayoutJson = R"({
     { "type": "battery_icon", "x": 154, "y": 10, "w": 75, "h": 16 }
   ]
 })";
-
+// { "type": "chip_temp", "x": 9, "y": 200, "w": 80, "h": 20, "align": "left", "font": "ChakraPetch_16", "color": "#f7f7f7ff" }
 void Task_MediaPlayer(void *pvParameters) {
   int8_t currentSlot = -1;
   uint32_t lastClockRender = 0;

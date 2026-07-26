@@ -4,6 +4,23 @@
 #include "CustomWifiIcons.h"
 #include "CustomBatteryIcons.h"
 #include "StandbyBackground.h"
+#include "driver/temp_sensor.h"
+
+static bool tempSensorInited = false;
+
+static float readChipTemp() {
+    if (!tempSensorInited) {
+        temp_sensor_config_t temp_sensor = TSENS_CONFIG_DEFAULT();
+        temp_sensor_set_config(temp_sensor);
+        temp_sensor_start();
+        tempSensorInited = true;
+    }
+    float result = 0.0f;
+    if (temp_sensor_read_celsius(&result) == ESP_OK) {
+        return result;
+    }
+    return 0.0f;
+}
 
 uint16_t LayoutEngine::hexToColor(const char* hex) {
     if (hex == nullptr || strlen(hex) < 7 || hex[0] != '#') return TFT_WHITE;
@@ -27,6 +44,7 @@ bool LayoutEngine::loadConfig(const char* jsonString) {
         else if (strcmp(type, "clock_date") == 0) cfg.type = WIDGET_CLOCK_DATE;
         else if (strcmp(type, "wifi_icon") == 0) cfg.type = WIDGET_WIFI_ICON;
         else if (strcmp(type, "battery_icon") == 0) cfg.type = WIDGET_BATTERY_ICON;
+        else if (strcmp(type, "chip_temp") == 0) cfg.type = WIDGET_CHIP_TEMP;
         else if (strcmp(type, "image") == 0) cfg.type = WIDGET_IMAGE;
         else continue;
 
@@ -52,6 +70,7 @@ void LayoutEngine::invalidateCache() {
     _lastDateStr = "";
     _lastRssiBars = -1;
     _lastBatPercent = -1;
+    _lastChipTemp = -999;
 }
 
 void LayoutEngine::drawBackgroundPatch(LGFX* canvas, int32_t x, int32_t y, int32_t w, int32_t h) {
@@ -93,6 +112,9 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver* display, NetworkManager* n
                 break;
             case WIDGET_BATTERY_ICON:
                 drawBatteryIcon(tft, cfg, fullRedraw);
+                break;
+            case WIDGET_CHIP_TEMP:
+                drawChipTemp(tft, cfg, fullRedraw);
                 break;
             case WIDGET_IMAGE:
                 break;
@@ -233,4 +255,41 @@ void LayoutEngine::drawBatteryIcon(LGFX* canvas, const WidgetConfig& cfg, bool f
     canvas->endWrite();
 
     _lastBatPercent = state;
+}
+
+void LayoutEngine::drawChipTemp(LGFX* canvas, const WidgetConfig& cfg, bool force) {
+    float tempC = readChipTemp();
+    int tempInt = (int)(tempC + 0.5f);
+    if (!force && tempInt == _lastChipTemp) return;
+
+    int32_t boxX = cfg.x;
+    int32_t boxY = cfg.y;
+    int32_t boxW = (cfg.w > 0) ? cfg.w : 100;
+    int32_t boxH = (cfg.h > 0) ? cfg.h : 20;
+
+    canvas->startWrite();
+    drawBackgroundPatch(canvas, boxX, boxY, boxW, boxH);
+
+    canvas->setFont(&ChakraPetch_SemiBold_16);
+    canvas->setTextColor(cfg.color);
+
+    char tempBuf[16];
+    snprintf(tempBuf, sizeof(tempBuf), "%d'C", tempInt);
+
+    int32_t centerY = boxY + (boxH / 2);
+    if (cfg.align == "center") {
+        canvas->setTextDatum(lgfx::middle_center);
+        canvas->drawString(tempBuf, boxX + (boxW / 2), centerY);
+    } else if (cfg.align == "right") {
+        canvas->setTextDatum(lgfx::middle_right);
+        canvas->drawString(tempBuf, boxX + boxW, centerY);
+    } else {
+        canvas->setTextDatum(lgfx::middle_left);
+        canvas->drawString(tempBuf, boxX, centerY);
+    }
+
+    canvas->setFont(nullptr);
+    canvas->endWrite();
+
+    _lastChipTemp = tempInt;
 }

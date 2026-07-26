@@ -12,7 +12,8 @@ enum WidgetType {
     WIDGET_CLOCK_DATE,
     WIDGET_WIFI_ICON,
     WIDGET_BATTERY_ICON,
-    WIDGET_IMAGE
+    WIDGET_IMAGE,
+    WIDGET_CHIP_TEMP
 };
 
 struct WidgetConfig {
@@ -54,6 +55,7 @@ private:
     String _lastDateStr = "";
     int    _lastRssiBars = -1;
     int    _lastBatPercent = -1;
+    int    _lastChipTemp = -999;
     
     /// Convert HEX color string (#FFFFFF) to RGB565 format
     uint16_t hexToColor(const char* hex);
@@ -62,6 +64,7 @@ private:
     void drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);
     void drawWifiIcon(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force);
     void drawBatteryIcon(LGFX* canvas, const WidgetConfig& cfg, bool force);
+    void drawChipTemp(LGFX* canvas, const WidgetConfig& cfg, bool force);
 };
 
 #endif // LAYOUT_ENGINE_H

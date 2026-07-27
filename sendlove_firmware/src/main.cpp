@@ -21,15 +21,19 @@
 // ============================================================================
 enum class SystemEvent : uint8_t { NONE, TOUCH_NEXT_SLOT, TOUCH_TOGGLE_MODE };
 
-DisplayDriver display;
-NandStorage nand;
-MediaPlayer player;
-UIController ui;
-NetworkManager network;
-LayoutEngine layoutEngine;
-OtaHandler otaHandler;
-PowerManager powerManager;
-ConfigManager configManager;
+struct AppContext {
+  DisplayDriver display;
+  NandStorage nand;
+  MediaPlayer player;
+  UIController ui;
+  NetworkManager network;
+  LayoutEngine layoutEngine;
+  OtaHandler otaHandler;
+  PowerManager powerManager;
+  ConfigManager configManager;
+};
+
+static AppContext appCtx;
 
 static uint32_t lastUserActivity = 0;
 static volatile bool forceStandbyRedraw = false;
@@ -55,9 +59,9 @@ void Task_MediaPlayer(void *pvParameters) {
   int8_t currentSlot = -1;
   uint32_t lastClockRender = 0;
 
-  currentSlot = nand.findFirstValidSlot();
+  currentSlot = appCtx.nand.findFirstValidSlot();
   if (currentSlot >= 0 && currentAppState == AppState::STATE_VIDEO)
-    player.playSlot(currentSlot);
+    appCtx.player.playSlot(currentSlot);
 
   for (;;) {
     SystemEvent event = SystemEvent::NONE;
@@ -65,24 +69,24 @@ void Task_MediaPlayer(void *pvParameters) {
       if (event == SystemEvent::TOUCH_TOGGLE_MODE) {
         if (currentAppState == AppState::STATE_STANDBY) {
           currentAppState = AppState::STATE_VIDEO;
-          display.clear();
+          appCtx.display.clear();
           if (currentSlot < 0)
-            currentSlot = nand.findFirstValidSlot();
+            currentSlot = appCtx.nand.findFirstValidSlot();
           if (currentSlot >= 0)
-            player.playSlot(currentSlot);
+            appCtx.player.playSlot(currentSlot);
         } else {
-          int8_t next = nand.findNextValidSlot(currentSlot);
+          int8_t next = appCtx.nand.findNextValidSlot(currentSlot);
           if (next >= 0) {
             currentSlot = next;
-            player.playSlot(currentSlot);
+            appCtx.player.playSlot(currentSlot);
           }
         }
       }
     }
 
     if (currentAppState == AppState::STATE_VIDEO) {
-      if (!otaHandler.isUpdating()) {
-        player.update();
+      if (!appCtx.otaHandler.isUpdating()) {
+        appCtx.player.update();
       } else {
         vTaskDelay(pdMS_TO_TICKS(100));
       }
@@ -90,7 +94,7 @@ void Task_MediaPlayer(void *pvParameters) {
       uint32_t now = millis();
       if (now - lastClockRender >= 1000 || forceStandbyRedraw) {
         bool fullRedraw = (lastClockRender == 0) || forceStandbyRedraw;
-        layoutEngine.renderStandbyScreen(&display, &network, fullRedraw);
+        appCtx.layoutEngine.renderStandbyScreen(&appCtx.display, &appCtx.network, fullRedraw);
         lastClockRender = now;
         forceStandbyRedraw = false;
       }
@@ -104,7 +108,7 @@ void Task_UIController(void *pvParameters) {
   uint32_t activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
 
   for (;;) {
-    if (ui.isTouched()) {
+    if (appCtx.ui.isTouched()) {
       SystemEvent event = SystemEvent::TOUCH_TOGGLE_MODE;
       xQueueSend(eventQueue, &event, 0);
       lastUserActivity = millis();
@@ -112,13 +116,13 @@ void Task_UIController(void *pvParameters) {
     }
 
     uint32_t now = millis();
-    if (!otaHandler.isUpdating() && !network.isProvisioningActive() &&
+    if (!appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
-      powerManager.enterLightSleep(SLEEP_TIMER_US, &display);
+      appCtx.powerManager.enterLightSleep(SLEEP_TIMER_US, &appCtx.display);
 
       delay(50);
-      network.ensureConnected();
-      network.triggerNtpSync();
+      appCtx.network.ensureConnected();
+      appCtx.network.triggerNtpSync();
 
       esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
       if (wakeupCause == ESP_SLEEP_WAKEUP_TIMER) {
@@ -135,14 +139,14 @@ void Task_UIController(void *pvParameters) {
       }
     }
 
-    ui.updateLED();
+    appCtx.ui.updateLED();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
 void Task_NetworkController(void *pvParameters) {
   for (;;) {
-    network.update();
+    appCtx.network.update();
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
@@ -158,52 +162,52 @@ void setup() {
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
 
-  display.init(spiMutex);
-  display.setBacklight(BACKLIGHT_DAY_PERCENT);
-  display.showMessage("Booting...");
+  appCtx.display.init(spiMutex);
+  appCtx.display.setBacklight(BACKLIGHT_DAY_PERCENT);
+  appCtx.display.showMessage("Booting...");
 
-  network.init();
-  configManager.init(NVS_NAMESPACE);
+  appCtx.network.init();
+  appCtx.configManager.init(NVS_NAMESPACE);
 
   char wifiSsid[WIFI_SSID_MAX_LEN] = "";
   char wifiPass[WIFI_PASS_MAX_LEN] = "";
 
-  if (!configManager.loadWiFi(wifiSsid, wifiPass)) {
+  if (!appCtx.configManager.loadWiFi(wifiSsid, wifiPass)) {
     strncpy(wifiSsid, DEFAULT_WIFI_SSID, sizeof(wifiSsid) - 1);
     strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
   }
 
-  network.connectWiFi(wifiSsid, wifiPass);
-  layoutEngine.loadConfig(defaultLayoutJson);
+  appCtx.network.connectWiFi(wifiSsid, wifiPass);
+  appCtx.layoutEngine.loadConfig(defaultLayoutJson);
 
-  if (!nand.init(spiMutex)) {
+  if (!appCtx.nand.init(spiMutex)) {
     uint8_t errData[4] = {0};
-    nand.readRaw(0, errData, 4);
+    appCtx.nand.readRaw(0, errData, 4);
     char errMsg[64];
     sprintf(errMsg, "NAND Err!\n%02X %02X %02X %02X", errData[0], errData[1],
             errData[2], errData[3]);
-    display.showMessage(errMsg);
+    appCtx.display.showMessage(errMsg);
     while (1) {
       delay(100);
     }
   }
 
-  player.init(&nand, &display);
-  ui.init(PIN_TOUCH, &display);
-  powerManager.init((gpio_num_t)PIN_TOUCH);
+  appCtx.player.init(&appCtx.nand, &appCtx.display);
+  appCtx.ui.init(PIN_TOUCH, &appCtx.display);
+  appCtx.powerManager.init((gpio_num_t)PIN_TOUCH);
   lastUserActivity = millis();
 
-  ui.showBootScreen();
+  appCtx.ui.showBootScreen();
 
-  if (network.isConnected()) {
-    network.triggerNtpSync();
-    network.startWebServer(OTA_HOSTNAME);
-    if (network.getWebServer() != nullptr) {
-      otaHandler.registerRoutes(*network.getWebServer());
+  if (appCtx.network.isConnected()) {
+    appCtx.network.triggerNtpSync();
+    appCtx.network.startWebServer(OTA_HOSTNAME);
+    if (appCtx.network.getWebServer() != nullptr) {
+      appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
     }
   } else {
-    display.showMessage("Setup Wi-Fi:\nSendloveBox-Setup");
-    network.startProvisioningAP("SendloveBox-Setup");
+    appCtx.display.showMessage("Setup Wi-Fi:\nSendloveBox-Setup");
+    appCtx.network.startProvisioningAP("SendloveBox-Setup");
   }
 
   xTaskCreate(Task_MediaPlayer, "MediaPlayer", TASK_STACK_MEDIA_PLAYER, nullptr,

@@ -109,6 +109,20 @@
   - Nếu thức dậy do Touch cảm ứng (`ESP_SLEEP_WAKEUP_GPIO`): Bật màn hình Standby và cho phép chờ 30s (`INACTIVITY_SLEEP_TIMEOUT_MS`).
   - Dòng tiêu thụ trung bình giảm từ `7.81mA` xuống **`~1.5mA`**, thời gian chờ của pin 1000 mAh tăng từ 4.5 ngày lên **~23 NGÀY** (gấp 5 lần).
 
+### Phase 2.5: Big Refactoring & Optimization (Completed)
+- [x] **Phase 1 (Chống Phân mảnh Bộ nhớ)**: Loại bỏ hoàn toàn việc lạm dụng `String` trong `NetworkManager`, `LayoutEngine`, `OtaHandler`. Chuyển sang dùng `char[]` tĩnh và `snprintf()`, triệt tiêu rò rỉ RAM (OOM / Heap Fragmentation).
+- [x] **Phase 2 (Kiến trúc Task & DRY)**:
+  - Phân tách `network.update()` ra FreeRTOS task riêng `Task_NetworkController` (Priority 2, Stack 8KB), giải quyết triệt để lỗi WebServer block UI Task (Priority 5).
+  - Tạo module `SystemMonitor` quản lý nhiệt độ chip và bộ nhớ RAM, loại bỏ code lặp ở `LayoutEngine` và `MediaPlayer`.
+  - Thêm helper `drawTextWidget` trong `LayoutEngine` giúp tái cấu trúc gọn gàng các widget text.
+- [x] **Phase 3 (Bảo mật, NVS & Captive Portal Wi-Fi)**:
+  - Tích hợp `ConfigManager` lưu Wi-Fi credentials vào NVS Flash (`Preferences`).
+  - Xây dựng luồng Wi-Fi Provisioning: Tự động phát AP `SendloveBox-Setup` kèm Captive Portal Web UI (có nút ẩn/hiện mật khẩu `👁️`) khi chưa cài mạng hoặc mất Wi-Fi.
+  - Thêm cờ `!network.isProvisioningActive()` ngăn thiết bị chui vào Light Sleep khi đang bật AP cài đặt.
+- [x] **Phase 4 (Tối ưu SRAM & AppContext)**:
+  - Chuyển `_jpegBuffer` 48KB từ mảng static giam RAM vĩnh viễn sang cấp phát động (`malloc()` khi phát media và `free()` ngay khi dừng), hoàn trả 48KB RAM cho màn hình Standby.
+  - Gom toàn bộ 9 biến toàn cục trong `main.cpp` vào struct `AppContext appCtx` theo chuẩn Clean Architecture.
+
 ---
 
 ## 6. LƯU Ý PHẦN CỨNG & KIẾN THỨC KỸ THUẬT QUAN TRỌNG

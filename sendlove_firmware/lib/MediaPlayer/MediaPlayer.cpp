@@ -9,7 +9,10 @@
 
 // Static pointer cho JPEGDEC callback (JPEGDEC không hỗ trợ user data pointer)
 static DisplayDriver* s_display = nullptr;
-static uint8_t s_jpegBuffer[48 * 1024];
+
+MediaPlayer::~MediaPlayer() {
+    stop();
+}
 
 int MediaPlayer::jpegDrawCallback(JPEGDRAW* pDraw) {
     if (s_display) s_display->pushImage(pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight, pDraw->pPixels);
@@ -31,6 +34,15 @@ bool MediaPlayer::playSlot(uint8_t slot) {
     }
 
     stop();
+
+    if (_jpegBuffer == nullptr) {
+        _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
+        if (_jpegBuffer == nullptr) {
+            Serial.println(F("[MediaPlayer] ERROR: Failed to allocate JPEG buffer"));
+            _state = PlaybackState::ERROR;
+            return false;
+        }
+    }
 
     SlotEntry info = _nand->getSlotInfo(slot);
     _fps = info.fps;
@@ -85,6 +97,10 @@ void MediaPlayer::stop() {
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
         _nand->closeSlot();
     }
+    if (_jpegBuffer != nullptr) {
+        free(_jpegBuffer);
+        _jpegBuffer = nullptr;
+    }
     _state = PlaybackState::IDLE;
     _currentSlot = -1;
     _currentFrame = 0;
@@ -101,17 +117,19 @@ int8_t MediaPlayer::getCurrentSlot() const {
 #include "SystemMonitor.h"
 
 bool MediaPlayer::decodeOneFrame() {
+    if (_jpegBuffer == nullptr) return false;
+
     uint32_t jpegSize = 0;
     int bytesRead = _nand->readData((uint8_t*)&jpegSize, 4);
 
-    if (bytesRead < 4 || jpegSize == 0 || jpegSize > sizeof(s_jpegBuffer)) return false;
+    if (bytesRead < 4 || jpegSize == 0 || jpegSize > JPEG_BUFFER_SIZE) return false;
 
-    bytesRead = _nand->readData(s_jpegBuffer, jpegSize);
+    bytesRead = _nand->readData(_jpegBuffer, jpegSize);
     if ((uint32_t)bytesRead < jpegSize) return false;
 
     if (!_display->acquireSPI()) return false;
 
-    if (_jpeg.openRAM(s_jpegBuffer, jpegSize, jpegDrawCallback)) {
+    if (_jpeg.openRAM(_jpegBuffer, jpegSize, jpegDrawCallback)) {
         _jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
         LGFX* tft = _display->getTFT();
         tft->startWrite();

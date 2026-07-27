@@ -32,6 +32,8 @@ enum class PlaybackState : uint8_t {
 /// Video (VJPG) and Image (VIMG) player from NAND Flash
 class MediaPlayer {
 public:
+    ~MediaPlayer();
+
     /// Initialize MediaPlayer instance
     bool init(NandStorage* nand, DisplayDriver* display);
 

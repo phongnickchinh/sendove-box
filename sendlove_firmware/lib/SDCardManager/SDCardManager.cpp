@@ -130,7 +130,7 @@ void SDCardManager::closeReadFile() {
 
 // --- Utility ---
 
-bool SDCardManager::fileExists(const char* path) {
+bool SDCardManager::fileExists(const char* path) const {
     if (!acquireSPI()) return false;
     bool exists = SD.exists(path);
     releaseSPI();
@@ -148,7 +148,7 @@ bool SDCardManager::deleteFile(const char* path) {
     return ok;
 }
 
-int32_t SDCardManager::getFileSize(const char* path) {
+int32_t SDCardManager::getFileSize(const char* path) const {
     if (!acquireSPI()) return -1;
 
     File f = SD.open(path, FILE_READ);
@@ -164,7 +164,7 @@ int32_t SDCardManager::getFileSize(const char* path) {
 
 // --- SPI Mutex ---
 
-bool SDCardManager::acquireSPI() {
+bool SDCardManager::acquireSPI() const {
     if (_spiMutex == nullptr) return true; // Không có mutex → bỏ qua
 
     if (xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
@@ -174,8 +174,9 @@ bool SDCardManager::acquireSPI() {
     return false;
 }
 
-void SDCardManager::releaseSPI() {
+void SDCardManager::releaseSPI() const {
     if (_spiMutex != nullptr) {
         xSemaphoreGive(_spiMutex);
     }
 }
+

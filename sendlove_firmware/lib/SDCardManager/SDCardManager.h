@@ -58,26 +58,27 @@ public:
     void closeReadFile();
 
     /// Kiểm tra file tồn tại
-    bool fileExists(const char* path);
+    bool fileExists(const char* path) const;
 
     /// Xóa file
     bool deleteFile(const char* path);
 
     /// Lấy kích thước file (bytes)
     /// @return Kích thước file, hoặc -1 nếu không tồn tại
-    int32_t getFileSize(const char* path);
+    int32_t getFileSize(const char* path) const;
 
 private:
     uint8_t _csPin = 0;
-    SemaphoreHandle_t _spiMutex = nullptr;
+    mutable SemaphoreHandle_t _spiMutex = nullptr;
     File _writeFile;
     File _readFile;
 
     /// Lấy quyền sử dụng SPI bus (blocking, timeout 1 giây)
-    bool acquireSPI();
+    bool acquireSPI() const;
 
     /// Trả quyền sử dụng SPI bus
-    void releaseSPI();
+    void releaseSPI() const;
+
 };
 
 #endif // SD_CARD_MANAGER_H

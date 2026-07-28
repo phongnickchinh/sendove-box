@@ -1,13 +1,12 @@
 #include "MediaPlayer.h"
-#include "NandStorage.h"
 #include "DisplayDriver.h"
+#include "SystemMonitor.h"
 #include "config.h"
 
 // ============================================================================
-// MediaPlayer Implementation — VJPG/VIMG from NAND Flash
+// MediaPlayer Implementation — VJPG/VIMG via IStorageProvider
 // ============================================================================
 
-// Static pointer cho JPEGDEC callback (JPEGDEC không hỗ trợ user data pointer)
 static DisplayDriver* s_display = nullptr;
 
 MediaPlayer::~MediaPlayer() {
@@ -19,8 +18,8 @@ int MediaPlayer::jpegDrawCallback(JPEGDRAW* pDraw) {
     return 1;
 }
 
-bool MediaPlayer::init(NandStorage* nand, DisplayDriver* display) {
-    _nand = nand;
+bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
+    _storage = storage;
     _display = display;
     s_display = display;
     _state = PlaybackState::IDLE;
@@ -28,7 +27,13 @@ bool MediaPlayer::init(NandStorage* nand, DisplayDriver* display) {
 }
 
 bool MediaPlayer::playSlot(uint8_t slot) {
-    if (_nand == nullptr || _display == nullptr || !_nand->isSlotValid(slot)) {
+    char slotStr[16];
+    snprintf(slotStr, sizeof(slotStr), "%d", slot);
+    return playItem(slotStr);
+}
+
+bool MediaPlayer::playItem(const char* identifier) {
+    if (_storage == nullptr || _display == nullptr || identifier == nullptr) {
         _state = PlaybackState::ERROR;
         return false;
     }
@@ -44,22 +49,29 @@ bool MediaPlayer::playSlot(uint8_t slot) {
         }
     }
 
-    SlotEntry info = _nand->getSlotInfo(slot);
-    _fps = info.fps;
-    _totalFrames = info.totalFrames;
-    _currentFrame = 0;
-    _currentSlot = slot;
-
-    if (!_nand->openSlot(slot)) {
+    if (!_storage->openForRead(identifier)) {
         _state = PlaybackState::ERROR;
         return false;
     }
+
+    StorageItemInfo info = _storage->getItemInfo(identifier);
+    if (info.type == StorageItemType::EMPTY) {
+        _storage->closeRead();
+        _state = PlaybackState::ERROR;
+        return false;
+    }
+
+    _fps = (info.fps > 0) ? info.fps : 10;
+    _totalFrames = info.totalFrames;
+    _currentFrame = 0;
+    strncpy(_currentId, identifier, sizeof(_currentId) - 1);
+    _currentSlot = (identifier[0] >= '0' && identifier[0] <= '9') ? atoi(identifier) : -1;
 
     _display->turnOn();
     _display->clear();
     _display->setBacklight(BACKLIGHT_DAY_PERCENT);
 
-    if (_nand->isSlotImage(slot)) {
+    if (info.type == StorageItemType::IMAGE) {
         _state = PlaybackState::SHOWING;
         decodeOneFrame();
     } else {
@@ -74,14 +86,14 @@ void MediaPlayer::update() {
         uint32_t frameStart = millis();
 
         if (!decodeOneFrame()) {
-            _nand->seekSlot(0);
+            _storage->seek(0);
             _currentFrame = 0;
             return;
         }
 
         _currentFrame++;
-        if (_currentFrame >= _totalFrames) {
-            _nand->seekSlot(0);
+        if (_totalFrames > 0 && _currentFrame >= _totalFrames) {
+            _storage->seek(0);
             _currentFrame = 0;
         }
 
@@ -95,7 +107,7 @@ void MediaPlayer::update() {
 
 void MediaPlayer::stop() {
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
-        _nand->closeSlot();
+        _storage->closeRead();
     }
     if (_jpegBuffer != nullptr) {
         free(_jpegBuffer);
@@ -103,6 +115,7 @@ void MediaPlayer::stop() {
     }
     _state = PlaybackState::IDLE;
     _currentSlot = -1;
+    _currentId[0] = '\0';
     _currentFrame = 0;
 }
 
@@ -114,43 +127,35 @@ int8_t MediaPlayer::getCurrentSlot() const {
     return _currentSlot;
 }
 
-#include "SystemMonitor.h"
-
 bool MediaPlayer::decodeOneFrame() {
-    if (_jpegBuffer == nullptr) return false;
+    if (_jpegBuffer == nullptr || _storage == nullptr) return false;
 
+    // 1. Đọc kích thước khung hình JPEG (4 bytes header)
     uint32_t jpegSize = 0;
-    int bytesRead = _nand->readData((uint8_t*)&jpegSize, 4);
+    if (_storage->readData((uint8_t*)&jpegSize, 4) < 4 || jpegSize == 0 || jpegSize > JPEG_BUFFER_SIZE) {
+        return false;
+    }
 
-    if (bytesRead < 4 || jpegSize == 0 || jpegSize > JPEG_BUFFER_SIZE) return false;
+    // 2. Đọc toàn bộ dữ liệu JPEG vào RAM buffer trong 1 lệnh duy nhất
+    if ((uint32_t)_storage->readData(_jpegBuffer, jpegSize) < jpegSize) {
+        return false;
+    }
 
-    bytesRead = _nand->readData(_jpegBuffer, jpegSize);
-    if ((uint32_t)bytesRead < jpegSize) return false;
-
+    // 3. Khóa bus SPI và giải mã trực tiếp lên màn hình
     if (!_display->acquireSPI()) return false;
 
     if (_jpeg.openRAM(_jpegBuffer, jpegSize, jpegDrawCallback)) {
         _jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
         LGFX* tft = _display->getTFT();
-        tft->startWrite();
+        
+        tft->startWrite(); // Khóa giao dịch SPI với ST7789 để đẩy toàn bộ block MCU siêu mượt
         _jpeg.decode(0, 0, 0);
-
-        // Draw temperature overlay on top of video frame
-        float tempC = SystemMonitor::getChipTemperature();
-        int tempInt = (int)(tempC + 0.5f);
-        char tempBuf[16];
-        snprintf(tempBuf, sizeof(tempBuf), "%d'C", tempInt);
-
-        tft->setTextDatum(lgfx::bottom_left);
-        tft->setTextColor(TFT_WHITE, TFT_BLACK);
-        tft->setFont(&fonts::FreeSansBold9pt7b);
-        tft->drawString(tempBuf, 8, 234);
-        tft->setFont(nullptr);
-
         tft->endWrite();
+        
         _jpeg.close();
     }
 
     _display->releaseSPI();
     return true;
 }
+

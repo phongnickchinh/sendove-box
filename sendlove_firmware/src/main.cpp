@@ -1,8 +1,10 @@
 #include "ConfigManager.h"
 #include "DisplayDriver.h"
+#include "IStorageProvider.h"
+#include "NandStorageProvider.h"
+#include "SDStorageProvider.h"
 #include "LayoutEngine.h"
 #include "MediaPlayer.h"
-#include "NandStorage.h"
 #include "NetworkManager.h"
 #include "OtaHandler.h"
 #include "PowerManager.h"
@@ -12,18 +14,18 @@
 #include <SPI.h>
 
 // ============================================================================
-// SENDLOVE BOX — Main Firmware (Phase 1)
+// SENDLOVE BOX — Main Firmware (Phase 3A: Storage Abstraction Layer)
 // ============================================================================
 // Kiến trúc FreeRTOS Event-Driven:
-//   - Task_MediaPlayer: Decode + render video/ảnh từ NAND
-//   - Task_UIController: Đọc touch sensor + gửi event chuyển slot
+//   - Task_MediaPlayer: Decode + render video/ảnh từ IStorageProvider (NAND / SD)
+//   - Task_UIController: Đọc touch sensor + gửi event chuyển slot/item
 //   - Task_NetworkController: Phục vụ WebServer / Captive Portal
 // ============================================================================
 enum class SystemEvent : uint8_t { NONE, TOUCH_NEXT_SLOT, TOUCH_TOGGLE_MODE };
 
 struct AppContext {
   DisplayDriver display;
-  NandStorage nand;
+  IStorageProvider* storage = nullptr;
   MediaPlayer player;
   UIController ui;
   NetworkManager network;
@@ -56,12 +58,14 @@ const char *defaultLayoutJson = R"({
 })";
 
 void Task_MediaPlayer(void *pvParameters) {
-  int8_t currentSlot = -1;
+  char currentId[32] = "";
   uint32_t lastClockRender = 0;
 
-  currentSlot = appCtx.nand.findFirstValidSlot();
-  if (currentSlot >= 0 && currentAppState == AppState::STATE_VIDEO)
-    appCtx.player.playSlot(currentSlot);
+  if (appCtx.storage && appCtx.storage->getFirstValidIdentifier(currentId, sizeof(currentId))) {
+    if (currentAppState == AppState::STATE_VIDEO) {
+      appCtx.player.playItem(currentId);
+    }
+  }
 
   for (;;) {
     SystemEvent event = SystemEvent::NONE;
@@ -70,15 +74,17 @@ void Task_MediaPlayer(void *pvParameters) {
         if (currentAppState == AppState::STATE_STANDBY) {
           currentAppState = AppState::STATE_VIDEO;
           appCtx.display.clear();
-          if (currentSlot < 0)
-            currentSlot = appCtx.nand.findFirstValidSlot();
-          if (currentSlot >= 0)
-            appCtx.player.playSlot(currentSlot);
+          if (currentId[0] == '\0' && appCtx.storage) {
+            appCtx.storage->getFirstValidIdentifier(currentId, sizeof(currentId));
+          }
+          if (currentId[0] != '\0') {
+            appCtx.player.playItem(currentId);
+          }
         } else {
-          int8_t next = appCtx.nand.findNextValidSlot(currentSlot);
-          if (next >= 0) {
-            currentSlot = next;
-            appCtx.player.playSlot(currentSlot);
+          char nextId[32] = "";
+          if (appCtx.storage && appCtx.storage->getNextValidIdentifier(currentId, nextId, sizeof(nextId))) {
+            strncpy(currentId, nextId, sizeof(currentId) - 1);
+            appCtx.player.playItem(currentId);
           }
         }
       }
@@ -126,12 +132,9 @@ void Task_UIController(void *pvParameters) {
 
       esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
       if (wakeupCause == ESP_SLEEP_WAKEUP_TIMER) {
-        // Woke up by 5-minute timer (display remains off)
-        // Allow 2 seconds for background NTP sync to run, then immediately re-enter sleep
         lastUserActivity = millis();
         activeSleepTimeoutMs = 2000;
       } else {
-        // Woke up by Touch sensor interaction
         lastUserActivity = millis();
         activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
         currentAppState = AppState::STATE_STANDBY;
@@ -180,19 +183,20 @@ void setup() {
   appCtx.network.connectWiFi(wifiSsid, wifiPass);
   appCtx.layoutEngine.loadConfig(defaultLayoutJson);
 
-  if (!appCtx.nand.init(spiMutex)) {
-    uint8_t errData[4] = {0};
-    appCtx.nand.readRaw(0, errData, 4);
-    char errMsg[64];
-    sprintf(errMsg, "NAND Err!\n%02X %02X %02X %02X", errData[0], errData[1],
-            errData[2], errData[3]);
-    appCtx.display.showMessage(errMsg);
+#if ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD
+  appCtx.storage = new SDStorageProvider();
+#else
+  appCtx.storage = new NandStorageProvider();
+#endif
+
+  if (!appCtx.storage->init(spiMutex)) {
+    appCtx.display.showMessage("Storage Err!");
     while (1) {
       delay(100);
     }
   }
 
-  appCtx.player.init(&appCtx.nand, &appCtx.display);
+  appCtx.player.init(appCtx.storage, &appCtx.display);
   appCtx.ui.init(PIN_TOUCH, &appCtx.display);
   appCtx.powerManager.init((gpio_num_t)PIN_TOUCH);
   lastUserActivity = millis();

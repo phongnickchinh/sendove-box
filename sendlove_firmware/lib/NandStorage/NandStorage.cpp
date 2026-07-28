@@ -10,7 +10,7 @@ static constexpr uint8_t W25Q_READ_STATUS_1  = 0x05;
 
 // SPI transaction settings cho NAND 
 // Giảm xuống 4MHz để dây cắm breadboard không bị suy hao tín hiệu (trước đây Software SPI rất chậm)
-static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
+static const SPISettings NAND_SPI_SETTINGS(33000000, MSBFIRST, SPI_MODE3);
 
 bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     _spiMutex = spiMutex;

@@ -5,3 +5,6 @@
 .vscode/ipch
 
 .agents/
+
+# Secret API keys & credentials
+include/config_secrets.h

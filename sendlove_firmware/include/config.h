@@ -67,10 +67,9 @@ static constexpr uint8_t NAND_SLOT_COUNT = 5;
 static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
     0x010000, 0x340000, 0x670000, 0x9A0000, 0xCD0000};
 
-// Firebase Configuration
-static constexpr const char *FIREBASE_HOST = "your-project.firebaseio.com";
-static constexpr const char *FIREBASE_API_KEY = "YOUR_API_KEY";
-static constexpr const char *BOX_ID = "box_id_001";
+// Firebase Configuration (Lưu trong config_secrets.h để chống lộ API trên Git)
+#include "config_secrets.h"
+
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";
@@ -99,9 +98,15 @@ static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
 // NVS Namespace
 static constexpr const char *NVS_NAMESPACE = "sendlove";
 
+// Storage Provider Configuration
+#define STORAGE_TYPE_NAND 0
+#define STORAGE_TYPE_SD   1
+#define ACTIVE_STORAGE_TYPE STORAGE_TYPE_NAND
+
 #ifdef WOKWI_SIMULATION
 static constexpr uint8_t PIN_BUZZER = 0;
 static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;
 #endif
 
 #endif // CONFIG_H
+

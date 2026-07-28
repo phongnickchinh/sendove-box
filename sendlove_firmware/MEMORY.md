@@ -123,6 +123,23 @@
   - Chuyển `_jpegBuffer` 48KB từ mảng static giam RAM vĩnh viễn sang cấp phát động (`malloc()` khi phát media và `free()` ngay khi dừng), hoàn trả 48KB RAM cho màn hình Standby.
   - Gom toàn bộ 9 biến toàn cục trong `main.cpp` vào struct `AppContext appCtx` theo chuẩn Clean Architecture.
 
+### Phase 3A: Storage Abstraction Layer (Completed)
+- [x] Tạo interface trừu tượng `IStorageProvider` định nghĩa tập API đọc/ghi luồng byte và quản lý hàng chờ tin nhắn.
+- [x] Xây dựng `NandStorageProvider` bọc chip W25Q128 16MB (quản lý 5 slot fixed offset + unread bitmask trên NVS).
+- [x] Xây dựng `SDStorageProvider` bọc thẻ MicroSD FAT32.
+- [x] Refactor `MediaPlayer` và `main.cpp` tách khỏi sự phụ thuộc NAND thô, cho phép chuyển đổi linh hoạt NAND <-> SD Card qua cờ `#define ACTIVE_STORAGE_TYPE` trong `config.h`.
+
+### Phân tách Kiến trúc Chuẩn (Separation of Concerns):
+1. **Bài toán Pairing (Web App / Cloud Backend):**
+   - Ghép nối giữa **Sender App <-> System <-> Receiver App**.
+   - Hộp quà ESP32 hoàn toàn không cần tham gia logic này. Kết quả pairing chỉ chốt thông tin trên Cloud Database.
+2. **Bài toán Bảo mật (Firmware Box <-> Cloud System):**
+   - Xác thực giao tiếp giữa **ESP32 Box <-> Firebase System**.
+   - ESP32 chỉ cần dùng `BOX_ID` + `Token` (hoặc Database Secret) lưu trong NVS để xác thực đường truyền HTTPS và tải đúng dữ liệu tin nhắn của Box mình về.
+
+
+
+
 ---
 
 ## 6. LƯU Ý PHẦN CỨNG & KIẾN THỨC KỸ THUẬT QUAN TRỌNG

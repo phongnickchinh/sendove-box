@@ -3,22 +3,20 @@
 
 #include <Arduino.h>
 #include <JPEGDEC.h>
+#include "IStorageProvider.h"
 #include "config.h"
 
-class NandStorage;
 class DisplayDriver;
 
 // ============================================================================
-// MediaPlayer — Phát video VJPG / ảnh VIMG từ NAND Flash
+// MediaPlayer — Phát video VJPG / ảnh VIMG từ IStorageProvider (NAND / SD)
 // ============================================================================
 // Phục vụ Task_MediaPlayer trong kiến trúc FreeRTOS.
 //
 // Cơ chế hoạt động:
-// - Đọc JPEG frame từ NandStorage (NAND Flash W25Q128)
+// - Đọc JPEG frame từ IStorageProvider
 // - Giải mã bằng JPEGDEC → callback pushImage lên DisplayDriver
 // - Hỗ trợ 2 mode: VJPG (video lặp vô hạn) và VIMG (ảnh tĩnh)
-//
-// Phase 1: Chỉ phát video/ảnh, chưa có I2S audio.
 // ============================================================================
 
 /// Trạng thái phát
@@ -29,16 +27,17 @@ enum class PlaybackState : uint8_t {
     ERROR
 };
 
-/// Video (VJPG) and Image (VIMG) player from NAND Flash
+/// Video (VJPG) and Image (VIMG) player from Storage Provider
 class MediaPlayer {
 public:
     ~MediaPlayer();
 
     /// Initialize MediaPlayer instance
-    bool init(NandStorage* nand, DisplayDriver* display);
+    bool init(IStorageProvider* storage, DisplayDriver* display);
 
-    /// Start playing media from specified slot
+    /// Start playing media from specified slot / item ID
     bool playSlot(uint8_t slot);
+    bool playItem(const char* identifier);
 
     /// Update playback loop frame timing
     void update();
@@ -55,13 +54,14 @@ public:
 private:
     static constexpr size_t JPEG_BUFFER_SIZE = 48 * 1024;
 
-    NandStorage*    _nand    = nullptr;
-    DisplayDriver*  _display = nullptr;
-    PlaybackState   _state   = PlaybackState::IDLE;
+    IStorageProvider* _storage = nullptr;
+    DisplayDriver*    _display = nullptr;
+    PlaybackState     _state   = PlaybackState::IDLE;
 
     JPEGDEC  _jpeg;
     uint8_t* _jpegBuffer    = nullptr;
     int8_t   _currentSlot   = -1;
+    char     _currentId[32] = "";
     uint16_t _fps          = 10;
     uint16_t _totalFrames  = 0;
     uint16_t _currentFrame = 0;
@@ -74,3 +74,4 @@ private:
 };
 
 #endif // MEDIA_PLAYER_H
+

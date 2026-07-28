@@ -16,6 +16,13 @@
 static constexpr size_t WIFI_SSID_MAX_LEN = 33;  // 32 chars + null terminator
 static constexpr size_t WIFI_PASS_MAX_LEN = 65;  // 64 chars + null terminator
 
+struct AlarmItem {
+    char id[16] = "";
+    char time[6] = "00:00"; // "HH:MM"
+    bool isEnable = false;
+    bool repeatable = false;
+};
+
 class ConfigManager {
 public:
     /// Khởi tạo NVS namespace
@@ -53,6 +60,25 @@ public:
     /// Xóa toàn bộ config (factory reset)
     bool clearAll();
 
+    // --- Firebase Sync & Alarms ---
+
+    /// Lưu mốc timestamp (ms) của tin nhắn cuối cùng đã tải
+    bool saveLastDownloadTimestamp(uint64_t ts);
+
+    /// Đọc mốc timestamp (ms) của tin nhắn cuối cùng đã tải
+    uint64_t loadLastDownloadTimestamp();
+
+    /// Lưu danh sách báo thức
+    bool saveAlarms(const AlarmItem* alarms, size_t count);
+
+    /// Đọc danh sách báo thức
+    size_t loadAlarms(AlarmItem* alarms, size_t maxCount);
+
+    /// Tính toán số giây còn lại đến mốc báo thức gần nhất
+    /// @param currentEpochTime Timestamp UNIX epoch hiện tại tính bằng giây
+    /// @return Số giây còn lại, hoặc 0xFFFFFFFF nếu không có báo thức
+    uint32_t getSecondsToNextAlarm(time_t currentEpochTime);
+
 private:
     Preferences _prefs;
 
@@ -61,6 +87,9 @@ private:
     static constexpr const char* KEY_WIFI_PASS     = "wifi_pass";
     static constexpr const char* KEY_WIFI_SSID_BAK = "wifi_ssid_bak";
     static constexpr const char* KEY_WIFI_PASS_BAK = "wifi_pass_bak";
+    static constexpr const char* KEY_LAST_DL_TS    = "last_dl_ts";
+    static constexpr const char* KEY_ALARM_COUNT   = "alarm_cnt";
+    static constexpr const char* KEY_ALARM_DATA    = "alarm_data";
 };
 
 #endif // CONFIG_MANAGER_H

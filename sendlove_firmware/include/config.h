@@ -70,6 +70,10 @@ static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
 // Firebase Configuration (Lưu trong config_secrets.h để chống lộ API trên Git)
 #include "config_secrets.h"
 
+static constexpr uint32_t FIREBASE_TIMEOUT_MS = 5000;
+static constexpr const char *NVS_KEY_LAST_DOWNLOAD_TS = "last_dl_ts";
+static constexpr uint8_t MAX_ALARMS = 10;
+
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";

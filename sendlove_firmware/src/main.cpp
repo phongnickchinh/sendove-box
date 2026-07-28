@@ -124,11 +124,26 @@ void Task_UIController(void *pvParameters) {
     uint32_t now = millis();
     if (!appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
-      appCtx.powerManager.enterLightSleep(SLEEP_TIMER_US, &appCtx.display);
+      
+      time_t nowSec = time(nullptr);
+      uint32_t secToAlarm = appCtx.configManager.getSecondsToNextAlarm(nowSec);
+      uint64_t sleepTimeUs = SLEEP_TIMER_US;
+      if (secToAlarm != 0xFFFFFFFF && secToAlarm > 0) {
+        uint64_t alarmUs = (uint64_t)secToAlarm * 1000000ULL;
+        if (alarmUs < sleepTimeUs) {
+          sleepTimeUs = alarmUs;
+        }
+      }
+
+      appCtx.powerManager.enterLightSleep(sleepTimeUs, &appCtx.display);
 
       delay(50);
       appCtx.network.ensureConnected();
       appCtx.network.triggerNtpSync();
+
+      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+      bool isCharging = appCtx.powerManager.isCharging();
+      appCtx.network.syncFirebaseWakeup(batPercent, isCharging, appCtx.storage);
 
       esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
       if (wakeupCause == ESP_SLEEP_WAKEUP_TIMER) {

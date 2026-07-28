@@ -77,7 +77,15 @@ public:
     /// Check if Wi-Fi provisioning portal is currently active
     bool isProvisioningActive() const;
 
+    /// Đồng bộ dữ liệu Firebase khi thức dậy (Status, Flags, Messages, Alarms)
+    bool syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
+
 private:
+    bool updateFirebaseStatus(uint8_t batteryPercent, bool isCharging);
+    bool checkFirebaseFlags();
+    bool syncFirebaseAlarms();
+    bool checkAndDownloadNewMessages(class IStorageProvider* storage);
+
     bool _isTimeSynced = false;
     volatile bool _isNtpSyncing = false;
     uint32_t _lastTimeSync = 0;

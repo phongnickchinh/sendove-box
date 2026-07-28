@@ -191,14 +191,20 @@
 - Với kiểu dữ liệu `uint32_t`, **tuyệt đối không gán mốc thời gian ở tương lai** (ví dụ: `lastUserActivity = millis() + 15000`), vì phép tính `now - lastUserActivity` ở vòng lặp sau sẽ bị underflow tràn số ra `4,294,952,306` (làm `now - lastUserActivity >= timeout` luôn trả về `true` lập tức).
 - **Giải pháp**: Giữ `lastUserActivity = millis()` chuẩn thời gian thực và thay đổi giá trị điều kiện so sánh `activeSleepTimeoutMs` (15s cho Touch Wakeup, 30s cho Timer Wakeup, 2s cho Timer Sleep Wakeup).
 
+### Phase 3B: Firebase Realtime Database & Storage Wakeup Integration (Completed)
+- [x] Tích hợp trực tiếp Firebase REST API vào `NetworkManager` (`syncFirebaseWakeup`, `updateFirebaseStatus`, `checkFirebaseFlags`, `syncFirebaseAlarms`, `checkAndDownloadNewMessages`).
+- [x] Loại bỏ hoàn toàn interval timers riêng. Đồng bộ tập trung 1 lần khi chip tỉnh dậy (Timer Wakeup 5 phút hoặc Touch Wakeup).
+- [x] Triển khai tính toán sleep timer động trong `ConfigManager::getSecondsToNextAlarm(nowSec)` và `main.cpp`: `sleepTimeUs = min(SLEEP_TIMER_US, alarmUs)`.
+- [x] Hỗ trợ tải dữ liệu media streaming dạng chunk 256B từ Firebase Storage vào thẳng `IStorageProvider` (NAND/SD) tránh tràn RAM ESP32-C3.
+- [x] Biên dịch thành công 100% (`[SUCCESS]`), RAM 19.0% (62KB/328KB), Flash 70.7% (1.29MB/1.83MB).
+
 ---
 
-### Sẽ thực hiện tiếp (Phase 2.5 & Phase 3)
-- [ ] Tháo/xả bỏ đèn LED đỏ báo nguồn phần cứng trên bo ESP32 DevKit và Module NAND Flash (giảm dòng rò từ 5mA xuống 1mA khi ngủ).
-- [ ] Test thực tế playback video VJPG từ NAND kết hợp chuyển đổi Standby UI trên phần cứng.
+### Sẽ thực hiện tiếp (Phase 3C & Phase 4)
+- [ ] Test thực tế nạp dữ liệu Firebase và xem phản hồi trên thiết bị thật / Wokwi.
+- [ ] Tháo/xả bỏ đèn LED đỏ báo nguồn phần cứng trên bo ESP32 DevKit và Module NAND Flash.
 - [ ] Bổ sung I2S Audio Module (MAX98357A) cho âm thanh video.
-- [ ] Tối ưu hóa chu kỳ Deep Sleep ngầm kết hợp kiểm tra Firebase.
-- [ ] Nâng cấp OTA: firmware từ Firebase Storage, trigger từ web client.
+- [ ] Nâng cấp Cloud OTA: tải firmware `.bin` từ Firebase Storage thông qua `ota_tasks`.
 
 
 

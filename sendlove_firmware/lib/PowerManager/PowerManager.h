@@ -35,6 +35,9 @@ public:
     /// Convert battery voltage to percentage (0-100%)
     uint8_t getBatteryPercentage();
 
+    /// Check if device is charging
+    bool isCharging() { return false; }
+
     /// Check if battery is low
     bool isLowBattery(uint8_t threshold = 10);
 

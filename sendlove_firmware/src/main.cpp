@@ -154,8 +154,8 @@ void Task_UIController(void *pvParameters) {
       // Dừng MediaPlayer giải phóng SPI/RAM và chuyển về Standby trước khi ngủ
       appCtx.player.stop();
       currentAppState = AppState::STATE_STANDBY;
-      forceStandbyRedraw = true;
-
+      // Không set forceStandbyRedraw ở đây để tránh race condition với Task_MediaPlayer
+      
       appCtx.powerManager.enterLightSleep(sleepTimeUs, &appCtx.display);
 
       delay(50);

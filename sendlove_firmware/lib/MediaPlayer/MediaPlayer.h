@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 #include <JPEGDEC.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "IStorageProvider.h"
 #include "config.h"
 
@@ -57,6 +59,7 @@ private:
     IStorageProvider* _storage = nullptr;
     DisplayDriver*    _display = nullptr;
     PlaybackState     _state   = PlaybackState::IDLE;
+    SemaphoreHandle_t _playerMutex = nullptr;
 
     JPEGDEC  _jpeg;
     uint8_t* _jpegBuffer    = nullptr;

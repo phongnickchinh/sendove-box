@@ -11,6 +11,10 @@ static DisplayDriver* s_display = nullptr;
 
 MediaPlayer::~MediaPlayer() {
     stop();
+    if (_playerMutex != nullptr) {
+        vSemaphoreDelete(_playerMutex);
+        _playerMutex = nullptr;
+    }
 }
 
 int MediaPlayer::jpegDrawCallback(JPEGDRAW* pDraw) {
@@ -23,6 +27,9 @@ bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
     _display = display;
     s_display = display;
     _state = PlaybackState::IDLE;
+    if (_playerMutex == nullptr) {
+        _playerMutex = xSemaphoreCreateRecursiveMutex();
+    }
     return true;
 }
 
@@ -33,8 +40,11 @@ bool MediaPlayer::playSlot(uint8_t slot) {
 }
 
 bool MediaPlayer::playItem(const char* identifier) {
+    if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
+
     if (_storage == nullptr || _display == nullptr || identifier == nullptr) {
         _state = PlaybackState::ERROR;
+        if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         return false;
     }
 
@@ -45,6 +55,7 @@ bool MediaPlayer::playItem(const char* identifier) {
         if (_jpegBuffer == nullptr) {
             Serial.println(F("[MediaPlayer] ERROR: Failed to allocate JPEG buffer"));
             _state = PlaybackState::ERROR;
+            if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             return false;
         }
     }
@@ -53,6 +64,7 @@ bool MediaPlayer::playItem(const char* identifier) {
         if (_display) { _display->showMessage("Slot Open FAIL!"); delay(2000); }
         Serial.printf("[MediaPlayer] ERROR: Cannot open slot '%s' for read\n", identifier);
         _state = PlaybackState::ERROR;
+        if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         return false;
     }
 
@@ -63,6 +75,7 @@ bool MediaPlayer::playItem(const char* identifier) {
     if (info.type == StorageItemType::EMPTY) {
         _storage->closeRead();
         _state = PlaybackState::ERROR;
+        if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         return false;
     }
 
@@ -115,16 +128,20 @@ bool MediaPlayer::playItem(const char* identifier) {
         _state = PlaybackState::PLAYING;
     }
 
+    if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
     return true;
 }
 
 void MediaPlayer::update() {
+    if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
+
     if (_state == PlaybackState::PLAYING) {
         uint32_t frameStart = millis();
 
         if (!decodeOneFrame()) {
             _storage->seek(20);
             _currentFrame = 0;
+            if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             return;
         }
 
@@ -136,13 +153,18 @@ void MediaPlayer::update() {
 
         uint32_t elapsed = millis() - frameStart;
         uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
+        
+        if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         if (elapsed < targetMs) vTaskDelay(pdMS_TO_TICKS(targetMs - elapsed));
     } else {
+        if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
 void MediaPlayer::stop() {
+    if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
+
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
         _storage->closeRead();
     }
@@ -154,6 +176,8 @@ void MediaPlayer::stop() {
     _currentSlot = -1;
     _currentId[0] = '\0';
     _currentFrame = 0;
+
+    if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
 }
 
 PlaybackState MediaPlayer::getState() const {

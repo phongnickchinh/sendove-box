@@ -275,7 +275,12 @@ void NetworkManager::triggerFirebaseSync(uint8_t batteryPercent, bool isCharging
 
     _isFirebaseSyncing = true;
     FirebaseTaskParams* p = new FirebaseTaskParams{this, batteryPercent, isCharging, storage, nullptr};
-    xTaskCreate(firebaseSyncTaskWorker, "FbSync", 8192, p, 2, nullptr);
+    BaseType_t res = xTaskCreate(firebaseSyncTaskWorker, "FbSync", 12288, p, 2, nullptr);
+    if (res != pdPASS) {
+        _isFirebaseSyncing = false;
+        delete p;
+        Serial.println(F("[NetworkManager] Failed to create FbSync task (Out of RAM)!"));
+    }
 }
 
 void NetworkManager::firebaseSyncTaskWorker(void* param) {
@@ -304,9 +309,11 @@ bool NetworkManager::syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging,
 
     // 1. Update Status (Heartbeat)
     updateFirebaseStatus(batteryPercent, isCharging);
+    delay(150);
 
     // 2. Check Flags (Alarms, OTA, Pairing)
     checkFirebaseFlags();
+    delay(150);
 
     // 3. Check and download new messages
     if (storage != nullptr) {
@@ -588,8 +595,16 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                     int initialLen = len;
                     int totalRead = 0;
                     Serial.printf("[NetworkManager] HTTP GET OK. Content-Length: %d\n", len);
+                    char writeSlotId[16] = "";
+                    if (!storage->getNextWriteSlotIdentifier(writeSlotId, sizeof(writeSlotId))) {
+                        Serial.println(F("[NetworkManager] Download skipped: Storage is FULL (5 unread messages)."));
+                        http.end();
+                        _isDownloadingMedia = false;
+                        break;
+                    }
+
                     WiFiClient* stream = http.getStreamPtr();
-                    if (storage->openForWrite("slot_0")) {
+                    if (storage->openForWrite(writeSlotId)) {
                         uint8_t buffer[256];
                         while (http.connected() && (len > 0 || len == -1)) {
                             size_t sizeAvail = stream->available();
@@ -603,7 +618,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             delay(1);
                         }
                         storage->closeWrite();
-                        Serial.printf("[NetworkManager] Media download completed. totalRead: %d bytes\n", totalRead);
+                        Serial.printf("[NetworkManager] Media download to Slot %s completed. totalRead: %d bytes\n", writeSlotId, totalRead);
                         downloadedAnyMedia = true;
                         if (_onDownloadComplete) {
                             _onDownloadComplete();

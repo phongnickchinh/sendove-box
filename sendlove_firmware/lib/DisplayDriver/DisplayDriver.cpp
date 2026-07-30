@@ -73,6 +73,7 @@ void DisplayDriver::turnOff() {
   setBacklight(0);
 
   if (acquireSPI()) {
+    _tft.fillScreen(TFT_BLACK);
     _tft.sleep();
     releaseSPI();
   }
@@ -92,14 +93,19 @@ void DisplayDriver::turnOn(uint8_t cause) {
     }
 
     gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
+
+    // Khởi tạo và xóa đen màn hình TRƯỚC KHI bật đèn nền để tránh hiện ảnh cũ nhòe/âm bản
+    if (acquireSPI()) {
+      _tft.init();
+      _tft.setRotation(0);
+      _tft.setSwapBytes(true);
+      _tft.fillScreen(TFT_BLACK);
+      releaseSPI();
+    }
+
     pinMode(PIN_TFT_BLK, OUTPUT);
     digitalWrite(PIN_TFT_BLK, HIGH);
-
-    _tft.init();
-    _tft.setRotation(0);
-    _tft.setSwapBytes(true);
-    _tft.fillScreen(TFT_BLACK);
-    _tft.setBrightness(255);
+    setBacklight(BACKLIGHT_DAY_PERCENT);
     _isSleeping = false;
   }
 }

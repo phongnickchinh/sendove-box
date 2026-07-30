@@ -26,6 +26,8 @@ public:
     void closeWrite() override;
 
     // --- Quản lý Hàng chờ & Slot ---
+    bool isFull() const override;
+    bool getNextWriteSlotIdentifier(char* outId, size_t maxLen) override;
     bool hasUnreadMessage() const override;
     bool getNextUnreadIdentifier(char* outId, size_t maxLen) override;
     void markAsRead(const char* identifier) override;

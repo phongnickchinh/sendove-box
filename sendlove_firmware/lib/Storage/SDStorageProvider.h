@@ -25,7 +25,13 @@ public:
     size_t writeChunk(const uint8_t* data, size_t len) override;
     void closeWrite() override;
 
-    // --- Quản lý Hàng chờ & Queue ---
+    // --- Quản lý Hàng chờ & Slot ---
+    bool isFull() const override { return false; }
+    bool getNextWriteSlotIdentifier(char* outId, size_t maxLen) override {
+        if (!outId || maxLen == 0) return false;
+        snprintf(outId, maxLen, "slot_0");
+        return true;
+    }
     bool hasUnreadMessage() const override;
     bool getNextUnreadIdentifier(char* outId, size_t maxLen) override;
     void markAsRead(const char* identifier) override;

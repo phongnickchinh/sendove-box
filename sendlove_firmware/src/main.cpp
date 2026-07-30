@@ -74,17 +74,32 @@ void Task_MediaPlayer(void *pvParameters) {
         if (currentAppState == AppState::STATE_STANDBY) {
           currentAppState = AppState::STATE_VIDEO;
           appCtx.display.clear();
-          if (currentId[0] == '\0' && appCtx.storage) {
-            appCtx.storage->getFirstValidIdentifier(currentId, sizeof(currentId));
-          }
-          if (currentId[0] != '\0') {
+          
+          char unreadId[32] = "";
+          if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+            strncpy(currentId, unreadId, sizeof(currentId) - 1);
             appCtx.player.playItem(currentId);
+            appCtx.storage->markAsRead(currentId);
+          } else {
+            if (currentId[0] == '\0' && appCtx.storage) {
+              appCtx.storage->getFirstValidIdentifier(currentId, sizeof(currentId));
+            }
+            if (currentId[0] != '\0') {
+              appCtx.player.playItem(currentId);
+            }
           }
         } else {
-          char nextId[32] = "";
-          if (appCtx.storage && appCtx.storage->getNextValidIdentifier(currentId, nextId, sizeof(nextId))) {
-            strncpy(currentId, nextId, sizeof(currentId) - 1);
+          char unreadId[32] = "";
+          if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+            strncpy(currentId, unreadId, sizeof(currentId) - 1);
             appCtx.player.playItem(currentId);
+            appCtx.storage->markAsRead(currentId);
+          } else {
+            char nextId[32] = "";
+            if (appCtx.storage && appCtx.storage->getNextValidIdentifier(currentId, nextId, sizeof(nextId))) {
+              strncpy(currentId, nextId, sizeof(currentId) - 1);
+              appCtx.player.playItem(currentId);
+            }
           }
         }
       }
@@ -136,12 +151,17 @@ void Task_UIController(void *pvParameters) {
         }
       }
 
+      // Dừng MediaPlayer giải phóng SPI/RAM và chuyển về Standby trước khi ngủ
+      appCtx.player.stop();
+      currentAppState = AppState::STATE_STANDBY;
+      forceStandbyRedraw = true;
+
       appCtx.powerManager.enterLightSleep(sleepTimeUs, &appCtx.display);
 
       delay(50);
       esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
       if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER) {
-        // Touch Wakeup: Bật màn hình và Render Standby UI NGAY LẬP TỨC (< 50ms!)
+        // Touch Wakeup: Bật màn hình mượt mà và Render Standby UI NGAY LẬP TỨC (< 50ms!)
         appCtx.display.turnOn();
         currentAppState = AppState::STATE_STANDBY;
         forceStandbyRedraw = true;
@@ -152,7 +172,10 @@ void Task_UIController(void *pvParameters) {
         activeSleepTimeoutMs = 2000;
       }
 
-      // Thực hiện đồng bộ ngầm non-blocking (không làm giật/block Touch UI)
+      // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm
+      vTaskDelay(pdMS_TO_TICKS(200));
+
+      // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy (cả Touch và Timer)
       appCtx.network.ensureConnected();
       appCtx.network.triggerNtpSync();
       uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
@@ -217,9 +240,6 @@ void setup() {
       delay(100);
     }
   }
-
-  // Xóa sạch toàn bộ dữ liệu 5 slot cũ trên NAND Flash ở lần boot nạp này
-  appCtx.storage->formatStorage();
 
   appCtx.player.init(appCtx.storage, &appCtx.display);
   appCtx.ui.init(PIN_TOUCH, &appCtx.display);

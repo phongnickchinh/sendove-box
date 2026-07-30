@@ -58,10 +58,16 @@ public:
 
     // --- Quản lý Hàng chờ & Duyệt Item ---
 
+    /// Kiểm tra bộ nhớ có đầy 5 tin chưa đọc hay không
+    virtual bool isFull() const = 0;
+
+    /// Lấy ID của Slot tiếp theo cho phép ghi (trả về false nếu bộ nhớ đầy)
+    virtual bool getNextWriteSlotIdentifier(char* outId, size_t maxLen) = 0;
+
     /// Kiểm tra xem có tin nhắn / item nào chưa xem hay không
     virtual bool hasUnreadMessage() const = 0;
 
-    /// Lấy ID của item chưa đọc tiếp theo (trả về false nếu không có)
+    /// Lấy ID của item chưa đọc tiếp theo (ưu tiên tin cũ nhất)
     virtual bool getNextUnreadIdentifier(char* outId, size_t maxLen) = 0;
 
     /// Đánh dấu một item đã được xem

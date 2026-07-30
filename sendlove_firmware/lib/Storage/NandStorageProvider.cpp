@@ -75,20 +75,25 @@ StorageItemInfo NandStorageProvider::getItemInfo(const char* identifier) const {
 
 bool NandStorageProvider::openForWrite(const char* identifier) {
     int8_t slot = parseSlotId(identifier);
-    if (slot < 0 || slot >= NAND_SLOT_COUNT) slot = 0;
+    if (slot < 0 || slot >= NAND_SLOT_COUNT) {
+        slot = _writeSlotIndex; // Mặc định dùng cur_point
+    }
+
+    // Kiểm tra nếu slot tại cur_point đang chứa tin nhắn chưa đọc -> từ chối ghi (Bộ nhớ đầy)
+    if (_unreadBitmask & (1 << slot)) {
+        Serial.printf("[NandStorageProvider] ERROR: Slot %d contains UNREAD message! Storage full.\n", slot);
+        return false;
+    }
+
     _writeSlotIndex = slot;
-    // QUAN TRỌNG: Luôn khởi tạo _writeOffset = 4 để chừa 4 byte đầu (offset 0..3) sạch (0xFF)
-    // cho kích thước frame (4-byte size header). Data thực sự ghi từ offset 4 trở đi.
     _writeOffset = 4;
     _lastErasedSectorAddr = 0xFFFFFFFF;
 
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_writeSlotIndex];
-
-    // Erase sector đầu tiên (4KB) để slot sạch 100%
     _nand.eraseSector(slotStartAddr);
     _lastErasedSectorAddr = slotStartAddr;
 
-    Serial.printf("[NandStorageProvider] openForWrite: slot=%d addr=0x%06X (Reserved 4-byte header at offset 0)\n",
+    Serial.printf("[NandStorageProvider] openForWrite: cur_point=%d addr=0x%06X (Reserved 4-byte header)\n",
                   _writeSlotIndex, (unsigned int)slotStartAddr);
     return true;
 }
@@ -148,11 +153,31 @@ void NandStorageProvider::closeWrite() {
         Serial.println(F("[NandStorageProvider] Raw JPEG media registered as VIMG."));
     }
 
+    // 1. Đánh dấu bit thứ cur_point là chưa đọc (1)
     _unreadBitmask |= (1 << _writeSlotIndex);
+
+    // 2. Dịch tiến con trỏ cur_point sang Slot tiếp theo (0..4)
+    int8_t writtenSlot = _writeSlotIndex;
+    _writeSlotIndex = (_writeSlotIndex + 1) % NAND_SLOT_COUNT;
+
     saveNvsState();
     _nand.writeSlotTable();
-    Serial.printf("[NandStorageProvider] Closed slot %d. Media size: %u bytes (Total slot offset: %u). Unread mask: 0x%02X\n",
-                  _writeSlotIndex, rawJpegSize, _writeOffset, _unreadBitmask);
+    Serial.printf("[NandStorageProvider] Written to Slot %d. Next cur_point -> %d. unreadBit: 0x%02X (%d)\n",
+                  writtenSlot, _writeSlotIndex, _unreadBitmask, _unreadBitmask);
+}
+
+bool NandStorageProvider::isFull() const {
+    return (_unreadBitmask == 0x1F) || ((_unreadBitmask & (1 << _writeSlotIndex)) != 0);
+}
+
+bool NandStorageProvider::getNextWriteSlotIdentifier(char* outId, size_t maxLen) {
+    if (!outId || maxLen == 0) return false;
+    if (isFull()) {
+        Serial.println(F("[NandStorageProvider] Storage FULL! All 5 slots unread."));
+        return false;
+    }
+    snprintf(outId, maxLen, "%d", _writeSlotIndex);
+    return true;
 }
 
 bool NandStorageProvider::hasUnreadMessage() const {
@@ -162,7 +187,7 @@ bool NandStorageProvider::hasUnreadMessage() const {
 bool NandStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
     if (!hasUnreadMessage() || !outId || maxLen == 0) return false;
 
-    // Tìm slot chưa đọc cũ nhất bắt đầu từ writeSlotIndex
+    // Duyệt tìm tin chưa đọc CŨ NHẤT bắt đầu từ cur_point theo vòng tròn modulo
     for (int i = 0; i < NAND_SLOT_COUNT; i++) {
         int8_t slot = (_writeSlotIndex + i) % NAND_SLOT_COUNT;
         if (_unreadBitmask & (1 << slot)) {
@@ -176,8 +201,9 @@ bool NandStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
 void NandStorageProvider::markAsRead(const char* identifier) {
     int8_t slot = parseSlotId(identifier);
     if (slot >= 0 && slot < NAND_SLOT_COUNT) {
-        _unreadBitmask &= ~(1 << slot);
+        _unreadBitmask &= ~(1 << slot); // Xóa bit thứ slot về 0 (đã đọc)
         saveNvsState();
+        Serial.printf("[NandStorageProvider] Marked slot %d as READ. unreadBit: 0x%02X\n", slot, _unreadBitmask);
     }
 }
 

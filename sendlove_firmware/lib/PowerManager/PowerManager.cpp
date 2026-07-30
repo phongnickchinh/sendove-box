@@ -64,11 +64,8 @@ void PowerManager::enterLightSleep(uint64_t sleepDurationUs, DisplayDriver* disp
     configureTouchWakeup(_touchPin);
 
     esp_light_sleep_start();
-
-    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    if (display != nullptr && cause != ESP_SLEEP_WAKEUP_TIMER) display->turnOn();
-
-    delay(200);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+    delay(50);
 }
 
 void PowerManager::enterDeepSleep(uint64_t sleepDurationUs, DisplayDriver* display) {

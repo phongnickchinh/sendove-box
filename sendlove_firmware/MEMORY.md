@@ -98,6 +98,10 @@
 - [x] Fix lỗi chữ có khung nền đen: Thêm `canvas->setTextColor(cfg.color)` (1 tham số) ép LovyanGFX vẽ chữ ở chế độ nền trong suốt (Transparent Background).
 - [x] Nới rộng Bounding Box lên `160x45` tránh viền chữ Chakra Petch 48pt tràn khung gây dư ảnh vết chữ cũ.
 - [x] Tối ưu hóa đồng bộ thời gian NTP ngầm & Bộ đếm RTC nội bộ:
+- [x] Xây dựng Lớp Trừu Tượng Lưu Trữ Media (`IStorageProvider`): Hỗ trợ đa bộ nhớ linh hoạt giữa NAND Flash (`NandStorageProvider`) và Thẻ nhớ SD (`SDStorageProvider`).
+- [x] Khắc phục lỗi nén JSON Firebase dài: Triển khai Zero-Copy JsonDocument + `http.getString()` chống mất/tràn mảng tin nhắn Firebase URL.
+- [x] Khắc phục lỗi ghi Flash NOR khi download stream: Cấu hình cơ chế Auto Per-Sector Erase (`_lastErasedSectorAddr`) và chừa 4-byte Offset Reserve ở `openForWrite()` giúp bảo toàn 100% dữ liệu tệp `.bin` tải về từ Firebase.
+- [x] Hỗ trợ định dạng tệp `SLBX` Native (128x160 Raw RGB565 Framebuffer): Nhận diện container header `SLBX` tự động, căn giữa hiển thị trên LCD 240x240 với tốc độ 1ms không qua `JPEGDEC`. Tương thích 100% tệp container `SLBX`/`VJPG`/`VIMG` lẫn ảnh RAW JPEG.
   - `getTimeString()` và `getDateString()` đọc trực tiếp mốc giờ RTC nội bộ ESP32 (`getLocalTime(&timeinfo, 0)` không chờ / timeout = 0).
   - Loại bỏ hoàn toàn hiện tượng chớp màn hình về `00:00` và `Loading...` khi chuyển phút hoặc rớt Wi-Fi tạm thời.
   - Lệnh `configTzTime()` chỉ gọi 1 lần duy nhất lúc `init()`. Tiến trình NTP chạy ngầm trên FreeRTOS task (`Task_NtpSyncWorker`), không gây nghẽn/khựng UI.
@@ -196,7 +200,27 @@
 - [x] Loại bỏ hoàn toàn interval timers riêng. Đồng bộ tập trung 1 lần khi chip tỉnh dậy (Timer Wakeup 5 phút hoặc Touch Wakeup).
 - [x] Triển khai tính toán sleep timer động trong `ConfigManager::getSecondsToNextAlarm(nowSec)` và `main.cpp`: `sleepTimeUs = min(SLEEP_TIMER_US, alarmUs)`.
 - [x] Hỗ trợ tải dữ liệu media streaming dạng chunk 256B từ Firebase Storage vào thẳng `IStorageProvider` (NAND/SD) tránh tràn RAM ESP32-C3.
-- [x] Biên dịch thành công 100% (`[SUCCESS]`), RAM 19.0% (62KB/328KB), Flash 70.7% (1.29MB/1.83MB).
+- [x] **Tối ưu hóa Non-blocking Touch UI**: Tạo `NetworkManager::triggerFirebaseSync(...)` khởi chạy task ngầm FreeRTOS (`FbSync`, Stack 8KB, Priority 2). Giải phóng 100% `Task_UIController` (Priority 5) giúp vòng lặp đọc cảm ứng TTP223 100Hz hoạt động liên tục, hoàn toàn không bị block/giật lag khi mạng HTTPS đang sync.
+- [x] **Ghi thật vào SPI Flash W25Q128 (16MB)**: Triển khai lệnh `eraseSector` (4KB sector erase `0x20`) và `writeRaw` (Page Program `0x02` 256B) trong `NandStorage` & `NandStorageProvider`. Dữ liệu media tải từ Firebase Storage được ghi đè trực tiếp vào các Slot Flash thực tế của chip W25Q128.
+- [x] **Tính năng Erase/Format NAND Flash khi boot**: Đã thêm `formatStorage()` giúp xóa sạch Sector 0 (Header) và 5 Sector của 5 Slot mẫu cũ trên chip W25Q128 + reset cờ `unread_mask` NVS về 0.
+- [x] **Tín hiệu trực quan & Khóa chống ngủ khi tải (Download Sleep Lock & UI Signal)**: Thêm cờ `_isDownloadingMedia` và `NetworkManager::isDownloadingMedia()`. Tự động bật màn hình hiển thị `"Downloading..."` (và `"Download Done!"` khi xong), đồng thời khóa `Task_UIController` không cho chip chui vào Light Sleep trong suốt thời gian tải dữ liệu mạng.
+- [x] **Khắc phục triệt để lỗi `Storage Err!` khi Format**: Thêm `NandStorage::writeSlotTable()`. Khi chip Flash bị Format/xóa Sector 0, `NandStorage::init()` tự động kiến tạo lại bảng Header `"NSLT"` mới sạch sẽ, loại bỏ hoàn toàn treo màn hình `Storage Err!`.
+- [x] **Thông báo Debug trực quan trên màn hình (`DEBUG_SCREEN`)**: Bổ sung hiển thị trực quan các bước giao tiếp Firebase trên màn hình TFT (`"Checking Firebase..."`, `"Polling Msg..."`, `"No New Msg"` / `"Found New Msg!"`, phần trăm tiến độ `"Downloading XX%"`, `"Download Done!"` và thông báo mã lỗi HTTP nếu có) với comment `// DEBUG_SCREEN:` rõ ràng để dễ dàng thu hồi sau này.
+- [x] **Sửa lỗi `FB http Err: 400` (Firebase REST 400 Bad Request)**: Bỏ các tham số `orderBy` và `startAt` trong URL REST API (nguyên nhân đòi hỏi Database Indexing Rules trên Firebase), chuyển sang lọc `if (timestamp > lastTs)` trực tiếp trong code C++.
+- [x] **Sửa lỗi `FB HTTP Err: -1` (Connection Refused / Network Not Ready)**: Thêm vòng lặp chờ Wi-Fi re-associate ổn định và xin lại IP (tối đa 5s) khi vừa đi ngủ dậy từ Light Sleep + cơ chế tự thử lại `http.GET()` lần 2 nếu bị rớt socket tạm thời.
+- [x] **Hiển thị mốc timestamp `lastTs` & `msgTs` trên màn hình**: Bổ sung debug hiển thị giá trị `lastTs` trong NVS và `msgTs` đọc được từ Firebase lên màn hình TFT để xác minh lý do tin nhắn bị xem là cũ và bị Skip.
+- [x] **Đồng bộ Firebase tức thì khi boot (`Boot-time Instant Sync`)**: Thêm `triggerFirebaseSync(...)` trực tiếp vào `setup()` của `main.cpp` giúp ESP32 tự động sync Firebase ngay khi vừa nạp code/bật nguồn thành công mà không phải chờ 30 giây hay đợi ngắt chạm.
+- [x] **Reset mốc `lastTs` về 0 khi Format Flash**: Tích hợp reset mốc thời gian NVS `last_download_ts` về `0` trong `NandStorageProvider::formatStorage()`, giúp ESP32 sẵn sàng kéo lại toàn bộ tin nhắn từ Firebase từ đầu sau khi xóa dữ liệu Flash NAND.
+- [x] **Khóa Sleep toàn diện trong lúc Sync (`isFirebaseSyncing`)**: Sửa cờ khóa sleep trong `main.cpp` từ `isDownloadingMedia` (chỉ khóa khi tải file) thành `isFirebaseSyncing` (khóa toàn bộ chu trình từ lúc bắt đầu gọi request). Đảm bảo chip thức liên tục 100% trong suốt quá trình giao tiếp Firebase, không bị sập nguồn/ngủ giữa chừng (Sleep interrupt) gây ngắt quãng tải dữ liệu.
+- [x] **Xử lý linh hoạt Link Firebase Storage**: Tự động nhận diện và convert đường dẫn dạng relative path (VD: `media/ESP32...`) hoặc `gs://...` được lưu trên Database thành dạng HTTPS REST Download URL hợp lệ (`https://firebasestorage.googleapis.com/...`) để ESP32 có thể tải file thành công bằng `HTTPClient`.
+- [x] **Cảnh báo thiếu đường dẫn tải (`No Media URL!`)**: Thêm hiển thị báo lỗi chữ đỏ `"No Media URL!"` nếu tin nhắn mới kéo về không hề chứa đường link (`bin_url`, `video_url`, hoặc `image_url`) nhằm giúp debug tại sao bị skip tiến trình Download.
+- [x] **Xử lý triệt để lỗi mất URL dài (`Zero-Copy JSON Parsing & Flexible Key Matcher`)**: Chuyển về `deserializeJson(doc, payload)` Zero-Copy. Đồng thời nâng cấp bộ parser hỗ trợ linh hoạt cả cấu trúc Firebase `JsonObject` và `JsonArray`, tự động quét tất cả các biến thể đặt tên key (`bin_url`, `binUrl`, `video_url`, `videoUrl`, `image_url`, `imageUrl`, `media_url`, `mediaUrl`, `url`) để đọc đúng 100% dữ liệu từ Firebase.
+- [x] **Xử lý tự động hiển thị Ảnh/Video ngay khi tải từ Firebase (`Raw JPEG & Slot Header Auto-Generation`)**: 
+  - Khắc phục triệt để nguyên nhân tải 100% nhưng không hiện ảnh: Khi tải từ Firebase về Flash NAND, code tự động kiểm tra byte đầu tiên. Nếu là file ảnh `.jpg` thô (`0xFF 0xD8 0xFF`), ESP32 sẽ tự động chèn 4-byte `jpegSize` vào đầu dữ liệu slot.
+  - Tự động ghi nhãn `"VIMG"` (cho ảnh) hoặc `"VJPG"` (cho video) vào bảng Slot Table (`Sector 0`) để `NandStorage` và `MediaPlayer` công nhận Slot hợp lệ và lập tức giải mã hiển thị hình ảnh rực rỡ trên màn hình LCD.
+- [x] **Tự động phát Media ngay sau khi tải xong (`Auto Play on Download Complete & Screen Overwrite Fix`)**: Tích hợp Event-driven callback `setOnDownloadComplete`. Đã loại bỏ triệt để xung đột giao diện làm chữ `"All Sync Done!"` in đè và xóa mất bức ảnh vừa được `MediaPlayer` hiển thị. Bức ảnh/video sẽ được giữ nguyên 100% rực rỡ trên màn hình LCD.
+- [x] **Thông báo hoàn tất (`All Sync Done`)**: Thêm hiển thị chữ `"All Sync Done!"` trên màn hình khi toàn bộ tiến trình Firebase đã kết thúc thành công.
+- [x] Biên dịch thành công 100% (`[SUCCESS]`), RAM 19.0% (62KB/328KB), Flash 70.8% (1.29MB/1.83MB).
 
 ---
 

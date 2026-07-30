@@ -2,6 +2,7 @@
 #include "captive_portal_html.h"
 #include <DNSServer.h>
 #include <time.h>
+#include <vector>
 #include "esp_sntp.h"
 
 static const byte DNS_PORT = 53;
@@ -67,6 +68,9 @@ void NetworkManager::update() {
 void NetworkManager::triggerNtpSync() {
     if (WiFi.status() != WL_CONNECTED) return;
     if (_isNtpSyncing) return;
+
+    // Re-apply timezone mỗi lần sync để chống drift sau Light Sleep (thời gian bị lệch sau 1 ngày)
+    configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 
     _isNtpSyncing = true;
     xTaskCreate(ntpTaskWorker, "NtpSync", 4096, this, 1, nullptr);
@@ -255,11 +259,48 @@ bool NetworkManager::isWebServerRunning() const {
 #include <ArduinoJson.h>
 #include "IStorageProvider.h"
 #include "ConfigManager.h"
+#include "DisplayDriver.h"
+
+struct FirebaseTaskParams {
+    NetworkManager* self;
+    uint8_t batteryPercent;
+    bool isCharging;
+    IStorageProvider* storage;
+    DisplayDriver* display;
+};
+
+void NetworkManager::triggerFirebaseSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
+    if (WiFi.status() != WL_CONNECTED) return;
+    if (_isFirebaseSyncing) return;
+
+    _isFirebaseSyncing = true;
+    FirebaseTaskParams* p = new FirebaseTaskParams{this, batteryPercent, isCharging, storage, nullptr};
+    xTaskCreate(firebaseSyncTaskWorker, "FbSync", 8192, p, 2, nullptr);
+}
+
+void NetworkManager::firebaseSyncTaskWorker(void* param) {
+    FirebaseTaskParams* p = static_cast<FirebaseTaskParams*>(param);
+    if (p && p->self) {
+        p->self->syncFirebaseWakeup(p->batteryPercent, p->isCharging, p->storage);
+        p->self->_isFirebaseSyncing = false;
+        delete p;
+    }
+    vTaskDelete(nullptr);
+}
 
 bool NetworkManager::syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
-    if (!isConnected()) return false;
+    // Chờ tối đa 5s cho Wi-Fi tái kết nối ổn định sau khi chip thức dậy từ Light Sleep
+    uint32_t waitStart = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - waitStart < 5000)) {
+        delay(100);
+    }
 
-    Serial.println(F("[NetworkManager] Starting Firebase Wakeup Sync..."));
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println(F("[NetworkManager] Firebase Sync skipped: Wi-Fi not connected."));
+        return false;
+    }
+
+    Serial.println(F("[NetworkManager] Starting Silent Firebase Wakeup Sync..."));
 
     // 1. Update Status (Heartbeat)
     updateFirebaseStatus(batteryPercent, isCharging);
@@ -272,7 +313,7 @@ bool NetworkManager::syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging,
         checkAndDownloadNewMessages(storage);
     }
 
-    Serial.println(F("[NetworkManager] Firebase Wakeup Sync completed."));
+    Serial.println(F("[NetworkManager] Silent Firebase Wakeup Sync completed."));
     return true;
 }
 
@@ -290,23 +331,16 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     http.setTimeout(FIREBASE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
-    time_t nowSec = time(nullptr);
-    uint64_t nowMs = (uint64_t)nowSec * 1000ULL;
+    char payload[128];
+    uint32_t now = (uint32_t)time(nullptr);
+    snprintf(payload, sizeof(payload),
+             "{\"online\":true,\"battery\":%d,\"is_charging\":%s,\"last_seen\":%u}",
+             batteryPercent, isCharging ? "true" : "false", now);
 
-    char body[256];
-    snprintf(body, sizeof(body),
-             "{\"online\":true,\"charging\":%s,\"battery\":%u,\"fw_version\":\"%s\",\"last_seen\":%llu}",
-             isCharging ? "true" : "false", batteryPercent, FW_VERSION, (unsigned long long)nowMs);
-
-    int httpCode = http.PATCH(body);
+    int httpCode = http.PATCH((uint8_t*)payload, strlen(payload));
     http.end();
 
-    if (httpCode == HTTP_CODE_OK || httpCode == 204) {
-        Serial.println(F("[NetworkManager] Firebase status updated successfully."));
-        return true;
-    }
-    Serial.printf("[NetworkManager] Firebase status update failed, HTTP code: %d\n", httpCode);
-    return false;
+    return (httpCode == HTTP_CODE_OK);
 }
 
 bool NetworkManager::checkFirebaseFlags() {
@@ -330,34 +364,34 @@ bool NetworkManager::checkFirebaseFlags() {
     String payload = http.getString();
     http.end();
 
+    if (payload == "null" || payload.length() <= 2) return true;
+
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err) return false;
 
-    bool aFlag = doc["a_flag"] | false;
-    bool pFlag = doc["p_flag"] | false;
+    bool syncAlarmsFlag = doc["sync_alarms_flag"] | false;
+    bool emergencyOta = doc["emergency_ota"] | false;
+    bool normalOta = doc["normal_ota"] | false;
 
-    if (aFlag) {
-        Serial.println(F("[NetworkManager] a_flag detected! Syncing alarms..."));
+    if (syncAlarmsFlag) {
         syncFirebaseAlarms();
-
-        // Clear a_flag
-        if (http.begin(client, url)) {
-            http.setTimeout(FIREBASE_TIMEOUT_MS);
-            http.addHeader("Content-Type", "application/json");
-            http.PATCH("{\"a_flag\":false}");
-            http.end();
-        }
     }
 
-    if (pFlag) {
-        Serial.println(F("[NetworkManager] p_flag detected! Resetting p_flag..."));
-        if (http.begin(client, url)) {
-            http.setTimeout(FIREBASE_TIMEOUT_MS);
-            http.addHeader("Content-Type", "application/json");
-            http.PATCH("{\"p_flag\":false}");
-            http.end();
-        }
+    // Reset cờ sau khi đọc
+    WiFiClientSecure patchClient;
+    patchClient.setInsecure();
+    HTTPClient patchHttp;
+
+    char patchUrl[256];
+    snprintf(patchUrl, sizeof(patchUrl), "https://%s/boxes/%s/flags.json?auth=%s",
+             FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+
+    if (patchHttp.begin(patchClient, patchUrl)) {
+        patchHttp.setTimeout(FIREBASE_TIMEOUT_MS);
+        patchHttp.addHeader("Content-Type", "application/json");
+        patchHttp.PATCH("{\"sync_alarms_flag\":false,\"emergency_ota\":false,\"normal_ota\":false}");
+        patchHttp.end();
     }
 
     return true;
@@ -384,14 +418,16 @@ bool NetworkManager::syncFirebaseAlarms() {
     String payload = http.getString();
     http.end();
 
+    if (payload == "null" || payload.length() <= 2) return true;
+
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
     if (err) return false;
 
-    JsonObject obj = doc.as<JsonObject>();
     AlarmItem alarms[MAX_ALARMS];
     size_t count = 0;
 
+    JsonObject obj = doc.as<JsonObject>();
     for (JsonPair kv : obj) {
         if (count >= MAX_ALARMS) break;
         JsonObject alarmObj = kv.value().as<JsonObject>();
@@ -407,8 +443,8 @@ bool NetworkManager::syncFirebaseAlarms() {
     if (cfg.init(NVS_NAMESPACE)) {
         cfg.saveAlarms(alarms, count);
         cfg.end();
-        Serial.printf("[NetworkManager] Saved %u alarms to NVS\n", (unsigned int)count);
     }
+
     return true;
 }
 
@@ -428,14 +464,24 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
 
     char url[384];
     snprintf(url, sizeof(url),
-             "https://%s/messages/%s.json?orderBy=\"timestamp\"&startAt=%llu&auth=%s",
-             FIREBASE_HOST, BOX_ID, (unsigned long long)(lastTs + 1), FIREBASE_AUTH_SECRET);
+             "https://%s/messages/%s.json?auth=%s",
+             FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
 
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, url)) {
+        Serial.println(F("[NetworkManager] HTTP init failed for messages endpoint."));
+        return false;
+    }
     http.setTimeout(FIREBASE_TIMEOUT_MS);
 
     int httpCode = http.GET();
+    if (httpCode < 0) {
+        // Tự thử lại lần 2 sau 500ms nếu ổ cắm TCP vừa khôi phục sau khi chip tỉnh dậy từ Light Sleep
+        delay(500);
+        httpCode = http.GET();
+    }
+
     if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[NetworkManager] Firebase HTTP GET failed with code: %d\n", httpCode);
         http.end();
         return false;
     }
@@ -443,28 +489,105 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     String payload = http.getString();
     http.end();
 
-    if (payload == "null" || payload.length() <= 2) return true; // No new messages
+    if (payload == "null" || payload.length() <= 2) {
+        return true;
+    }
 
+    // Zero-copy JSON parsing từ RAM string (hỗ trợ chuỗi dài bất kỳ như bin_url mà không bị xén)
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload);
-    if (err) return false;
 
-    JsonObject messagesObj = doc.as<JsonObject>();
+    if (err) {
+        Serial.printf("[NetworkManager] JSON parse error: %s\n", err.c_str());
+        return false;
+    }
+
+    if (doc.isNull()) {
+        return true;
+    }
+
+    // Tạo danh sách các tin nhắn từ JsonObject hoặc JsonArray (Firebase tự động biến đổi tùy theo dạng key)
+    std::vector<JsonObject> msgList;
+    if (doc.is<JsonObject>()) {
+        JsonObject obj = doc.as<JsonObject>();
+        for (JsonPair kv : obj) {
+            if (kv.value().is<JsonObject>()) {
+                msgList.push_back(kv.value().as<JsonObject>());
+            }
+        }
+    } else if (doc.is<JsonArray>()) {
+        JsonArray arr = doc.as<JsonArray>();
+        for (JsonVariant v : arr) {
+            if (v.is<JsonObject>()) {
+                msgList.push_back(v.as<JsonObject>());
+            }
+        }
+    }
+
+    if (msgList.empty()) {
+        return true;
+    }
+
     uint64_t maxTs = lastTs;
+    bool hasNewMsg = false;
 
-    for (JsonPair kv : messagesObj) {
-        JsonObject msg = kv.value().as<JsonObject>();
+    bool downloadedAnyMedia = false;
+
+    for (JsonObject msg : msgList) {
         uint64_t ts = msg["timestamp"] | 0ULL;
+
+        if (ts <= lastTs) {
+            continue;
+        }
+
+        hasNewMsg = true;
         if (ts > maxTs) maxTs = ts;
 
-        const char* binUrl = msg["bin_url"] | nullptr;
-        if (binUrl && binUrl[0] != '\0') {
-            Serial.printf("[NetworkManager] Downloading bin media from: %s\n", binUrl);
-            if (http.begin(client, binUrl)) {
-                http.setTimeout(10000);
+        // Tìm kiếm linh hoạt tất cả các biến thể đặt tên key (snake_case, camelCase...)
+        String rawMediaUrl = "";
+        const char* candidateKeys[] = {
+            "bin_url", "binUrl", 
+            "video_url", "videoUrl", 
+            "image_url", "imageUrl", 
+            "media_url", "mediaUrl", 
+            "url"
+        };
+        for (const char* k : candidateKeys) {
+            if (msg.containsKey(k) && !msg[k].isNull()) {
+                String val = msg[k].as<String>();
+                val.trim();
+                if (val.length() > 0 && val != "null") {
+                    rawMediaUrl = val;
+                    break;
+                }
+            }
+        }
+
+        if (rawMediaUrl.length() > 0) {
+            String fullUrl = rawMediaUrl;
+            
+            // Xử lý tự động convert relative path hoặc gs:// thành HTTP Download URL của Firebase Storage API
+            if (!fullUrl.startsWith("http")) {
+                if (fullUrl.startsWith("gs://")) {
+                    int slashIdx = fullUrl.indexOf('/', 5);
+                    if (slashIdx > 0) fullUrl = fullUrl.substring(slashIdx + 1);
+                }
+                if (fullUrl.startsWith("/")) fullUrl.remove(0, 1);
+                fullUrl.replace("/", "%2F"); // Đổi / thành %2F
+                fullUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + fullUrl + "?alt=media";
+            }
+
+            _isDownloadingMedia = true;
+            Serial.printf("[NetworkManager] Downloading bin media from: %s\n", fullUrl.c_str());
+            
+            if (http.begin(client, fullUrl.c_str())) {
+                http.setTimeout(30000);
                 int code = http.GET();
                 if (code == HTTP_CODE_OK) {
                     int len = http.getSize();
+                    int initialLen = len;
+                    int totalRead = 0;
+                    Serial.printf("[NetworkManager] HTTP GET OK. Content-Length: %d\n", len);
                     WiFiClient* stream = http.getStreamPtr();
                     if (storage->openForWrite("slot_0")) {
                         uint8_t buffer[256];
@@ -474,18 +597,29 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                 size_t toRead = (sizeAvail < sizeof(buffer)) ? sizeAvail : sizeof(buffer);
                                 int c = stream->readBytes(buffer, toRead);
                                 storage->writeChunk(buffer, c);
+                                totalRead += c;
                                 if (len > 0) len -= c;
                             }
                             delay(1);
                         }
                         storage->closeWrite();
-                        Serial.println(F("[NetworkManager] Binary media download completed."));
+                        Serial.printf("[NetworkManager] Media download completed. totalRead: %d bytes\n", totalRead);
+                        downloadedAnyMedia = true;
+                        if (_onDownloadComplete) {
+                            _onDownloadComplete();
+                        }
                     }
+                } else {
+                    Serial.printf("[NetworkManager] HTTP download failed with code: %d\n", code);
                 }
                 http.end();
             }
+            _isDownloadingMedia = false;
+        } else {
+            Serial.println(F("[NetworkManager] Message skipped: No valid media URL found."));
         }
     }
+
 
     if (maxTs > lastTs) {
         if (cfg.init(NVS_NAMESPACE)) {
@@ -495,5 +629,5 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         }
     }
 
-    return true;
+    return downloadedAnyMedia;
 }

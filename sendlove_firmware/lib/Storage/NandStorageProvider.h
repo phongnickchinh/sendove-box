@@ -32,11 +32,15 @@ public:
     bool getFirstValidIdentifier(char* outId, size_t maxLen) const override;
     bool getNextValidIdentifier(const char* currentId, char* outId, size_t maxLen) const override;
 
+    bool formatStorage() override;
+
 private:
     NandStorage _nand;
     Preferences _prefs;
     uint8_t _unreadBitmask = 0;
     int8_t _writeSlotIndex = 0;
+    uint32_t _writeOffset = 0;
+    uint32_t _lastErasedSectorAddr = 0xFFFFFFFF;
 
     int8_t parseSlotId(const char* identifier) const;
     void loadNvsState();

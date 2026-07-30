@@ -44,8 +44,7 @@ static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 
 // Timing & Power Constants
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
-static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS =
-    30000; // TODO: Increase to 60000-300000 for production
+static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 30000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr uint8_t WIFI_RETRY_MAX = 3;
 static constexpr uint32_t TOUCH_DEBOUNCE_MS = 50;
@@ -74,7 +73,6 @@ static constexpr uint32_t FIREBASE_TIMEOUT_MS = 5000;
 static constexpr const char *NVS_KEY_LAST_DOWNLOAD_TS = "last_dl_ts";
 static constexpr uint8_t MAX_ALARMS = 10;
 
-
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";
 static constexpr const char *FW_VERSION = "2.1.0";
@@ -97,14 +95,14 @@ static constexpr UBaseType_t TASK_PRIORITY_UI_CONTROLLER = 5;
 static constexpr uint32_t TASK_STACK_POWER_MANAGER = 4096;
 static constexpr uint32_t TASK_STACK_MEDIA_PLAYER = 8192;
 static constexpr uint32_t TASK_STACK_NETWORK = 8192;
-static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
+static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 8192;
 
 // NVS Namespace
 static constexpr const char *NVS_NAMESPACE = "sendlove";
 
 // Storage Provider Configuration
 #define STORAGE_TYPE_NAND 0
-#define STORAGE_TYPE_SD   1
+#define STORAGE_TYPE_SD 1
 #define ACTIVE_STORAGE_TYPE STORAGE_TYPE_NAND
 
 #ifdef WOKWI_SIMULATION
@@ -113,4 +111,3 @@ static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;
 #endif
 
 #endif // CONFIG_H
-

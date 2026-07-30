@@ -72,6 +72,9 @@ public:
 
     /// Tìm ID của item hợp lệ kế tiếp
     virtual bool getNextValidIdentifier(const char* currentId, char* outId, size_t maxLen) const = 0;
+
+    /// Xóa toàn bộ dữ liệu storage (Factory reset / Clear NAND)
+    virtual bool formatStorage() { return false; }
 };
 
 #endif // I_STORAGE_PROVIDER_H

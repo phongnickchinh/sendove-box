@@ -123,6 +123,7 @@ void Task_UIController(void *pvParameters) {
 
     uint32_t now = millis();
     if (!appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
+        !appCtx.network.isFirebaseSyncing() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
       
       time_t nowSec = time(nullptr);
@@ -138,23 +139,29 @@ void Task_UIController(void *pvParameters) {
       appCtx.powerManager.enterLightSleep(sleepTimeUs, &appCtx.display);
 
       delay(50);
-      appCtx.network.ensureConnected();
-      appCtx.network.triggerNtpSync();
-
-      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-      bool isCharging = appCtx.powerManager.isCharging();
-      appCtx.network.syncFirebaseWakeup(batPercent, isCharging, appCtx.storage);
-
       esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
-      if (wakeupCause == ESP_SLEEP_WAKEUP_TIMER) {
-        lastUserActivity = millis();
-        activeSleepTimeoutMs = 2000;
-      } else {
-        lastUserActivity = millis();
-        activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
+      if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER) {
+        // Touch Wakeup: Bật màn hình và Render Standby UI NGAY LẬP TỨC (< 50ms!)
+        appCtx.display.turnOn();
         currentAppState = AppState::STATE_STANDBY;
         forceStandbyRedraw = true;
+        lastUserActivity = millis();
+        activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
+      } else {
+        lastUserActivity = millis();
+        activeSleepTimeoutMs = 2000;
       }
+
+      // Thực hiện đồng bộ ngầm non-blocking (không làm giật/block Touch UI)
+      appCtx.network.ensureConnected();
+      appCtx.network.triggerNtpSync();
+      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+      bool isCharging = appCtx.powerManager.isCharging();
+      appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+    }
+
+    if (appCtx.network.isFirebaseSyncing()) {
+      lastUserActivity = millis();
     }
 
     appCtx.ui.updateLED();
@@ -211,6 +218,9 @@ void setup() {
     }
   }
 
+  // Xóa sạch toàn bộ dữ liệu 5 slot cũ trên NAND Flash ở lần boot nạp này
+  appCtx.storage->formatStorage();
+
   appCtx.player.init(appCtx.storage, &appCtx.display);
   appCtx.ui.init(PIN_TOUCH, &appCtx.display);
   appCtx.powerManager.init((gpio_num_t)PIN_TOUCH);
@@ -224,6 +234,11 @@ void setup() {
     if (appCtx.network.getWebServer() != nullptr) {
       appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
     }
+
+    // Kích hoạt Firebase Sync ngầm ngay khi vừa nạp code/khởi động xong
+    uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+    bool isCharging = appCtx.powerManager.isCharging();
+    appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
   } else {
     appCtx.display.showMessage("Setup Wi-Fi:\nSendloveBox-Setup");
     appCtx.network.startProvisioningAP("SendloveBox-Setup");

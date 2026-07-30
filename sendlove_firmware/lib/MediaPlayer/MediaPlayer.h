@@ -66,6 +66,10 @@ private:
     uint16_t _totalFrames  = 0;
     uint16_t _currentFrame = 0;
 
+    bool     _isSlbxRgb565  = false;
+    uint16_t _slbxWidth     = 128;
+    uint16_t _slbxHeight    = 160;
+
     /// Decode and render single JPEG frame
     bool decodeOneFrame();
 

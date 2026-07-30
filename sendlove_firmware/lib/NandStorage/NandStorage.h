@@ -35,6 +35,21 @@ public:
     /// Read raw data bytes from specified Flash address
     void readRaw(uint32_t addr, uint8_t* data, uint32_t len);
 
+    /// Erase a 4KB Flash sector at specified address
+    void eraseSector(uint32_t addr);
+
+    /// Write raw data bytes to Flash address (handles page programming)
+    void writeRaw(uint32_t addr, const uint8_t* data, uint32_t len);
+
+    /// Erase all slots & header table (Format Flash)
+    void formatAll();
+
+    /// Write / sync current slot table to Sector 0 with "NSLT" magic header
+    void writeSlotTable();
+
+    /// Set slot metadata in RAM table (used after writing slot data)
+    void setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize, uint16_t fps, uint16_t totalFrames);
+
     /// Get slot metadata entry
     SlotEntry getSlotInfo(uint8_t slot) const;
 

@@ -77,14 +77,31 @@ public:
     /// Check if Wi-Fi provisioning portal is currently active
     bool isProvisioningActive() const;
 
-    /// Đồng bộ dữ liệu Firebase khi thức dậy (Status, Flags, Messages, Alarms)
+    /// Check if currently downloading media in progress
+    bool isDownloadingMedia() const { return _isDownloadingMedia; }
+
+    /// Check if Firebase sync is currently running in background
+    bool isFirebaseSyncing() const { return _isFirebaseSyncing; }
+
+    /// Đồng bộ dữ liệu Firebase ngầm khi thức dậy (Status, Flags, Messages, Alarms)
     bool syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
+
+    /// Set callback khi tải media hoàn tất
+    void setOnDownloadComplete(std::function<void()> cb) { _onDownloadComplete = cb; }
+
+    /// Kích hoạt Firebase Sync ngầm trên background task (không làm block UI Task)
+    void triggerFirebaseSync(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
 
 private:
     bool updateFirebaseStatus(uint8_t batteryPercent, bool isCharging);
     bool checkFirebaseFlags();
     bool syncFirebaseAlarms();
     bool checkAndDownloadNewMessages(class IStorageProvider* storage);
+
+    static void firebaseSyncTaskWorker(void* param);
+    volatile bool _isFirebaseSyncing = false;
+    volatile bool _isDownloadingMedia = false;
+    std::function<void()> _onDownloadComplete = nullptr;
 
     bool _isTimeSynced = false;
     volatile bool _isNtpSyncing = false;

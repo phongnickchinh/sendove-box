@@ -221,10 +221,17 @@
 - [x] **Tự động phát Media ngay sau khi tải xong (`Auto Play on Download Complete & Screen Overwrite Fix`)**: Tích hợp Event-driven callback `setOnDownloadComplete`. Đã loại bỏ triệt để xung đột giao diện làm chữ `"All Sync Done!"` in đè và xóa mất bức ảnh vừa được `MediaPlayer` hiển thị. Bức ảnh/video sẽ được giữ nguyên 100% rực rỡ trên màn hình LCD.
 - [x] **Thông báo hoàn tất (`All Sync Done`)**: Thêm hiển thị chữ `"All Sync Done!"` trên màn hình khi toàn bộ tiến trình Firebase đã kết thúc thành công.
 - [x] **Cập nhật Quy tắc Indexing trên Firebase (`database.rules.json`)**: Bổ sung `.indexOn: ["timestamp"]` cho node `messages/$box_id`, cho phép lọc Server-side trên Firebase.
-- [x] **Tối ưu Server-side Filtering & Zero-Copy Stream Parsing (`NetworkManager`)**:
+- [x] Tối ưu Server-side Filtering & Zero-Copy Stream Parsing (`NetworkManager`):
   - Đính kèm query parameters `orderBy="timestamp"&startAt=<nextTs>` vào HTTP GET request gửi lên Firebase REST API. Khi không có tin mới, Firebase Server trả về `{}` (2 bytes), giảm 99% tải băng thông & CPU/RAM cho Box.
   - Sử dụng Stream parsing trực tiếp từ HTTP socket (`deserializeJson(doc, *stream)`), loại bỏ hoàn toàn cấp phát mảng chuỗi tạm `http.getString()`, chống triệt để phân mảnh RAM Heap trên ESP32-C3.
 - [x] Biên dịch thành công 100% (`[SUCCESS]`), RAM 19.0% (62KB/328KB), Flash 71.3% (1.30MB/1.83MB).
+
+### Phase 3C: Advanced Playback & Touch Refactoring (Completed)
+- [x] **Cấu trúc lại Metadata Storage (maxDisplayTime)**: Tận dụng vùng nhớ `reserved` 4-byte trong bảng Header `SlotEntry` của NAND Flash Sector 0 để lưu trữ tĩnh thông số `max_display_time`.
+- [x] **Refactor cơ chế Touch (Long/Short Press)**: Nâng cấp `UIController` nhận diện `SHORT_PRESS` (bấm nhanh chuyển slot, đánh dấu đã đọc) và `LONG_PRESS` (bấm giữ 3s ép về Standby mà không đánh dấu đã đọc).
+- [x] **Biến đếm `_numOfNewMsg`**: Theo dõi chính xác tổng tin nhắn chưa đọc còn lưu trong NAND Flash cộng với tin đang chờ tải trên Cloud. Box dừng phát khi xem xong tin mới (khi biến về 0) thay vì lặp lại vòng tròn các slot cũ.
+- [x] **An toàn NAND Flash (Chặn Download khi Play)**: Box chỉ trigger tiến trình Download khi RAM/SPI bus rảnh rỗi ở màn hình chờ (người dùng xem xong tin cũ, Touch bị vô hiệu hóa tạm thời với thông báo `Downloading...`).
+- [x] **Auto Timeout Next**: Tự động chuyển media sau khi hiển thị đủ `maxDisplayTime` giây.
 
 ---
 

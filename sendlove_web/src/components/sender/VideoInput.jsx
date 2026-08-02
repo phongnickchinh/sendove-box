@@ -23,7 +23,7 @@ const VideoInput = ({ onVideoSelect, onCancel }) => {
   return (
     <div className="video-input-container glass-panel fade-in" style={{ padding: '20px', textAlign: 'center' }}>
       <h3>Gửi một đoạn Video</h3>
-      <p style={{fontSize: '12px', color: '#666'}}>Tối đa 15 giây</p>
+      <p style={{fontSize: '12px', color: '#666'}}>Tối đa 10 giây</p>
       
       {!previewUrl ? (
         <div className="upload-section" style={{ margin: '30px 0' }}>
@@ -40,7 +40,7 @@ const VideoInput = ({ onVideoSelect, onCancel }) => {
       ) : (
         <div className="preview-section">
           <div style={{ 
-            width: '128px', height: '160px', 
+            width: '240px', height: '240px', 
             margin: '20px auto', 
             border: '2px dashed var(--color-primary)',
             borderRadius: '8px',

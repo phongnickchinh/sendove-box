@@ -21,6 +21,8 @@ class DisplayDriver;
 // - Thanh trạng thái pin — khi có BatteryMonitor
 // ============================================================================
 
+enum class TouchEvent { NONE, SHORT_PRESS, LONG_PRESS };
+
 /// Trạng thái hiển thị LED (giữ enum cho Phase 2)
 enum class LEDState : uint8_t {
     OFF,
@@ -41,7 +43,7 @@ public:
     void setLEDState(LEDState state);
 
     /// Read debounced touch sensor state
-    bool isTouched();
+    TouchEvent getTouchEvent();
 
     /// Reset touch confirmation state
     void resetTouch();
@@ -67,6 +69,7 @@ private:
     bool     _touchConfirmed   = false;
     uint32_t _lastDebounceTime = 0;
     uint32_t _touchStartTime   = 0;
+    bool     _longPressEmitted = false;
 };
 
 #endif // UI_CONTROLLER_H

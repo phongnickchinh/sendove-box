@@ -21,7 +21,7 @@
 //   - Task_UIController: Đọc touch sensor + gửi event chuyển slot/item
 //   - Task_NetworkController: Phục vụ WebServer / Captive Portal
 // ============================================================================
-enum class SystemEvent : uint8_t { NONE, TOUCH_NEXT_SLOT, TOUCH_TOGGLE_MODE };
+enum class SystemEvent : uint8_t { NONE, TOUCH_SHORT, TOUCH_LONG, TIMEOUT_AUTO_NEXT };
 
 struct AppContext {
   DisplayDriver display;
@@ -76,57 +76,107 @@ void Task_MediaPlayer(void *pvParameters) {
   Serial.println(F("[Task_MediaPlayer] started"));
   char currentId[32] = "";
   uint32_t lastClockRender = 0;
+  uint32_t playStartTime = 0;
 
   if (appCtx.storage && appCtx.storage->getFirstValidIdentifier(currentId, sizeof(currentId))) {
     if (currentAppState == AppState::STATE_VIDEO) {
       appCtx.player.playItem(currentId);
+      playStartTime = millis();
     }
   }
+
+  auto drawToast = [](const char* msg) {
+      appCtx.layoutEngine.renderStandbyScreen(&appCtx.display, &appCtx.network, true);
+      if (appCtx.display.acquireSPI()) {
+          appCtx.display.getTFT()->fillRect(0, 200, 240, 40, TFT_BLACK);
+          appCtx.display.getTFT()->setTextColor(TFT_WHITE);
+          appCtx.display.getTFT()->setTextDatum(lgfx::middle_center);
+          appCtx.display.getTFT()->setTextSize(1);
+          appCtx.display.getTFT()->drawString(msg, 120, 220);
+          appCtx.display.releaseSPI();
+      }
+  };
 
   for (;;) {
     SystemEvent event = SystemEvent::NONE;
     while (xQueueReceive(eventQueue, &event, 0) == pdTRUE) {
       Serial.printf("[Task_MediaPlayer] event=%d state=%d currentId=%s\n",
                     (int)event, (int)currentAppState, currentId);
-      if (event == SystemEvent::TOUCH_TOGGLE_MODE) {
+      
+      if (event == SystemEvent::TOUCH_SHORT) {
         if (currentAppState == AppState::STATE_STANDBY) {
-          currentAppState = AppState::STATE_VIDEO;
-          Serial.println(F("[Task_MediaPlayer] switching to VIDEO"));
-          appCtx.display.clear();
-          
-          char unreadId[32] = "";
-          if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
-            strncpy(currentId, unreadId, sizeof(currentId) - 1);
-            if (appCtx.player.playItem(currentId)) {
-              appCtx.storage->markAsRead(currentId);
-            } else {
-              Serial.printf("[Task_MediaPlayer] ERROR: playItem('%s') failed! Keeping slot as UNREAD.\n", currentId);
-            }
-          } else {
-            if (currentId[0] == '\0' && appCtx.storage) {
-              appCtx.storage->getFirstValidIdentifier(currentId, sizeof(currentId));
-            }
-            if (currentId[0] != '\0') {
-              appCtx.player.playItem(currentId);
-            }
-          }
-        } else {
-          Serial.println(F("[Task_MediaPlayer] cycling to next video/item"));
-          char unreadId[32] = "";
-          if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
-            strncpy(currentId, unreadId, sizeof(currentId) - 1);
-            if (appCtx.player.playItem(currentId)) {
-              appCtx.storage->markAsRead(currentId);
-            } else {
-              Serial.printf("[Task_MediaPlayer] ERROR: playItem('%s') failed! Keeping slot as UNREAD.\n", currentId);
-            }
-          } else {
-            char nextId[32] = "";
-            if (appCtx.storage && appCtx.storage->getNextValidIdentifier(currentId, nextId, sizeof(nextId))) {
-              strncpy(currentId, nextId, sizeof(currentId) - 1);
-              appCtx.player.playItem(currentId);
-            }
-          }
+           char unreadId[32] = "";
+           if (appCtx.network.getNumOfNewMsg() > 0) {
+              if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+                  currentAppState = AppState::STATE_VIDEO;
+                  appCtx.display.clear();
+                  strncpy(currentId, unreadId, sizeof(currentId) - 1);
+                  if (appCtx.player.playItem(currentId)) {
+                      playStartTime = millis();
+                  } else {
+                      Serial.println(F("[Task_MediaPlayer] playItem failed. Reverting to STANDBY."));
+                      currentAppState = AppState::STATE_STANDBY;
+                      forceStandbyRedraw = true;
+                  }
+              } else {
+                  Serial.println(F("[Task_MediaPlayer] No unread in memory but pending on server. Downloading batch..."));
+                  appCtx.player.stop();
+                  drawToast("Downloading...");
+                  uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+                  bool isCharging = appCtx.powerManager.isCharging();
+                  appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+              }
+           } else {
+              appCtx.display.turnOn();
+              drawToast("No new messages");
+              vTaskDelay(1000);
+              forceStandbyRedraw = true;
+           }
+        } else if (currentAppState == AppState::STATE_VIDEO) {
+           if (event == SystemEvent::TOUCH_SHORT) {
+               appCtx.storage->markAsRead(currentId);
+               appCtx.network.decrementNewMsgCount();
+           }
+
+           char unreadId[32] = "";
+           if (appCtx.network.getNumOfNewMsg() > 0) {
+               if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+                   strncpy(currentId, unreadId, sizeof(currentId) - 1);
+                   if (appCtx.player.playItem(currentId)) {
+                       playStartTime = millis();
+                   } else {
+                       Serial.println(F("[Task_MediaPlayer] playItem failed. Reverting to STANDBY."));
+                       currentAppState = AppState::STATE_STANDBY;
+                       forceStandbyRedraw = true;
+                   }
+               } else {
+                   appCtx.player.stop();
+                   currentAppState = AppState::STATE_STANDBY;
+                   drawToast("Downloading...");
+                   uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+                   bool isCharging = appCtx.powerManager.isCharging();
+                   appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+               }
+           } else {
+               appCtx.player.stop();
+               if (appCtx.display.acquireSPI()) {
+                   appCtx.display.getTFT()->fillRect(0, 200, 240, 40, TFT_BLACK);
+                   appCtx.display.getTFT()->setTextColor(TFT_WHITE);
+                   appCtx.display.getTFT()->setTextDatum(lgfx::middle_center);
+                   appCtx.display.getTFT()->setTextSize(1);
+                   appCtx.display.getTFT()->drawString("Reached newest msg", 120, 220);
+                   appCtx.display.releaseSPI();
+               }
+               vTaskDelay(1500);
+               currentAppState = AppState::STATE_STANDBY;
+               forceStandbyRedraw = true;
+           }
+        }
+      } else if (event == SystemEvent::TOUCH_LONG || event == SystemEvent::TIMEOUT_AUTO_NEXT) {
+        if (currentAppState == AppState::STATE_VIDEO) {
+           appCtx.player.stop();
+           currentAppState = AppState::STATE_STANDBY;
+           forceStandbyRedraw = true;
         }
       }
     }
@@ -134,6 +184,16 @@ void Task_MediaPlayer(void *pvParameters) {
     if (currentAppState == AppState::STATE_VIDEO) {
       if (!appCtx.otaHandler.isUpdating()) {
         appCtx.player.update();
+        
+        if (playStartTime > 0 && appCtx.storage) {
+            StorageItemInfo info = appCtx.storage->getItemInfo(currentId);
+            uint32_t maxDispMs = (info.maxDisplayTime > 0 ? info.maxDisplayTime : 60) * 1000;
+            if (millis() - playStartTime >= maxDispMs) {
+                playStartTime = 0; 
+                SystemEvent timeoutEv = SystemEvent::TIMEOUT_AUTO_NEXT;
+                xQueueSend(eventQueue, &timeoutEv, 0);
+            }
+        }
       } else {
         vTaskDelay(pdMS_TO_TICKS(100));
       }
@@ -141,7 +201,6 @@ void Task_MediaPlayer(void *pvParameters) {
       uint32_t now = millis();
       if (now - lastClockRender >= 1000 || forceStandbyRedraw) {
         bool fullRedraw = (lastClockRender == 0) || forceStandbyRedraw;
-        Serial.printf("[Task_MediaPlayer] redraw standby full=%d\n", fullRedraw ? 1 : 0);
         appCtx.layoutEngine.renderStandbyScreen(&appCtx.display, &appCtx.network, fullRedraw);
         lastClockRender = now;
         forceStandbyRedraw = false;
@@ -157,15 +216,33 @@ void Task_UIController(void *pvParameters) {
   uint32_t activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
 
   for (;;) {
-    if (appCtx.ui.isTouched()) {
-      Serial.println(F("[Task_UIController] touch event -> queue TOGGLE_MODE"));
-      SystemEvent event = SystemEvent::TOUCH_TOGGLE_MODE;
-      xQueueSend(eventQueue, &event, 0);
-      lastUserActivity = millis();
-      activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
+    TouchEvent tEvent = appCtx.ui.getTouchEvent();
+    if (tEvent != TouchEvent::NONE) {
+      if (appCtx.network.isFirebaseSyncing()) {
+          Serial.println(F("[Task_UIController] Ignoring touch because Firebase sync is active..."));
+      } else {
+          SystemEvent event = (tEvent == TouchEvent::LONG_PRESS) ? SystemEvent::TOUCH_LONG : SystemEvent::TOUCH_SHORT;
+          Serial.printf("[Task_UIController] touch event -> queue %d\n", (int)event);
+          xQueueSend(eventQueue, &event, 0);
+          lastUserActivity = millis();
+          activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
+      }
     }
 
     uint32_t now = millis();
+    static uint32_t lastIntervalSyncMs = millis();
+
+    // Periodic check if device is kept awake in Standby UI
+    if (now - lastIntervalSyncMs >= 10000 && !appCtx.network.isFirebaseSyncing() && currentAppState == AppState::STATE_STANDBY) {
+        lastIntervalSyncMs = now;
+        Serial.println(F("[Task_UIController] interval sync start (while awake)"));
+        appCtx.network.ensureConnected();
+        appCtx.network.triggerNtpSync();
+        uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+        bool isCharging = appCtx.powerManager.isCharging();
+        appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+    }
+
     if (!appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
         !appCtx.network.isFirebaseSyncing() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
@@ -218,6 +295,7 @@ void Task_UIController(void *pvParameters) {
       uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
       bool isCharging = appCtx.powerManager.isCharging();
       appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+      lastIntervalSyncMs = millis();
     }
 
     if (appCtx.network.isFirebaseSyncing()) {
@@ -315,6 +393,10 @@ void setup() {
     if (appCtx.network.getWebServer() != nullptr) {
       appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
     }
+
+    appCtx.network.setOnDownloadComplete([]() {
+      forceStandbyRedraw = true;
+    });
 
     // Kích hoạt Firebase Sync ngầm ngay khi vừa nạp code/khởi động xong
     uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();

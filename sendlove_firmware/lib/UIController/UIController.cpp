@@ -26,10 +26,10 @@ void UIController::setLEDState(LEDState state) {
     _ledState = state;
 }
 
-bool UIController::isTouched() {
+TouchEvent UIController::getTouchEvent() {
     bool currentState = digitalRead(_touchPin) == HIGH;
     uint32_t now = millis();
-    bool triggered = false;
+    TouchEvent result = TouchEvent::NONE;
 
     if (currentState != _lastTouchState) {
         Serial.printf("[UIController] raw touch state -> %s at %lu ms\n",
@@ -44,24 +44,31 @@ bool UIController::isTouched() {
             Serial.printf("[UIController] touch start at %lu ms\n", (unsigned long)now);
         } else if ((now - _touchStartTime) >= 30 && !_touchConfirmed) {
             _touchConfirmed = true;
-            triggered = true;
             Serial.printf("[UIController] touch confirmed after %lu ms\n",
                           (unsigned long)(now - _touchStartTime));
         }
+
+        if (_touchConfirmed && (now - _touchStartTime) >= 3000 && !_longPressEmitted) {
+            _longPressEmitted = true;
+            result = TouchEvent::LONG_PRESS;
+            Serial.println("[UIController] LONG_PRESS detected!");
+        }
     } else {
-        if (_touchStartTime != 0 || _touchConfirmed) {
-            Serial.printf("[UIController] touch released after %lu ms\n",
-                          (unsigned long)(now - _touchStartTime));
+        if (_touchConfirmed && !_longPressEmitted) {
+            result = TouchEvent::SHORT_PRESS;
+            Serial.println("[UIController] SHORT_PRESS detected!");
         }
         _touchStartTime = 0;
         _touchConfirmed = false;
+        _longPressEmitted = false;
     }
 
-    return triggered;
+    return result;
 }
 
 void UIController::resetTouch() {
     _touchConfirmed = false;
+    _longPressEmitted = false;
 }
 
 void UIController::showConnecting() {

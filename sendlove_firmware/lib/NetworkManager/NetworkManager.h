@@ -83,6 +83,14 @@ public:
     /// Check if Firebase sync is currently running in background
     bool isFirebaseSyncing() const { return _isFirebaseSyncing; }
 
+    /// Trả về tổng số tin nhắn mới (chưa đọc + đang chờ trên mây)
+    uint32_t getNumOfNewMsg() const { return _numOfNewMsg; }
+    void setNumOfNewMsg(uint32_t num) { _numOfNewMsg = num; }
+    void decrementNewMsgCount() { if (_numOfNewMsg > 0) _numOfNewMsg--; }
+
+    /// Check if there are pending messages on the server (aborted due to full storage)
+    bool hasPendingMessages() const { return _hasPendingMessages; }
+
     /// Đồng bộ dữ liệu Firebase ngầm khi thức dậy (Status, Flags, Messages, Alarms)
     bool syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
 
@@ -100,6 +108,8 @@ private:
 
     static void firebaseSyncTaskWorker(void* param);
     volatile bool _isFirebaseSyncing = false;
+    volatile bool _hasPendingMessages = false;
+    volatile uint32_t _numOfNewMsg = 0;
     volatile bool _isDownloadingMedia = false;
     std::function<void()> _onDownloadComplete = nullptr;
 

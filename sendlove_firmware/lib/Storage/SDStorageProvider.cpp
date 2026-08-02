@@ -67,7 +67,7 @@ size_t SDStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     return _sd.appendChunk(data, len);
 }
 
-void SDStorageProvider::closeWrite() {
+void SDStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     _sd.closeWriteFile();
 }
 
@@ -76,6 +76,10 @@ bool SDStorageProvider::hasUnreadMessage() const {
     char path[64];
     buildFilePath("slot_0", path, sizeof(path));
     return _sd.fileExists(path);
+}
+
+uint8_t SDStorageProvider::getUnreadCount() const {
+    return hasUnreadMessage() ? 1 : 0;
 }
 
 bool SDStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {

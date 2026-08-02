@@ -71,6 +71,7 @@ StorageItemInfo NandStorageProvider::getItemInfo(const char* identifier) const {
     info.dataSize = entry.dataSize;
     info.fps = entry.fps;
     info.totalFrames = entry.totalFrames;
+    info.maxDisplayTime = entry.maxDisplayTime > 0 ? entry.maxDisplayTime : 60;
 
     if (strncmp(entry.magic, "VJPG", 4) == 0) {
         info.type = StorageItemType::VIDEO;
@@ -135,7 +136,7 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     return len;
 }
 
-void NandStorageProvider::closeWrite() {
+void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_writeSlotIndex];
 
     Serial.printf("[MONITOR] closeWrite: slot=%d final _writeOffset=%lu. Updating header & unreadBitmask...\n",
@@ -159,12 +160,12 @@ void NandStorageProvider::closeWrite() {
         uint16_t finalFps = (fps > 0) ? fps : 1;
         if (mediaType == 0x02 || totalFrames <= 1) {
             totalFrames = 1;
-            _nand.setSlotInfo(_writeSlotIndex, "VIMG", _writeOffset, finalFps, totalFrames);
+            _nand.setSlotInfo(_writeSlotIndex, "VIMG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
             Serial.printf("[NandStorageProvider] Detected SLBX image (type=0x%02X, fps=%u, frames=%u, total offset=%u).\n",
                           mediaType, finalFps, totalFrames, _writeOffset);
         } else {
             if (totalFrames == 0) totalFrames = 1;
-            _nand.setSlotInfo(_writeSlotIndex, "VJPG", _writeOffset, finalFps, totalFrames);
+            _nand.setSlotInfo(_writeSlotIndex, "VJPG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
             Serial.printf("[NandStorageProvider] Detected SLBX video (type=0x%02X, fps=%u, frames=%u, total offset=%u).\n",
                           mediaType, finalFps, totalFrames, _writeOffset);
         }
@@ -174,10 +175,10 @@ void NandStorageProvider::closeWrite() {
         uint16_t totalFrames = *(uint16_t*)(header + 10);
         if (dataSize == 0 || dataSize > _writeOffset) dataSize = _writeOffset;
         const char* magic = (totalFrames > 1) ? "VJPG" : "VIMG";
-        _nand.setSlotInfo(_writeSlotIndex, magic, dataSize, (fps > 0) ? fps : 10, totalFrames);
+        _nand.setSlotInfo(_writeSlotIndex, magic, dataSize, (fps > 0) ? fps : 10, totalFrames, maxDisplayTime);
         Serial.printf("[NandStorageProvider] Detected pre-encoded container media (%u frames, %u FPS, magic: %s).\n", totalFrames, fps, magic);
     } else {
-        _nand.setSlotInfo(_writeSlotIndex, "VIMG", _writeOffset, 1, 1);
+        _nand.setSlotInfo(_writeSlotIndex, "VIMG", _writeOffset, 1, 1, maxDisplayTime);
         Serial.println(F("[NandStorageProvider] Raw JPEG media registered as VIMG."));
     }
 
@@ -212,6 +213,14 @@ bool NandStorageProvider::getNextWriteSlotIdentifier(char* outId, size_t maxLen)
 
 bool NandStorageProvider::hasUnreadMessage() const {
     return (_unreadBitmask != 0);
+}
+
+uint8_t NandStorageProvider::getUnreadCount() const {
+    uint8_t count = 0;
+    for (int i = 0; i < NAND_SLOT_COUNT; i++) {
+        if (_unreadBitmask & (1 << i)) count++;
+    }
+    return count;
 }
 
 bool NandStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {

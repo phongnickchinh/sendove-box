@@ -3,6 +3,7 @@
 #include <DNSServer.h>
 #include <time.h>
 #include <vector>
+#include <algorithm>
 #include "esp_sntp.h"
 
 static const byte DNS_PORT = 53;
@@ -558,13 +559,55 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         }
     }
 
+    // Đảm bảo msgList luôn được sắp xếp theo timestamp tăng dần (cũ nhất -> mới nhất)
+    std::sort(msgList.begin(), msgList.end(), [](const JsonObject& a, const JsonObject& b) {
+        uint64_t tsA = 0, tsB = 0;
+        JsonVariantConst vA = a["timestamp"];
+        if (!vA.isNull()) {
+            if (vA.is<uint64_t>()) tsA = vA.as<uint64_t>();
+            else if (vA.is<double>()) tsA = (uint64_t)vA.as<double>();
+            else if (vA.is<const char*>()) tsA = strtoull(vA.as<const char*>(), nullptr, 10);
+            else tsA = vA.as<uint64_t>();
+        }
+        JsonVariantConst vB = b["timestamp"];
+        if (!vB.isNull()) {
+            if (vB.is<uint64_t>()) tsB = vB.as<uint64_t>();
+            else if (vB.is<double>()) tsB = (uint64_t)vB.as<double>();
+            else if (vB.is<const char*>()) tsB = strtoull(vB.as<const char*>(), nullptr, 10);
+            else tsB = vB.as<uint64_t>();
+        }
+        return tsA < tsB;
+    });
+
+    uint8_t unreadInMem = storage ? storage->getUnreadCount() : 0;
+    uint32_t newCloudMsg = 0;
+    for (JsonObject msg : msgList) {
+        uint64_t ts = 0;
+        JsonVariantConst tsVar = msg["timestamp"];
+        if (!tsVar.isNull()) {
+            if (tsVar.is<uint64_t>()) ts = tsVar.as<uint64_t>();
+            else if (tsVar.is<double>()) ts = (uint64_t)tsVar.as<double>();
+            else if (tsVar.is<const char*>()) ts = strtoull(tsVar.as<const char*>(), nullptr, 10);
+            else ts = tsVar.as<uint64_t>();
+        }
+        if (ts == 0) {
+            time_t nowSec = time(nullptr);
+            ts = (nowSec > 1600000000) ? ((uint64_t)nowSec * 1000ULL) : (uint64_t)millis();
+        }
+        if (ts > lastTs) newCloudMsg++;
+    }
+    _numOfNewMsg = unreadInMem + newCloudMsg;
+    Serial.printf("[NetworkManager] unreadInMem=%u, newCloudMsg=%u, _numOfNewMsg=%u\n", unreadInMem, newCloudMsg, _numOfNewMsg);
+
     if (msgList.empty()) {
         Serial.println(F("[NetworkManager] No message objects found in payload."));
+        _hasPendingMessages = false;
         return true;
     }
 
     uint64_t successfullyProcessedMaxTs = lastTs;
     bool downloadedAnyMedia = false;
+    _hasPendingMessages = false;
 
     for (JsonObject msg : msgList) {
         uint64_t ts = 0;
@@ -593,6 +636,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         if (ts <= lastTs) {
             Serial.println(F("[NetworkManager] message skipped: older than lastTs"));
             continue;
+        }
+
+        uint32_t maxDisplayTime = 60;
+        if (msg["max_display_time"].is<uint32_t>()) {
+            maxDisplayTime = msg["max_display_time"].as<uint32_t>();
+        } else if (msg["max_display_time"].is<const char*>()) {
+            maxDisplayTime = atoi(msg["max_display_time"].as<const char*>());
+            if (maxDisplayTime == 0) maxDisplayTime = 60;
         }
 
         // Tìm kiếm linh hoạt tất cả các biến thể đặt tên key (snake_case, camelCase...)
@@ -648,6 +699,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         Serial.println(F("[NetworkManager] Download skipped: Storage is FULL (5 unread messages)."));
                         http.end();
                         _isDownloadingMedia = false;
+                        _hasPendingMessages = true;
                         break; // Dừng tiến trình khi bộ nhớ đầy
                     }
 
@@ -673,7 +725,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             }
                             delay(1);
                         }
-                        storage->closeWrite();
+                        storage->closeWrite(maxDisplayTime);
 
                         // Kiểm tra dữ liệu đã tải trọn vẹn 100% chưa
                         if (!writeError && (initialLen <= 0 || totalRead >= initialLen)) {

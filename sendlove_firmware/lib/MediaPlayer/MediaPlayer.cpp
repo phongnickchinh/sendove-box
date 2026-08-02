@@ -229,21 +229,34 @@ bool MediaPlayer::decodeOneFrame() {
 
     // XỬ LÝ 1: Tệp SLBX Raw RGB565 (Render trực tiếp khung hình pixel lên LCD không qua JPEGDEC)
     if (_isSlbxRgb565) {
-        uint32_t payloadSize = (uint32_t)_slbxWidth * _slbxHeight * 2;
-        if (payloadSize > JPEG_BUFFER_SIZE) payloadSize = JPEG_BUFFER_SIZE;
-
-        int readBytes = _storage->readData(_jpegBuffer, payloadSize);
-        if ((uint32_t)readBytes < payloadSize) {
-            Serial.printf("[MediaPlayer] SLBX RGB565 read short: %d/%u\n", readBytes, payloadSize);
-            return false;
-        }
+        uint32_t bytesPerLine = _slbxWidth * 2;
+        uint32_t linesPerChunk = JPEG_BUFFER_SIZE / bytesPerLine;
+        if (linesPerChunk == 0) linesPerChunk = 1; // Safeguard
 
         int x = (SCREEN_WIDTH > _slbxWidth) ? (SCREEN_WIDTH - _slbxWidth) / 2 : 0;
         int y = (SCREEN_HEIGHT > _slbxHeight) ? (SCREEN_HEIGHT - _slbxHeight) / 2 : 0;
+        int currentY = y;
 
-        if (!_display->acquireSPI()) return false;
-        _display->pushImage(x, y, _slbxWidth, _slbxHeight, (const uint16_t*)_jpegBuffer);
-        _display->releaseSPI();
+        uint32_t remainingLines = _slbxHeight;
+        while (remainingLines > 0) {
+            uint32_t linesToRead = (remainingLines > linesPerChunk) ? linesPerChunk : remainingLines;
+            uint32_t bytesToRead = linesToRead * bytesPerLine;
+
+            // Đọc NAND trước (SPI chưa bị khóa bởi LCD)
+            int readBytes = _storage->readData(_jpegBuffer, bytesToRead);
+            if ((uint32_t)readBytes < bytesToRead) {
+                Serial.printf("[MediaPlayer] SLBX RGB565 read short: %d/%u\n", readBytes, bytesToRead);
+                return false;
+            }
+
+            // Lấy SPI mutex chỉ trong lúc push lên LCD
+            if (!_display->acquireSPI()) return false;
+            _display->pushImage(x, currentY, _slbxWidth, linesToRead, (const uint16_t*)_jpegBuffer);
+            _display->releaseSPI();
+
+            currentY += linesToRead;
+            remainingLines -= linesToRead;
+        }
 
         Serial.printf("[MediaPlayer] SLBX RGB565 frame rendered successfully (%dx%d at %d,%d).\n", _slbxWidth, _slbxHeight, x, y);
         return true;

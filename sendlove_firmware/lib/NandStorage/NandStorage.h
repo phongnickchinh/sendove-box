@@ -23,7 +23,7 @@ struct SlotEntry {
     uint32_t dataSize;       // Data size in bytes
     uint16_t fps;            // Frame rate (video)
     uint16_t totalFrames;    // Total frame count
-    uint32_t reserved;
+    uint32_t maxDisplayTime; // Max display time in seconds
 };
 
 /// Hardware SPI driver for W25Q128 NAND Flash storage
@@ -51,7 +51,7 @@ public:
     void writeSlotTable();
 
     /// Set slot metadata in RAM table (used after writing slot data)
-    void setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize, uint16_t fps, uint16_t totalFrames);
+    void setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize, uint16_t fps, uint16_t totalFrames, uint32_t maxDisplayTime);
 
     /// Get slot metadata entry
     SlotEntry getSlotInfo(uint8_t slot) const;

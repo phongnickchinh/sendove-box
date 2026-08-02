@@ -18,6 +18,7 @@ struct StorageItemInfo {
     uint16_t fps = 10;
     uint16_t totalFrames = 0;
     char id[32] = "";
+    uint32_t maxDisplayTime = 60;
 };
 
 /// Interface trừu tượng cho mọi lớp bộ nhớ lưu trữ (NAND Flash / SD Card)
@@ -54,7 +55,7 @@ public:
     virtual size_t writeChunk(const uint8_t* data, size_t len) = 0;
 
     /// Đóng item đang ghi
-    virtual void closeWrite() = 0;
+    virtual void closeWrite(uint32_t maxDisplayTime = 60) = 0;
 
     // --- Quản lý Hàng chờ & Duyệt Item ---
 
@@ -66,6 +67,9 @@ public:
 
     /// Kiểm tra xem có tin nhắn / item nào chưa xem hay không
     virtual bool hasUnreadMessage() const = 0;
+
+    /// Trả về số lượng tin chưa đọc
+    virtual uint8_t getUnreadCount() const = 0;
 
     /// Lấy ID của item chưa đọc tiếp theo (ưu tiên tin cũ nhất)
     virtual bool getNextUnreadIdentifier(char* outId, size_t maxLen) = 0;

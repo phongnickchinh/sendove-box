@@ -36,13 +36,14 @@ bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     return true;
 }
 
-void NandStorage::setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize, uint16_t fps, uint16_t totalFrames) {
+void NandStorage::setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize, uint16_t fps, uint16_t totalFrames, uint32_t maxDisplayTime) {
     if (slot >= NAND_SLOT_COUNT) return;
     memset(&_slots[slot], 0, sizeof(SlotEntry));
     if (magic) memcpy(_slots[slot].magic, magic, 4);
     _slots[slot].dataSize = dataSize;
     _slots[slot].fps = fps;
     _slots[slot].totalFrames = totalFrames;
+    _slots[slot].maxDisplayTime = maxDisplayTime;
 }
 
 SlotEntry NandStorage::getSlotInfo(uint8_t slot) const {

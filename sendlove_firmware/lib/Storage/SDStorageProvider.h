@@ -23,7 +23,7 @@ public:
     // --- Thao tác GHI ---
     bool openForWrite(const char* identifier) override;
     size_t writeChunk(const uint8_t* data, size_t len) override;
-    void closeWrite() override;
+    void closeWrite(uint32_t maxDisplayTime = 60) override;
 
     // --- Quản lý Hàng chờ & Slot ---
     bool isFull() const override { return false; }
@@ -33,6 +33,7 @@ public:
         return true;
     }
     bool hasUnreadMessage() const override;
+    uint8_t getUnreadCount() const override;
     bool getNextUnreadIdentifier(char* outId, size_t maxLen) override;
     void markAsRead(const char* identifier) override;
     bool getFirstValidIdentifier(char* outId, size_t maxLen) const override;

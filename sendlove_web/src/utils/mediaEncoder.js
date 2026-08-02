@@ -7,8 +7,8 @@
 
 const HEADER_MAGIC = [0x53, 0x4C, 0x42, 0x58]; // 'SLBX'
 const VERSION = 0x01;
-const TARGET_WIDTH = 128;
-const TARGET_HEIGHT = 160;
+const TARGET_WIDTH = 240;
+const TARGET_HEIGHT = 240;
 
 function createHeader(type, fps, totalFrames) {
   const header = new Uint8Array(16);
@@ -107,8 +107,8 @@ export const encodeVideoToBin = async (videoBlob, onProgress) => {
     video.muted = true;
     
     video.onloadeddata = async () => {
-      const fps = 15; // Target FPS for ESP32
-      const duration = Math.min(video.duration, 15); // Max 15 seconds
+      const fps = 10; // Target FPS for ESP32
+      const duration = Math.min(video.duration, 10); // Max 10 seconds
       const totalFrames = Math.floor(duration * fps);
       
       const canvas = document.createElement('canvas');

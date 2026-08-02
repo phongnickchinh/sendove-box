@@ -94,9 +94,9 @@ void DisplayDriver::turnOn(uint8_t cause) {
 
     gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
 
-    // Khởi tạo và xóa đen màn hình TRƯỚC KHI bật đèn nền để tránh hiện ảnh cũ nhòe/âm bản
+    // Đánh thức màn hình và xóa đen để tránh hiện ảnh cũ nhòe
     if (acquireSPI()) {
-      _tft.init();
+      _tft.wakeup();
       _tft.setRotation(0);
       _tft.setSwapBytes(true);
       _tft.fillScreen(TFT_BLACK);

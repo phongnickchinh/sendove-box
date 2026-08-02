@@ -102,10 +102,9 @@ void PowerManager::configureTouchWakeup(gpio_num_t touchPin) {
     config.mode = GPIO_MODE_INPUT;
     config.pull_down_en = GPIO_PULLDOWN_ENABLE;
     config.pull_up_en = GPIO_PULLUP_DISABLE;
-    config.intr_type = GPIO_INTR_HIGH_LEVEL;
+    config.intr_type = GPIO_INTR_DISABLE;
     gpio_config(&config);
 
-    gpio_set_intr_type(touchPin, GPIO_INTR_HIGH_LEVEL);
     gpio_wakeup_enable(touchPin, GPIO_INTR_HIGH_LEVEL);
     esp_sleep_enable_gpio_wakeup();
 }

@@ -218,8 +218,8 @@ void Task_UIController(void *pvParameters) {
   for (;;) {
     TouchEvent tEvent = appCtx.ui.getTouchEvent();
     if (tEvent != TouchEvent::NONE) {
-      if (appCtx.network.isFirebaseSyncing()) {
-          Serial.println(F("[Task_UIController] Ignoring touch because Firebase sync is active..."));
+      if (appCtx.network.isDownloadingMedia()) {
+          Serial.println(F("[Task_UIController] Ignoring touch because media download is active..."));
       } else {
           SystemEvent event = (tEvent == TouchEvent::LONG_PRESS) ? SystemEvent::TOUCH_LONG : SystemEvent::TOUCH_SHORT;
           Serial.printf("[Task_UIController] touch event -> queue %d\n", (int)event);

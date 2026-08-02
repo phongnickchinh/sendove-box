@@ -563,23 +563,37 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         return true;
     }
 
-    uint64_t maxTs = lastTs;
-    bool hasNewMsg = false;
-
+    uint64_t successfullyProcessedMaxTs = lastTs;
     bool downloadedAnyMedia = false;
 
     for (JsonObject msg : msgList) {
-        uint64_t ts = msg["timestamp"] | 0ULL;
-        Serial.printf("[NetworkManager] message ts=%llu lastTs=%llu\n",
+        uint64_t ts = 0;
+        JsonVariantConst tsVar = msg["timestamp"];
+        if (!tsVar.isNull()) {
+            if (tsVar.is<uint64_t>()) {
+                ts = tsVar.as<uint64_t>();
+            } else if (tsVar.is<double>()) {
+                ts = (uint64_t)tsVar.as<double>();
+            } else if (tsVar.is<const char*>()) {
+                ts = strtoull(tsVar.as<const char*>(), nullptr, 10);
+            } else {
+                ts = tsVar.as<uint64_t>();
+            }
+        }
+
+        // Nếu Firebase không có timestamp (ts == 0), tự động dùng mốc giờ NTP hoặc bộ đếm millis()
+        if (ts == 0) {
+            time_t nowSec = time(nullptr);
+            ts = (nowSec > 1600000000) ? ((uint64_t)nowSec * 1000ULL) : (uint64_t)millis();
+        }
+
+        Serial.printf("[NetworkManager] message parsed ts=%llu, lastTs=%llu\n",
                       (unsigned long long)ts, (unsigned long long)lastTs);
 
         if (ts <= lastTs) {
             Serial.println(F("[NetworkManager] message skipped: older than lastTs"));
             continue;
         }
-
-        hasNewMsg = true;
-        if (ts > maxTs) maxTs = ts;
 
         // Tìm kiếm linh hoạt tất cả các biến thể đặt tên key (snake_case, camelCase...)
         String rawMediaUrl = "";
@@ -601,6 +615,8 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                 }
             }
         }
+
+        bool messageSuccess = false;
 
         if (rawMediaUrl.length() > 0) {
             String fullUrl = rawMediaUrl;
@@ -632,30 +648,45 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         Serial.println(F("[NetworkManager] Download skipped: Storage is FULL (5 unread messages)."));
                         http.end();
                         _isDownloadingMedia = false;
-                        break;
+                        break; // Dừng tiến trình khi bộ nhớ đầy
                     }
 
                     WiFiClient* stream = http.getStreamPtr();
                     if (storage->openForWrite(writeSlotId)) {
                         Serial.printf("[NetworkManager] Writing media into slot %s\n", writeSlotId);
                         uint8_t buffer[256];
+                        bool writeError = false;
                         while (http.connected() && (len > 0 || len == -1)) {
                             size_t sizeAvail = stream->available();
                             if (sizeAvail) {
                                 size_t toRead = (sizeAvail < sizeof(buffer)) ? sizeAvail : sizeof(buffer);
                                 int c = stream->readBytes(buffer, toRead);
-                                storage->writeChunk(buffer, c);
-                                totalRead += c;
-                                if (len > 0) len -= c;
+                                if (c > 0) {
+                                    size_t written = storage->writeChunk(buffer, c);
+                                    if (written < (size_t)c) {
+                                        writeError = true;
+                                        break;
+                                    }
+                                    totalRead += c;
+                                    if (len > 0) len -= c;
+                                }
                             }
                             delay(1);
                         }
                         storage->closeWrite();
-                        Serial.printf("[NetworkManager] Media download to Slot %s completed. totalRead: %d bytes initialLen=%d\n",
-                                      writeSlotId, totalRead, initialLen);
-                        downloadedAnyMedia = true;
-                        if (_onDownloadComplete) {
-                            _onDownloadComplete();
+
+                        // Kiểm tra dữ liệu đã tải trọn vẹn 100% chưa
+                        if (!writeError && (initialLen <= 0 || totalRead >= initialLen)) {
+                            Serial.printf("[NetworkManager] Media download to Slot %s 100%% SUCCESS. totalRead: %d bytes\n",
+                                          writeSlotId, totalRead);
+                            messageSuccess = true;
+                            downloadedAnyMedia = true;
+                            if (_onDownloadComplete) {
+                                _onDownloadComplete();
+                            }
+                        } else {
+                            Serial.printf("[NetworkManager] ERROR: Download incomplete or failed! totalRead=%d, expected=%d\n",
+                                          totalRead, initialLen);
                         }
                     } else {
                         Serial.printf("[NetworkManager] openForWrite failed for slot %s\n", writeSlotId);
@@ -667,16 +698,29 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
             _isDownloadingMedia = false;
         } else {
-            Serial.println(F("[NetworkManager] Message skipped: No valid media URL found."));
+            Serial.println(F("[NetworkManager] Message has no media URL, marked as success."));
+            messageSuccess = true;
+        }
+
+        // CHỈ CẬP NHẬT TIMESTAMP KHI VÀ CHỈ KHI TASK CỦA TIN NHẮN NÀY ĐÃ HOÀN THÀNH 100%
+        if (messageSuccess) {
+            if (ts > successfullyProcessedMaxTs) {
+                successfullyProcessedMaxTs = ts;
+            }
+        } else {
+            Serial.printf("[NetworkManager] Message ts=%llu FAILED to process 100%%. Stopping timestamp advancement to allow retry on next sync.\n",
+                          (unsigned long long)ts);
+            break; // Ngắt vòng lặp để đảm bảo thứ tự tin nhắn không bị nhảy vọt
         }
     }
 
 
-    if (maxTs > lastTs) {
+    if (successfullyProcessedMaxTs > lastTs) {
         if (cfg.init(NVS_NAMESPACE)) {
-            cfg.saveLastDownloadTimestamp(maxTs);
+            cfg.saveLastDownloadTimestamp(successfullyProcessedMaxTs);
             cfg.end();
-            Serial.printf("[NetworkManager] Updated last_download_ts to %llu\n", (unsigned long long)maxTs);
+            Serial.printf("[NetworkManager] TRANSACTION COMPLETED: Updated last_download_ts in NVS to %llu\n",
+                          (unsigned long long)successfullyProcessedMaxTs);
         }
     }
 

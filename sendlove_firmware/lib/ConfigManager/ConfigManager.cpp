@@ -101,13 +101,14 @@ bool ConfigManager::clearAll() {
 // --- Firebase Sync & Alarms ---
 
 bool ConfigManager::saveLastDownloadTimestamp(uint64_t ts) {
-    size_t bytes = _prefs.putBytes(KEY_LAST_DL_TS, &ts, sizeof(uint64_t));
-    return (bytes == sizeof(uint64_t));
+    size_t written = _prefs.putULong64(KEY_LAST_DL_TS, ts);
+    Serial.printf("[ConfigManager] saveLastDownloadTimestamp(%llu) -> bytes=%u\n", (unsigned long long)ts, (unsigned)written);
+    return (written > 0);
 }
 
 uint64_t ConfigManager::loadLastDownloadTimestamp() {
-    uint64_t ts = 0;
-    _prefs.getBytes(KEY_LAST_DL_TS, &ts, sizeof(uint64_t));
+    uint64_t ts = _prefs.getULong64(KEY_LAST_DL_TS, 0ULL);
+    Serial.printf("[ConfigManager] loadLastDownloadTimestamp() -> %llu\n", (unsigned long long)ts);
     return ts;
 }
 

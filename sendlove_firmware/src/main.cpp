@@ -49,6 +49,7 @@ static void initSerialDebug() {
   while (!Serial && millis() - waitStart < 2000) {
     delay(10);
   }
+  Serial.setTxTimeoutMs(0);
   Serial.setDebugOutput(true);
   Serial.println();
   Serial.println(F("[BOOT] =================================================="));
@@ -96,8 +97,11 @@ void Task_MediaPlayer(void *pvParameters) {
           char unreadId[32] = "";
           if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
             strncpy(currentId, unreadId, sizeof(currentId) - 1);
-            appCtx.player.playItem(currentId);
-            appCtx.storage->markAsRead(currentId);
+            if (appCtx.player.playItem(currentId)) {
+              appCtx.storage->markAsRead(currentId);
+            } else {
+              Serial.printf("[Task_MediaPlayer] ERROR: playItem('%s') failed! Keeping slot as UNREAD.\n", currentId);
+            }
           } else {
             if (currentId[0] == '\0' && appCtx.storage) {
               appCtx.storage->getFirstValidIdentifier(currentId, sizeof(currentId));
@@ -111,8 +115,11 @@ void Task_MediaPlayer(void *pvParameters) {
           char unreadId[32] = "";
           if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
             strncpy(currentId, unreadId, sizeof(currentId) - 1);
-            appCtx.player.playItem(currentId);
-            appCtx.storage->markAsRead(currentId);
+            if (appCtx.player.playItem(currentId)) {
+              appCtx.storage->markAsRead(currentId);
+            } else {
+              Serial.printf("[Task_MediaPlayer] ERROR: playItem('%s') failed! Keeping slot as UNREAD.\n", currentId);
+            }
           } else {
             char nextId[32] = "";
             if (appCtx.storage && appCtx.storage->getNextValidIdentifier(currentId, nextId, sizeof(nextId))) {
@@ -126,7 +133,6 @@ void Task_MediaPlayer(void *pvParameters) {
 
     if (currentAppState == AppState::STATE_VIDEO) {
       if (!appCtx.otaHandler.isUpdating()) {
-        Serial.println(F("[Task_MediaPlayer] update playback"));
         appCtx.player.update();
       } else {
         vTaskDelay(pdMS_TO_TICKS(100));

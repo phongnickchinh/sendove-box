@@ -152,10 +152,9 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
 
     if (memcmp(header, "SLBX", 4) == 0) {
         uint8_t mediaType = header[5];
-        uint16_t fps = 0;
+        uint8_t fps      = header[10];            // 1 byte
         uint16_t totalFrames = 1;
-        memcpy(&fps, header + 10, sizeof(fps));
-        memcpy(&totalFrames, header + 11, sizeof(totalFrames));
+        memcpy(&totalFrames, header + 11, sizeof(totalFrames)); // 2 bytes
 
         uint16_t finalFps = (fps > 0) ? fps : 1;
         if (mediaType == 0x02 || totalFrames <= 1) {

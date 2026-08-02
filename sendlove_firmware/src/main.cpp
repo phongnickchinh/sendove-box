@@ -232,8 +232,9 @@ void Task_UIController(void *pvParameters) {
     uint32_t now = millis();
     static uint32_t lastIntervalSyncMs = millis();
 
-    // Periodic check if device is kept awake in Standby UI
-    if (now - lastIntervalSyncMs >= 10000 && !appCtx.network.isFirebaseSyncing() && currentAppState == AppState::STATE_STANDBY) {
+    // Periodic check if device is kept awake in Standby UI (every 10s)
+    bool isStorageFull = (appCtx.storage && appCtx.storage->isFull());
+    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !appCtx.network.isFirebaseSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
         Serial.println(F("[Task_UIController] interval sync start (while awake)"));
         appCtx.network.ensureConnected();
@@ -289,16 +290,20 @@ void Task_UIController(void *pvParameters) {
       vTaskDelay(pdMS_TO_TICKS(200));
 
       // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy (cả Touch và Timer)
-      Serial.println(F("[Task_UIController] post-wakeup sync start"));
-      appCtx.network.ensureConnected();
-      appCtx.network.triggerNtpSync();
-      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-      bool isCharging = appCtx.powerManager.isCharging();
-      appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+      if (appCtx.storage && appCtx.storage->isFull()) {
+          Serial.println(F("[Task_UIController] post-wakeup sync skipped: Storage FULL (all slots unread)"));
+      } else {
+          Serial.println(F("[Task_UIController] post-wakeup sync start"));
+          appCtx.network.ensureConnected();
+          appCtx.network.triggerNtpSync();
+          uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+          bool isCharging = appCtx.powerManager.isCharging();
+          appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+      }
       lastIntervalSyncMs = millis();
     }
 
-    if (appCtx.network.isFirebaseSyncing()) {
+    if (appCtx.network.isDownloadingMedia()) {
       lastUserActivity = millis();
     }
 

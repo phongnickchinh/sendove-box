@@ -231,7 +231,11 @@
 - [x] **Refactor cơ chế Touch (Long/Short Press)**: Nâng cấp `UIController` nhận diện `SHORT_PRESS` (bấm nhanh chuyển slot, đánh dấu đã đọc) và `LONG_PRESS` (bấm giữ 3s ép về Standby mà không đánh dấu đã đọc).
 - [x] **Biến đếm `_numOfNewMsg`**: Theo dõi chính xác tổng tin nhắn chưa đọc còn lưu trong NAND Flash cộng với tin đang chờ tải trên Cloud. Box dừng phát khi xem xong tin mới (khi biến về 0) thay vì lặp lại vòng tròn các slot cũ.
 - [x] **An toàn NAND Flash (Chặn Download khi Play)**: Box chỉ trigger tiến trình Download khi RAM/SPI bus rảnh rỗi ở màn hình chờ (người dùng xem xong tin cũ, Touch bị vô hiệu hóa tạm thời với thông báo `Downloading...`).
-- [x] **Auto Timeout Next**: Tự động chuyển media sau khi hiển thị đủ `maxDisplayTime` giây.
+- [x] **Auto Timeout Next**: Tự động chuyển media sau khi hiển thị đủ `maxDisplayTime` giây (hoặc quay về UI nếu hết tin).
+- [x] **Interval Sync & Full Storage Guard**: Tự động check Firebase định kỳ 5 phút/lần khi ở màn hình Standby, đồng thời kiểm tra `appCtx.storage->isFull()`. Nếu toàn bộ 5 slot NAND đều chứa tin chưa đọc (đầy), hệ thống tự động bỏ qua lượt check ngầm để tránh block cảm ứng và tiết kiệm mạng/RAM.
+- [x] **Sắp xếp thứ tự phát tin nhắn (`std::sort`)**: Ép mảng `msgList` qua `std::sort` theo mốc `timestamp` tăng dần trước khi lưu NAND, đảm bảo 100% tin nhắn cũ nhất luôn phát trước, tin mới phát sau.
+- [x] **Fix SPI Deadlock khi Render Ảnh lớn (Chunking)**: Sửa hàm `decodeOneFrame()` trong `MediaPlayer.cpp` đọc từng chunk pixel từ NAND trước, sau đó mới acquire SPI để push lên LCD, loại bỏ hoàn toàn hiện tượng xé hình / mất 2/3 ảnh đối với file > 48KB.
+- [x] **KISS 10s Awake Polling & Independent Sleep Timer**: Thiết lập kiểm tra Firebase ngầm định kỳ 10 giây/lần khi ở Standby UI (`now - lastIntervalSyncMs >= 10000`). Đồng thời tách biệt hoàn toàn bộ đếm ngủ `lastUserActivity` (chỉ reset khi chạm tay hoặc đang thực sự tải tệp media `isDownloadingMedia`), giúp box vừa hút tin nhắn nhạy bén 10s/lần vừa đi ngủ chính xác 100% theo thời gian đếm ngược.
 
 ---
 

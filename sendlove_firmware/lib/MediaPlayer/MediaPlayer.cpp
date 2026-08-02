@@ -115,24 +115,42 @@ bool MediaPlayer::playItem(const char* identifier) {
     dumpHexBytes("[MediaPlayer] Header dump:", hdrCheck, sizeof(hdrCheck));
 
     if (memcmp(hdrCheck + 4, "SLBX", 4) == 0) {
-        uint8_t mediaType = hdrCheck[9]; // header[5] ở file gốc
-        uint16_t w = 0;
-        uint16_t h = 0;
-        uint16_t fps = 0;
+        uint8_t mediaType    = hdrCheck[9];  // type: 0x01=video, 0x02=image
+        uint16_t w           = 0;
+        uint16_t h           = 0;
+        uint8_t  fps         = hdrCheck[14]; // 1 byte
         uint16_t totalFrames = 0;
-        memcpy(&w, hdrCheck + 10, sizeof(w));
-        memcpy(&h, hdrCheck + 12, sizeof(h));
-        memcpy(&fps, hdrCheck + 14, sizeof(fps));
+        memcpy(&w,           hdrCheck + 10, sizeof(w));
+        memcpy(&h,           hdrCheck + 12, sizeof(h));
         memcpy(&totalFrames, hdrCheck + 15, sizeof(totalFrames));
 
-        _isSlbxRgb565 = true;
-        _slbxWidth = (w > 0) ? w : 128;
-        _slbxHeight = (h > 0) ? h : 160;
         _frameBaseOffset = 20;
-        _readFrameSizeHeader = false;
-        _storage->seek(20); // Skip 4-byte offset reserve + 16-byte SLBX header
-        Serial.printf("[MediaPlayer] SLBX raw RGB565 detected: type=0x%02X w=%u h=%u fps=%u frames=%u. Seeking to offset 20.\n",
-                      mediaType, _slbxWidth, _slbxHeight, fps, totalFrames);
+        _fps             = (fps > 0) ? fps : 15;
+        _totalFrames     = (totalFrames > 0) ? totalFrames : 1;
+
+        // Tự động phát hiện payload là JPEG hay Raw RGB565 bằng cách peek 7 bytes tại offset 20
+        // JPEG format: [4-byte size][FF D8 FF ...]  → bytes[4..6] == JPEG magic
+        // RGB565 format: pixel data thô, không có JPEG magic
+        uint8_t peek[7] = {0};
+        _storage->seek(20);
+        _storage->readData(peek, sizeof(peek));
+        _storage->seek(20); // Rewind về đầu payload
+
+        const bool isJpegPayload = (peek[4] == 0xFF && peek[5] == 0xD8 && peek[6] == 0xFF);
+
+        if (isJpegPayload) {
+            _isSlbxRgb565        = false;
+            _readFrameSizeHeader = true;
+            Serial.printf("[MediaPlayer] SLBX JPEG container: type=0x%02X fps=%u frames=%u\n",
+                          mediaType, _fps, _totalFrames);
+        } else {
+            _isSlbxRgb565        = true;
+            _readFrameSizeHeader = false;
+            _slbxWidth           = (w > 0) ? w : 128;
+            _slbxHeight          = (h > 0) ? h : 160;
+            Serial.printf("[MediaPlayer] SLBX Raw RGB565: type=0x%02X w=%u h=%u fps=%u frames=%u\n",
+                          mediaType, _slbxWidth, _slbxHeight, _fps, _totalFrames);
+        }
     } else if (memcmp(hdrCheck + 4, "SLOT", 4) == 0 ||
                memcmp(hdrCheck + 4, "VJPG", 4) == 0 ||
                memcmp(hdrCheck + 4, "VIMG", 4) == 0) {
@@ -223,9 +241,9 @@ int8_t MediaPlayer::getCurrentSlot() const {
 bool MediaPlayer::decodeOneFrame() {
     if (_jpegBuffer == nullptr || _storage == nullptr) return false;
 
-    Serial.printf("[MediaPlayer] decodeOneFrame: slot=%d state=%d totalFrames=%u baseOffset=%lu readHeader=%d\n",
-                  _currentSlot, (int)_state, _totalFrames, (unsigned long)_frameBaseOffset,
-                  _readFrameSizeHeader ? 1 : 0);
+    // Serial.printf("[MediaPlayer] decodeOneFrame: slot=%d state=%d totalFrames=%u baseOffset=%lu readHeader=%d\n",
+    //               _currentSlot, (int)_state, _totalFrames, (unsigned long)_frameBaseOffset,
+    //               _readFrameSizeHeader ? 1 : 0);
 
     // XỬ LÝ 1: Tệp SLBX Raw RGB565 (Render trực tiếp khung hình pixel lên LCD không qua JPEGDEC)
     if (_isSlbxRgb565) {
@@ -325,7 +343,7 @@ bool MediaPlayer::decodeOneFrame() {
         int decodeRes = _jpeg.decode(0, 0, 0);
         tft->endWrite();
 
-        Serial.printf("[MediaPlayer] JPEG decode result=%d size=%lu\n", decodeRes, (unsigned long)jpegSize);
+        // Serial.printf("[MediaPlayer] JPEG decode result=%d size=%lu\n", decodeRes, (unsigned long)jpegSize);
         _jpeg.close();
     } else {
         Serial.println(F("[MediaPlayer] JPEG openRAM failed!"));

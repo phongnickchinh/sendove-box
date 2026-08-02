@@ -9,12 +9,14 @@ static const byte DNS_PORT = 53;
 static DNSServer dnsServer;
 
 void NetworkManager::init() {
+    Serial.println(F("[NetworkManager] init()"));
     WiFi.mode(WIFI_STA);
     // Initialize timezone once at boot
     configTzTime("ICT-7", NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 }
 
 WiFiConnectResult NetworkManager::connectWiFi(const char* ssid, const char* password) {
+    Serial.printf("[NetworkManager] connectWiFi(ssid=%s)\n", ssid ? ssid : "(null)");
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
 
@@ -24,9 +26,12 @@ WiFiConnectResult NetworkManager::connectWiFi(const char* ssid, const char* pass
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("[NetworkManager] WiFi connected. IP=%s RSSI=%d\n",
+                      WiFi.localIP().toString().c_str(), WiFi.RSSI());
         triggerNtpSync();
         return WiFiConnectResult::CONNECTED;
     }
+    Serial.println(F("[NetworkManager] WiFi connect failed"));
     return WiFiConnectResult::FAILED;
 }
 
@@ -45,6 +50,7 @@ bool NetworkManager::isConnected() const {
 
 void NetworkManager::ensureConnected() {
     if (WiFi.status() != WL_CONNECTED) {
+        Serial.println(F("[NetworkManager] ensureConnected(): reconnecting WiFi"));
         WiFi.reconnect();
     }
 }
@@ -69,6 +75,7 @@ void NetworkManager::triggerNtpSync() {
     if (WiFi.status() != WL_CONNECTED) return;
     if (_isNtpSyncing) return;
 
+    Serial.println(F("[NetworkManager] triggerNtpSync()"));
     // Re-apply timezone mỗi lần sync để chống drift sau Light Sleep (thời gian bị lệch sau 1 ngày)
     configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 
@@ -305,7 +312,8 @@ bool NetworkManager::syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging,
         return false;
     }
 
-    Serial.println(F("[NetworkManager] Starting Silent Firebase Wakeup Sync..."));
+    Serial.printf("[NetworkManager] Starting Silent Firebase Wakeup Sync... bat=%u%% charging=%d storage=%p\n",
+                  batteryPercent, isCharging ? 1 : 0, (void*)storage);
 
     // 1. Update Status (Heartbeat)
     updateFirebaseStatus(batteryPercent, isCharging);
@@ -347,6 +355,8 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     int httpCode = http.PATCH((uint8_t*)payload, strlen(payload));
     http.end();
 
+    Serial.printf("[NetworkManager] updateFirebaseStatus -> code=%d payload=%s\n", httpCode, payload);
+
     return (httpCode == HTTP_CODE_OK);
 }
 
@@ -364,6 +374,7 @@ bool NetworkManager::checkFirebaseFlags() {
 
     int httpCode = http.GET();
     if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[NetworkManager] checkFirebaseFlags GET failed: %d\n", httpCode);
         http.end();
         return false;
     }
@@ -382,6 +393,7 @@ bool NetworkManager::checkFirebaseFlags() {
     bool normalOta = doc["normal_ota"] | false;
 
     if (syncAlarmsFlag) {
+        Serial.println(F("[NetworkManager] checkFirebaseFlags: sync_alarms_flag=TRUE"));
         syncFirebaseAlarms();
     }
 
@@ -418,6 +430,7 @@ bool NetworkManager::syncFirebaseAlarms() {
 
     int httpCode = http.GET();
     if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[NetworkManager] syncFirebaseAlarms GET failed: %d\n", httpCode);
         http.end();
         return false;
     }
@@ -452,11 +465,15 @@ bool NetworkManager::syncFirebaseAlarms() {
         cfg.end();
     }
 
+    Serial.printf("[NetworkManager] syncFirebaseAlarms saved %u alarms\n", (unsigned)count);
+
     return true;
 }
 
 bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     if (!storage) return false;
+
+    Serial.printf("[NetworkManager] checkAndDownloadNewMessages(storage=%p)\n", (void*)storage);
 
     ConfigManager cfg;
     uint64_t lastTs = 0;
@@ -470,21 +487,30 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     HTTPClient http;
 
     char url[384];
-    snprintf(url, sizeof(url),
-             "https://%s/messages/%s.json?auth=%s",
-             FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+    uint64_t nextTs = (lastTs > 0) ? (lastTs + 1) : 0;
+    if (nextTs > 0) {
+        snprintf(url, sizeof(url),
+                 "https://%s/messages/%s.json?auth=%s&orderBy=%%22timestamp%%22&startAt=%llu",
+                 FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET, (unsigned long long)nextTs);
+    } else {
+        snprintf(url, sizeof(url),
+                 "https://%s/messages/%s.json?auth=%s",
+                 FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+    }
 
     if (!http.begin(client, url)) {
         Serial.println(F("[NetworkManager] HTTP init failed for messages endpoint."));
         return false;
     }
     http.setTimeout(FIREBASE_TIMEOUT_MS);
+    Serial.printf("[NetworkManager] messages URL: %s\n", url);
 
     int httpCode = http.GET();
     if (httpCode < 0) {
         // Tự thử lại lần 2 sau 500ms nếu ổ cắm TCP vừa khôi phục sau khi chip tỉnh dậy từ Light Sleep
         delay(500);
         httpCode = http.GET();
+        Serial.printf("[NetworkManager] messages retry HTTP code: %d\n", httpCode);
     }
 
     if (httpCode != HTTP_CODE_OK) {
@@ -493,19 +519,20 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         return false;
     }
 
-    String payload = http.getString();
-    http.end();
-
-    if (payload == "null" || payload.length() <= 2) {
-        return true;
+    WiFiClient* stream = http.getStreamPtr();
+    if (!stream) {
+        Serial.println(F("[NetworkManager] HTTP stream NULL."));
+        http.end();
+        return false;
     }
 
-    // Zero-copy JSON parsing từ RAM string (hỗ trợ chuỗi dài bất kỳ như bin_url mà không bị xén)
+    // Zero-copy JSON stream parsing (tránh cấp phát chuỗi String tạm lớn gây phân mảnh RAM)
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, payload);
+    DeserializationError err = deserializeJson(doc, *stream);
+    http.end();
 
     if (err) {
-        Serial.printf("[NetworkManager] JSON parse error: %s\n", err.c_str());
+        Serial.printf("[NetworkManager] JSON stream parse error: %s\n", err.c_str());
         return false;
     }
 
@@ -532,6 +559,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     }
 
     if (msgList.empty()) {
+        Serial.println(F("[NetworkManager] No message objects found in payload."));
         return true;
     }
 
@@ -542,8 +570,11 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
 
     for (JsonObject msg : msgList) {
         uint64_t ts = msg["timestamp"] | 0ULL;
+        Serial.printf("[NetworkManager] message ts=%llu lastTs=%llu\n",
+                      (unsigned long long)ts, (unsigned long long)lastTs);
 
         if (ts <= lastTs) {
+            Serial.println(F("[NetworkManager] message skipped: older than lastTs"));
             continue;
         }
 
@@ -560,8 +591,9 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             "url"
         };
         for (const char* k : candidateKeys) {
-            if (msg.containsKey(k) && !msg[k].isNull()) {
-                String val = msg[k].as<String>();
+            JsonVariantConst mediaValue = msg[k];
+            if (!mediaValue.isNull()) {
+                String val = mediaValue.as<String>();
                 val.trim();
                 if (val.length() > 0 && val != "null") {
                     rawMediaUrl = val;
@@ -585,7 +617,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
 
             _isDownloadingMedia = true;
-            Serial.printf("[NetworkManager] Downloading bin media from: %s\n", fullUrl.c_str());
+            Serial.printf("[NetworkManager] Downloading media from: %s\n", fullUrl.c_str());
             
             if (http.begin(client, fullUrl.c_str())) {
                 http.setTimeout(30000);
@@ -605,6 +637,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
 
                     WiFiClient* stream = http.getStreamPtr();
                     if (storage->openForWrite(writeSlotId)) {
+                        Serial.printf("[NetworkManager] Writing media into slot %s\n", writeSlotId);
                         uint8_t buffer[256];
                         while (http.connected() && (len > 0 || len == -1)) {
                             size_t sizeAvail = stream->available();
@@ -618,11 +651,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             delay(1);
                         }
                         storage->closeWrite();
-                        Serial.printf("[NetworkManager] Media download to Slot %s completed. totalRead: %d bytes\n", writeSlotId, totalRead);
+                        Serial.printf("[NetworkManager] Media download to Slot %s completed. totalRead: %d bytes initialLen=%d\n",
+                                      writeSlotId, totalRead, initialLen);
                         downloadedAnyMedia = true;
                         if (_onDownloadComplete) {
                             _onDownloadComplete();
                         }
+                    } else {
+                        Serial.printf("[NetworkManager] openForWrite failed for slot %s\n", writeSlotId);
                     }
                 } else {
                     Serial.printf("[NetworkManager] HTTP download failed with code: %d\n", code);

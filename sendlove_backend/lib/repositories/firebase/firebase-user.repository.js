@@ -27,12 +27,13 @@ class FirebaseUserRepository extends firebase_base_repository_1.FirebaseBaseRepo
         await this.getRef(`${uid}/last_login_at`).set(Date.now());
     }
     /**
-     * Xoá mềm user: set deleted_at thay vì xoá hoàn toàn.
+     * Xoá mềm user: set is_deleted = true và deleted_at.
      * Dữ liệu user vẫn được giữ lại cho mục đích audit/history.
      */
     async softDelete(uid) {
         const now = Date.now();
         await this.getRef(uid).update({
+            is_deleted: true,
             deleted_at: now,
             updated_at: now,
         });

@@ -42,7 +42,7 @@ private:
     uint8_t _unreadBitmask = 0;
     int8_t _writeSlotIndex = 0;
     uint32_t _writeOffset = 0;
-    uint32_t _lastErasedSectorAddr = 0xFFFFFFFF;
+    uint32_t _slotCapacity = 0;
 
     int8_t parseSlotId(const char* identifier) const;
     void loadNvsState();

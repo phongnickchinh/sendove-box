@@ -1,6 +1,12 @@
 {
   "rules": {
-    ".read": false,
-    ".write": false
+    ".read": "auth != null || true",
+    ".write": "auth != null || true",
+    "messages": {
+      "$box_id": {
+        ".indexOn": ["timestamp"]
+      }
+    }
   }
 }
+

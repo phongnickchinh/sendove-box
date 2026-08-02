@@ -105,6 +105,9 @@ static constexpr const char *NVS_NAMESPACE = "sendlove";
 #define STORAGE_TYPE_SD 1
 #define ACTIVE_STORAGE_TYPE STORAGE_TYPE_NAND
 
+// Bật tạm thời để xóa sạch dữ liệu trên NOR/W25Q128 lúc boot kế tiếp.
+// Sau khi nạp xong và xác nhận dữ liệu đã được xóa, đổi về 0 rồi build lại.
+#define ERASE_NOR_ON_BOOT 1
 #ifdef WOKWI_SIMULATION
 static constexpr uint8_t PIN_BUZZER = 0;
 static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;

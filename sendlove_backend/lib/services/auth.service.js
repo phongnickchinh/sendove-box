@@ -52,6 +52,9 @@ class AuthService {
         const { uid, email, name, picture } = decodedToken;
         const now = Date.now();
         let user = await this.userRepo.getById(uid);
+        if (user && user.is_deleted) {
+            throw new error_handler_middleware_1.AppError(403, 'account_deleted', 'Account has been deleted.');
+        }
         if (!user) {
             // Tạo user mới
             user = await this.userRepo.create(uid, {
@@ -60,6 +63,7 @@ class AuthService {
                 display_name: name || '',
                 is_admin: false,
                 avatar_url: picture || null,
+                is_deleted: false,
                 last_login_at: now,
                 boxes_list: {},
                 created_at: now,

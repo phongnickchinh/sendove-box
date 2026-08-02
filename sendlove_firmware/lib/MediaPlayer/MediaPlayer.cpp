@@ -9,6 +9,15 @@
 
 static DisplayDriver* s_display = nullptr;
 
+static void dumpHexBytes(const char* tag, const uint8_t* data, size_t len) {
+    if (tag == nullptr || data == nullptr || len == 0) return;
+    Serial.printf("%s", tag);
+    for (size_t i = 0; i < len; i++) {
+        Serial.printf(" %02X", data[i]);
+    }
+    Serial.println();
+}
+
 MediaPlayer::~MediaPlayer() {
     stop();
     if (_playerMutex != nullptr) {
@@ -50,6 +59,8 @@ bool MediaPlayer::playItem(const char* identifier) {
 
     stop();
 
+    Serial.printf("[MediaPlayer] playItem('%s') requested\n", identifier);
+
     if (_jpegBuffer == nullptr) {
         _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
         if (_jpegBuffer == nullptr) {
@@ -71,6 +82,13 @@ bool MediaPlayer::playItem(const char* identifier) {
     StorageItemInfo info = _storage->getItemInfo(identifier);
     Serial.printf("[MediaPlayer] Slot %s info: type=%d size=%lu fps=%u frames=%u\n",
                   identifier, (int)info.type, (unsigned long)info.dataSize, info.fps, info.totalFrames);
+    _currentDataSize = info.dataSize;
+    _frameBaseOffset = 0;
+    _readFrameSizeHeader = true;
+
+    if (_currentDataSize == 0) {
+        Serial.printf("[MediaPlayer] WARN: slot %s reports dataSize=0\n", identifier);
+    }
 
     if (info.type == StorageItemType::EMPTY) {
         _storage->closeRead();
@@ -94,32 +112,46 @@ bool MediaPlayer::playItem(const char* identifier) {
     // Tự động kiểm tra header tại offset 4 (SLBX / SLOT / VJPG / VIMG)
     uint8_t hdrCheck[20] = {0};
     _storage->readData(hdrCheck, 20);
+    dumpHexBytes("[MediaPlayer] Header dump:", hdrCheck, sizeof(hdrCheck));
 
     if (memcmp(hdrCheck + 4, "SLBX", 4) == 0) {
-        uint8_t formatType = hdrCheck[9]; // Byte index 9 trong payload header (index 5 + 4 offset)
-        uint16_t w = *(uint16_t*)(hdrCheck + 10);
-        uint16_t h = *(uint16_t*)(hdrCheck + 12);
+        uint8_t mediaType = hdrCheck[9]; // header[5] ở file gốc
+        uint16_t w = 0;
+        uint16_t h = 0;
+        uint16_t fps = 0;
+        uint16_t totalFrames = 0;
+        memcpy(&w, hdrCheck + 10, sizeof(w));
+        memcpy(&h, hdrCheck + 12, sizeof(h));
+        memcpy(&fps, hdrCheck + 14, sizeof(fps));
+        memcpy(&totalFrames, hdrCheck + 15, sizeof(totalFrames));
 
-        if (formatType == 2 && w > 0 && h > 0) {
-            _isSlbxRgb565 = true;
-            _slbxWidth = w;
-            _slbxHeight = h;
-            _storage->seek(20); // Skip 4-byte offset reserve + 16-byte SLBX header
-            Serial.printf("[MediaPlayer] SLBX Raw RGB565 media detected (%dx%d). Seeking to offset 20.\n", w, h);
-        } else {
-            _storage->seek(20);
-            Serial.println(F("[MediaPlayer] SLBX JPEG media detected. Seeking to offset 20."));
-        }
+        _isSlbxRgb565 = true;
+        _slbxWidth = (w > 0) ? w : 128;
+        _slbxHeight = (h > 0) ? h : 160;
+        _frameBaseOffset = 20;
+        _readFrameSizeHeader = false;
+        _storage->seek(20); // Skip 4-byte offset reserve + 16-byte SLBX header
+        Serial.printf("[MediaPlayer] SLBX raw RGB565 detected: type=0x%02X w=%u h=%u fps=%u frames=%u. Seeking to offset 20.\n",
+                      mediaType, _slbxWidth, _slbxHeight, fps, totalFrames);
     } else if (memcmp(hdrCheck + 4, "SLOT", 4) == 0 ||
                memcmp(hdrCheck + 4, "VJPG", 4) == 0 ||
                memcmp(hdrCheck + 4, "VIMG", 4) == 0) {
         // Tệp container pre-encoded: Skip 4-byte reserve + 16-byte container header -> Seek đến offset 20!
+        _frameBaseOffset = 20;
+        _readFrameSizeHeader = true;
         _storage->seek(20);
         Serial.println(F("[MediaPlayer] Container header detected. Seeking to offset 20 for Frame 1."));
     } else {
         // Tệp Raw JPEG: Seek về offset 0 để đọc 4-byte frame size header
+        _frameBaseOffset = 0;
+        _readFrameSizeHeader = true;
         _storage->seek(0);
+        Serial.println(F("[MediaPlayer] Raw JPEG detected. Seeking to offset 0 for size prefix."));
     }
+
+    Serial.printf("[MediaPlayer] Playback setup done: baseOffset=%lu, readFrameSizeHeader=%d, totalFrames=%u, dataSize=%lu\n",
+                  (unsigned long)_frameBaseOffset, _readFrameSizeHeader ? 1 : 0,
+                  _totalFrames, (unsigned long)_currentDataSize);
 
     if (info.type == StorageItemType::IMAGE) {
         _state = PlaybackState::SHOWING;
@@ -139,7 +171,7 @@ void MediaPlayer::update() {
         uint32_t frameStart = millis();
 
         if (!decodeOneFrame()) {
-            _storage->seek(20);
+            _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
             if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             return;
@@ -147,7 +179,7 @@ void MediaPlayer::update() {
 
         _currentFrame++;
         if (_totalFrames > 0 && _currentFrame >= _totalFrames) {
-            _storage->seek(20);
+            _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
         }
 
@@ -191,6 +223,10 @@ int8_t MediaPlayer::getCurrentSlot() const {
 bool MediaPlayer::decodeOneFrame() {
     if (_jpegBuffer == nullptr || _storage == nullptr) return false;
 
+    Serial.printf("[MediaPlayer] decodeOneFrame: slot=%d state=%d totalFrames=%u baseOffset=%lu readHeader=%d\n",
+                  _currentSlot, (int)_state, _totalFrames, (unsigned long)_frameBaseOffset,
+                  _readFrameSizeHeader ? 1 : 0);
+
     // XỬ LÝ 1: Tệp SLBX Raw RGB565 (Render trực tiếp khung hình pixel lên LCD không qua JPEGDEC)
     if (_isSlbxRgb565) {
         uint32_t payloadSize = (uint32_t)_slbxWidth * _slbxHeight * 2;
@@ -214,16 +250,43 @@ bool MediaPlayer::decodeOneFrame() {
     }
 
     // XỬ LÝ 2: Tệp JPEG / MJPEG (Giải mã qua JPEGDEC)
-    // 1. Đọc kích thước khung hình JPEG (4 bytes header)
     uint32_t jpegSize = 0;
-    if (_storage->readData((uint8_t*)&jpegSize, 4) < 4 || jpegSize == 0 || jpegSize > JPEG_BUFFER_SIZE) {
-        if (_display) {
-            char dbg[32];
-            snprintf(dbg, sizeof(dbg), "Bad jpegSz: %lu", (unsigned long)jpegSize);
-            _display->showMessage(dbg);
-            delay(2000);
+
+    if (_readFrameSizeHeader) {
+        // 1. Đọc kích thước khung hình JPEG (4 bytes header)
+        uint8_t sizeBytes[4] = {0};
+        int sizeRead = _storage->readData(sizeBytes, sizeof(sizeBytes));
+        if (sizeRead < 4) {
+            Serial.printf("[MediaPlayer] ERROR: jpeg size header short read: %d\n", sizeRead);
+            return false;
         }
-        return false;
+        memcpy(&jpegSize, sizeBytes, sizeof(jpegSize));
+
+        if (jpegSize == 0 || jpegSize > JPEG_BUFFER_SIZE) {
+            Serial.printf("[MediaPlayer] BAD jpegSize=%lu (header path) dataSize=%lu baseOffset=%lu totalFrames=%u\n",
+                          (unsigned long)jpegSize, (unsigned long)_currentDataSize,
+                          (unsigned long)_frameBaseOffset, _totalFrames);
+            dumpHexBytes("[MediaPlayer] bad-size bytes:", sizeBytes, sizeof(sizeBytes));
+            if (_display) {
+                char dbg[40];
+                snprintf(dbg, sizeof(dbg), "Bad jpegSize: %lu", (unsigned long)jpegSize);
+                _display->showMessage(dbg);
+                delay(2000);
+            }
+            return false;
+        }
+    } else {
+        if (_currentDataSize <= _frameBaseOffset) {
+            Serial.printf("[MediaPlayer] ERROR: invalid single-frame baseOffset=%lu dataSize=%lu\n",
+                          (unsigned long)_frameBaseOffset, (unsigned long)_currentDataSize);
+            return false;
+        }
+
+        jpegSize = _currentDataSize - _frameBaseOffset;
+        if (jpegSize > JPEG_BUFFER_SIZE) jpegSize = JPEG_BUFFER_SIZE;
+        Serial.printf("[MediaPlayer] Single-frame payload mode: jpegSize=%lu (dataSize=%lu baseOffset=%lu)\n",
+                      (unsigned long)jpegSize, (unsigned long)_currentDataSize,
+                      (unsigned long)_frameBaseOffset);
     }
 
     // 2. Đọc toàn bộ dữ liệu JPEG vào RAM buffer trong 1 lệnh duy nhất
@@ -249,6 +312,7 @@ bool MediaPlayer::decodeOneFrame() {
         int decodeRes = _jpeg.decode(0, 0, 0);
         tft->endWrite();
 
+        Serial.printf("[MediaPlayer] JPEG decode result=%d size=%lu\n", decodeRes, (unsigned long)jpegSize);
         _jpeg.close();
     } else {
         Serial.println(F("[MediaPlayer] JPEG openRAM failed!"));

@@ -6,6 +6,7 @@ void UIController::init(uint8_t touchPin, DisplayDriver* display) {
     _touchPin = touchPin;
     _display  = display;
     pinMode(_touchPin, INPUT_PULLDOWN);
+    Serial.printf("[UIController] init: touchPin=%u display=%p\n", _touchPin, (void*)_display);
 }
 
 void UIController::startBreathingLED() {
@@ -30,14 +31,28 @@ bool UIController::isTouched() {
     uint32_t now = millis();
     bool triggered = false;
 
+    if (currentState != _lastTouchState) {
+        Serial.printf("[UIController] raw touch state -> %s at %lu ms\n",
+                      currentState ? "HIGH" : "LOW", (unsigned long)now);
+        _lastTouchState = currentState;
+        _lastDebounceTime = now;
+    }
+
     if (currentState) {
         if (_touchStartTime == 0) {
             _touchStartTime = now;
+            Serial.printf("[UIController] touch start at %lu ms\n", (unsigned long)now);
         } else if ((now - _touchStartTime) >= 30 && !_touchConfirmed) {
             _touchConfirmed = true;
             triggered = true;
+            Serial.printf("[UIController] touch confirmed after %lu ms\n",
+                          (unsigned long)(now - _touchStartTime));
         }
     } else {
+        if (_touchStartTime != 0 || _touchConfirmed) {
+            Serial.printf("[UIController] touch released after %lu ms\n",
+                          (unsigned long)(now - _touchStartTime));
+        }
         _touchStartTime = 0;
         _touchConfirmed = false;
     }
@@ -51,6 +66,7 @@ void UIController::resetTouch() {
 
 void UIController::showConnecting() {
     if (_display == nullptr) return;
+    Serial.println(F("[UIController] showConnecting()"));
     _display->turnOn();
     _display->showMessage("Connecting...");
     _display->setBacklight(BACKLIGHT_NIGHT_PERCENT);
@@ -58,11 +74,13 @@ void UIController::showConnecting() {
 
 void UIController::showDownloading() {
     if (_display == nullptr) return;
+    Serial.println(F("[UIController] showDownloading()"));
     _display->showMessage("Downloading...");
 }
 
 void UIController::showError(const char* message) {
     if (_display == nullptr) return;
+    Serial.printf("[UIController] showError: %s\n", message ? message : "(null)");
     _display->turnOn();
     _display->showMessage(message);
     _display->setBacklight(BACKLIGHT_DAY_PERCENT);
@@ -71,6 +89,7 @@ void UIController::showError(const char* message) {
 
 void UIController::showBootScreen() {
     if (_display == nullptr) return;
+    Serial.println(F("[UIController] showBootScreen()"));
     _display->turnOn();
     _display->clear();
     _display->showMessage("Sendlove Box");

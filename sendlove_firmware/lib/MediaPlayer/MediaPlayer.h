@@ -68,6 +68,9 @@ private:
     uint16_t _fps          = 10;
     uint16_t _totalFrames  = 0;
     uint16_t _currentFrame = 0;
+    uint32_t _currentDataSize = 0;
+    uint32_t _frameBaseOffset = 0;
+    bool     _readFrameSizeHeader = true;
 
     bool     _isSlbxRgb565  = false;
     uint16_t _slbxWidth     = 128;

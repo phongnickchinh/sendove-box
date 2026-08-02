@@ -87,14 +87,14 @@ bool NandStorageProvider::openForWrite(const char* identifier) {
 
     _writeSlotIndex = slot;
     _writeOffset = 4;
-    _lastErasedSectorAddr = 0xFFFFFFFF;
+    _slotCapacity = ((slot + 1) < NAND_SLOT_COUNT) ? (NAND_SLOT_ADDRS[slot + 1] - NAND_SLOT_ADDRS[slot])
+                                                   : (0x1000000UL - NAND_SLOT_ADDRS[slot]);
 
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_writeSlotIndex];
-    _nand.eraseSector(slotStartAddr);
-    _lastErasedSectorAddr = slotStartAddr;
+    _nand.eraseRange(slotStartAddr, _slotCapacity);
 
-    Serial.printf("[NandStorageProvider] openForWrite: cur_point=%d addr=0x%06X (Reserved 4-byte header)\n",
-                  _writeSlotIndex, (unsigned int)slotStartAddr);
+    Serial.printf("[NandStorageProvider] openForWrite: cur_point=%d addr=0x%06X slotCapacity=%lu (pre-erased)\n",
+                  _writeSlotIndex, (unsigned int)slotStartAddr, (unsigned long)_slotCapacity);
     return true;
 }
 
@@ -103,19 +103,11 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
 
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_writeSlotIndex];
     uint32_t startAddr = slotStartAddr + _writeOffset;
-    uint32_t endAddr = startAddr + len - 1;
 
-    // Xác định sector bắt đầu và kết thúc của chunk này
-    uint32_t startSector = startAddr & ~4095U;
-    uint32_t endSector = endAddr & ~4095U;
-
-    // Tự động xóa các sector chưa từng xóa trong lượt ghi này
-    for (uint32_t sec = startSector; sec <= endSector; sec += 4096) {
-        if (_lastErasedSectorAddr == 0xFFFFFFFF || sec > _lastErasedSectorAddr) {
-            _nand.eraseSector(sec);
-            _lastErasedSectorAddr = sec;
-            Serial.printf("[NandStorageProvider] Erased sector at 0x%06X\n", (unsigned int)sec);
-        }
+    if (_slotCapacity == 0 || (uint64_t)_writeOffset + (uint64_t)len > _slotCapacity) {
+        Serial.printf("[NandStorageProvider] ERROR: write exceeds slot capacity. slot=%d offset=%lu len=%u cap=%lu\n",
+                      _writeSlotIndex, (unsigned long)_writeOffset, (unsigned)len, (unsigned long)_slotCapacity);
+        return 0;
     }
 
     _nand.writeRaw(startAddr, data, len);
@@ -136,10 +128,24 @@ void NandStorageProvider::closeWrite() {
     _nand.readRaw(slotStartAddr + 4, header, 16);
 
     if (memcmp(header, "SLBX", 4) == 0) {
-        uint16_t fps = *(uint16_t*)(header + 10);
-        uint16_t totalFrames = (fps > 0) ? fps : 1;
-        _nand.setSlotInfo(_writeSlotIndex, "SLBX", _writeOffset, (fps > 0) ? fps : 10, totalFrames);
-        Serial.printf("[NandStorageProvider] Detected SendLove Box SLBX media (Total offset: %u bytes).\n", _writeOffset);
+        uint8_t mediaType = header[5];
+        uint16_t fps = 0;
+        uint16_t totalFrames = 1;
+        memcpy(&fps, header + 10, sizeof(fps));
+        memcpy(&totalFrames, header + 11, sizeof(totalFrames));
+
+        uint16_t finalFps = (fps > 0) ? fps : 1;
+        if (mediaType == 0x02 || totalFrames <= 1) {
+            totalFrames = 1;
+            _nand.setSlotInfo(_writeSlotIndex, "VIMG", _writeOffset, finalFps, totalFrames);
+            Serial.printf("[NandStorageProvider] Detected SLBX image (type=0x%02X, fps=%u, frames=%u, total offset=%u).\n",
+                          mediaType, finalFps, totalFrames, _writeOffset);
+        } else {
+            if (totalFrames == 0) totalFrames = 1;
+            _nand.setSlotInfo(_writeSlotIndex, "VJPG", _writeOffset, finalFps, totalFrames);
+            Serial.printf("[NandStorageProvider] Detected SLBX video (type=0x%02X, fps=%u, frames=%u, total offset=%u).\n",
+                          mediaType, finalFps, totalFrames, _writeOffset);
+        }
     } else if (memcmp(header, "SLOT", 4) == 0 || memcmp(header, "VJPG", 4) == 0 || memcmp(header, "VIMG", 4) == 0) {
         uint32_t dataSize = *(uint32_t*)(header + 4);
         uint16_t fps = *(uint16_t*)(header + 8);
@@ -159,6 +165,7 @@ void NandStorageProvider::closeWrite() {
     // 2. Dịch tiến con trỏ cur_point sang Slot tiếp theo (0..4)
     int8_t writtenSlot = _writeSlotIndex;
     _writeSlotIndex = (_writeSlotIndex + 1) % NAND_SLOT_COUNT;
+    _slotCapacity = 0;
 
     saveNvsState();
     _nand.writeSlotTable();
@@ -227,6 +234,7 @@ bool NandStorageProvider::formatStorage() {
     _unreadBitmask = 0;
     _writeSlotIndex = 0;
     _writeOffset = 0;
+    _slotCapacity = 0;
     saveNvsState();
 
     // Reset mốc last_download_ts trong NVS về 0 để sẵn sàng tải tin nhắn mới từ đầu

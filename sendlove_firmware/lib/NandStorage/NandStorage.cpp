@@ -142,6 +142,8 @@ void NandStorage::readRaw(uint32_t addr, uint8_t* data, uint32_t len) {
 
 static constexpr uint8_t W25Q_WRITE_ENABLE = 0x06;
 static constexpr uint8_t W25Q_SECTOR_ERASE = 0x20;
+static constexpr uint8_t W25Q_BLOCK_ERASE_32K = 0x52;
+static constexpr uint8_t W25Q_BLOCK_ERASE_64K = 0xD8;
 static constexpr uint8_t W25Q_PAGE_PROGRAM = 0x02;
 
 static void waitBusyInternal() {
@@ -177,6 +179,67 @@ void NandStorage::eraseSector(uint32_t addr) {
 
     SPI.endTransaction();
     releaseSPI();
+}
+
+void NandStorage::eraseRange(uint32_t addr, uint32_t len) {
+    if (len == 0) return;
+
+    uint32_t current = addr;
+    uint32_t remaining = len;
+
+    while (remaining > 0) {
+        if ((current % 65536U) == 0 && remaining >= 65536U) {
+            if (!acquireSPI()) return;
+
+            SPI.beginTransaction(NAND_SPI_SETTINGS);
+            writeEnableInternal();
+
+            digitalWrite(PIN_NAND_CS, LOW);
+            SPI.transfer(W25Q_BLOCK_ERASE_64K);
+            SPI.transfer((current >> 16) & 0xFF);
+            SPI.transfer((current >> 8) & 0xFF);
+            SPI.transfer(current & 0xFF);
+            digitalWrite(PIN_NAND_CS, HIGH);
+
+            waitBusyInternal();
+            SPI.endTransaction();
+            releaseSPI();
+
+            current += 65536U;
+            remaining -= 65536U;
+            continue;
+        }
+
+        if ((current % 32768U) == 0 && remaining >= 32768U) {
+            if (!acquireSPI()) return;
+
+            SPI.beginTransaction(NAND_SPI_SETTINGS);
+            writeEnableInternal();
+
+            digitalWrite(PIN_NAND_CS, LOW);
+            SPI.transfer(W25Q_BLOCK_ERASE_32K);
+            SPI.transfer((current >> 16) & 0xFF);
+            SPI.transfer((current >> 8) & 0xFF);
+            SPI.transfer(current & 0xFF);
+            digitalWrite(PIN_NAND_CS, HIGH);
+
+            waitBusyInternal();
+            SPI.endTransaction();
+            releaseSPI();
+
+            current += 32768U;
+            remaining -= 32768U;
+            continue;
+        }
+
+        eraseSector(current & ~4095U);
+        current = (current & ~4095U) + 4096U;
+        if (remaining > 4096U) {
+            remaining -= 4096U;
+        } else {
+            remaining = 0;
+        }
+    }
 }
 
 void NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
@@ -248,21 +311,30 @@ void NandStorage::writeSlotTable() {
     for (uint8_t i = 0; i < NAND_SLOT_COUNT; i++) {
         memcpy(header + 4 + i * sizeof(SlotEntry), &_slots[i], sizeof(SlotEntry));
     }
-    eraseSector(0x000000);
+    eraseRange(0x000000, 4096);
     writeRaw(0x000000, header, sizeof(header));
     _tableValid = true;
     Serial.println(F("[NandStorage] Wrote fresh NSLT header table."));
 }
 
 void NandStorage::formatAll() {
-    Serial.println(F("[NandStorage] Formatting W25Q128 Flash... Erasing Header & Slot Sectors..."));
-    // Erase Header sector 0
-    eraseSector(0x000000);
+    Serial.println(F("[NandStorage] Formatting W25Q128 Flash... Chip Erase..."));
 
-    // Erase first sector of each slot
-    for (uint8_t i = 0; i < NAND_SLOT_COUNT; i++) {
-        eraseSector(NAND_SLOT_ADDRS[i]);
+    if (!acquireSPI()) {
+        Serial.println(F("[NandStorage] ERROR: SPI mutex timeout during chip erase"));
+        return;
     }
+
+    SPI.beginTransaction(NAND_SPI_SETTINGS);
+    writeEnableInternal();
+
+    digitalWrite(PIN_NAND_CS, LOW);
+    SPI.transfer(0xC7); // Chip Erase
+    digitalWrite(PIN_NAND_CS, HIGH);
+
+    waitBusyInternal();
+    SPI.endTransaction();
+    releaseSPI();
 
     _currentSlot = -1;
     _cursor = 0;

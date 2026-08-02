@@ -43,6 +43,20 @@ static volatile bool forceStandbyRedraw = false;
 static SemaphoreHandle_t spiMutex = nullptr;
 static QueueHandle_t eventQueue = nullptr;
 
+static void initSerialDebug() {
+  Serial.begin(115200);
+  unsigned long waitStart = millis();
+  while (!Serial && millis() - waitStart < 2000) {
+    delay(10);
+  }
+  Serial.setDebugOutput(true);
+  Serial.println();
+  Serial.println(F("[BOOT] =================================================="));
+  Serial.println(F("[BOOT] Sendlove Box firmware starting..."));
+  Serial.printf("[BOOT] CPU=%u MHz, heap=%u bytes\n", ESP.getCpuFreqMHz(), ESP.getFreeHeap());
+  Serial.printf("[BOOT] Wakeup cause=%d\n", (int)esp_sleep_get_wakeup_cause());
+}
+
 enum class AppState { STATE_STANDBY, STATE_VIDEO };
 
 AppState currentAppState = AppState::STATE_STANDBY;
@@ -58,6 +72,7 @@ const char *defaultLayoutJson = R"({
 })";
 
 void Task_MediaPlayer(void *pvParameters) {
+  Serial.println(F("[Task_MediaPlayer] started"));
   char currentId[32] = "";
   uint32_t lastClockRender = 0;
 
@@ -70,9 +85,12 @@ void Task_MediaPlayer(void *pvParameters) {
   for (;;) {
     SystemEvent event = SystemEvent::NONE;
     while (xQueueReceive(eventQueue, &event, 0) == pdTRUE) {
+      Serial.printf("[Task_MediaPlayer] event=%d state=%d currentId=%s\n",
+                    (int)event, (int)currentAppState, currentId);
       if (event == SystemEvent::TOUCH_TOGGLE_MODE) {
         if (currentAppState == AppState::STATE_STANDBY) {
           currentAppState = AppState::STATE_VIDEO;
+          Serial.println(F("[Task_MediaPlayer] switching to VIDEO"));
           appCtx.display.clear();
           
           char unreadId[32] = "";
@@ -89,6 +107,7 @@ void Task_MediaPlayer(void *pvParameters) {
             }
           }
         } else {
+          Serial.println(F("[Task_MediaPlayer] cycling to next video/item"));
           char unreadId[32] = "";
           if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
             strncpy(currentId, unreadId, sizeof(currentId) - 1);
@@ -107,6 +126,7 @@ void Task_MediaPlayer(void *pvParameters) {
 
     if (currentAppState == AppState::STATE_VIDEO) {
       if (!appCtx.otaHandler.isUpdating()) {
+        Serial.println(F("[Task_MediaPlayer] update playback"));
         appCtx.player.update();
       } else {
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -115,6 +135,7 @@ void Task_MediaPlayer(void *pvParameters) {
       uint32_t now = millis();
       if (now - lastClockRender >= 1000 || forceStandbyRedraw) {
         bool fullRedraw = (lastClockRender == 0) || forceStandbyRedraw;
+        Serial.printf("[Task_MediaPlayer] redraw standby full=%d\n", fullRedraw ? 1 : 0);
         appCtx.layoutEngine.renderStandbyScreen(&appCtx.display, &appCtx.network, fullRedraw);
         lastClockRender = now;
         forceStandbyRedraw = false;
@@ -126,10 +147,12 @@ void Task_MediaPlayer(void *pvParameters) {
 }
 
 void Task_UIController(void *pvParameters) {
+  Serial.println(F("[Task_UIController] started"));
   uint32_t activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
 
   for (;;) {
     if (appCtx.ui.isTouched()) {
+      Serial.println(F("[Task_UIController] touch event -> queue TOGGLE_MODE"));
       SystemEvent event = SystemEvent::TOUCH_TOGGLE_MODE;
       xQueueSend(eventQueue, &event, 0);
       lastUserActivity = millis();
@@ -140,6 +163,8 @@ void Task_UIController(void *pvParameters) {
     if (!appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
         !appCtx.network.isFirebaseSyncing() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
+      Serial.printf("[Task_UIController] inactivity timeout hit after %lu ms\n",
+                    (unsigned long)(now - lastUserActivity));
       
       time_t nowSec = time(nullptr);
       uint32_t secToAlarm = appCtx.configManager.getSecondsToNextAlarm(nowSec);
@@ -151,6 +176,9 @@ void Task_UIController(void *pvParameters) {
         }
       }
 
+      Serial.printf("[Task_UIController] entering light sleep sleepTimeUs=%llu secToAlarm=%lu\n",
+                    (unsigned long long)sleepTimeUs, (unsigned long)secToAlarm);
+
       // Dừng MediaPlayer giải phóng SPI/RAM và chuyển về Standby trước khi ngủ
       appCtx.player.stop();
       currentAppState = AppState::STATE_STANDBY;
@@ -160,6 +188,7 @@ void Task_UIController(void *pvParameters) {
 
       delay(50);
       esp_sleep_wakeup_cause_t wakeupCause = esp_sleep_get_wakeup_cause();
+      Serial.printf("[Task_UIController] wakeup cause=%d\n", (int)wakeupCause);
       if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER) {
         // Touch Wakeup: Bật màn hình mượt mà và Render Standby UI NGAY LẬP TỨC (< 50ms!)
         appCtx.display.turnOn();
@@ -170,12 +199,14 @@ void Task_UIController(void *pvParameters) {
       } else {
         lastUserActivity = millis();
         activeSleepTimeoutMs = 2000;
+        Serial.println(F("[Task_UIController] timer wakeup -> short active window"));
       }
 
       // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm
       vTaskDelay(pdMS_TO_TICKS(200));
 
       // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy (cả Touch và Timer)
+      Serial.println(F("[Task_UIController] post-wakeup sync start"));
       appCtx.network.ensureConnected();
       appCtx.network.triggerNtpSync();
       uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
@@ -193,6 +224,7 @@ void Task_UIController(void *pvParameters) {
 }
 
 void Task_NetworkController(void *pvParameters) {
+  Serial.println(F("[Task_NetworkController] started"));
   for (;;) {
     appCtx.network.update();
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -200,20 +232,26 @@ void Task_NetworkController(void *pvParameters) {
 }
 
 void setup() {
+  initSerialDebug();
+  Serial.println(F("[BOOT] setup(): creating SPI mutex and event queue"));
   spiMutex = xSemaphoreCreateMutex();
   eventQueue = xQueueCreate(8, sizeof(SystemEvent));
 
   if (spiMutex == nullptr || eventQueue == nullptr) {
+    Serial.println(F("[BOOT] ERROR: failed to create SPI mutex or event queue"));
     while (1)
       delay(1000);
   }
 
+  Serial.println(F("[BOOT] setup(): initializing SPI bus"));
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
 
+  Serial.println(F("[BOOT] setup(): initializing display"));
   appCtx.display.init(spiMutex);
   appCtx.display.setBacklight(BACKLIGHT_DAY_PERCENT);
   appCtx.display.showMessage("Booting...");
 
+  Serial.println(F("[BOOT] setup(): initializing network and config"));
   appCtx.network.init();
   appCtx.configManager.init(NVS_NAMESPACE);
 
@@ -223,32 +261,49 @@ void setup() {
   if (!appCtx.configManager.loadWiFi(wifiSsid, wifiPass)) {
     strncpy(wifiSsid, DEFAULT_WIFI_SSID, sizeof(wifiSsid) - 1);
     strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
+    Serial.println(F("[BOOT] WiFi credentials not found, using defaults"));
   }
 
+  Serial.printf("[BOOT] WiFi SSID: %s\n", wifiSsid);
   appCtx.network.connectWiFi(wifiSsid, wifiPass);
   appCtx.layoutEngine.loadConfig(defaultLayoutJson);
 
 #if ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD
+  Serial.println(F("[BOOT] storage type: SD"));
   appCtx.storage = new SDStorageProvider();
 #else
+  Serial.println(F("[BOOT] storage type: NAND"));
   appCtx.storage = new NandStorageProvider();
 #endif
 
+  Serial.println(F("[BOOT] setup(): initializing storage backend"));
   if (!appCtx.storage->init(spiMutex)) {
+    Serial.println(F("[BOOT] ERROR: storage init failed"));
     appCtx.display.showMessage("Storage Err!");
     while (1) {
       delay(100);
     }
   }
 
+#if ERASE_NOR_ON_BOOT == 1
+  Serial.println(F("[BOOT] setup(): erasing NOR on boot"));
+  appCtx.display.showMessage("Erasing NOR...");
+  appCtx.storage->formatStorage();
+  delay(1000);
+#endif
+
+  Serial.println(F("[BOOT] setup(): initializing player, UI, and power manager"));
   appCtx.player.init(appCtx.storage, &appCtx.display);
   appCtx.ui.init(PIN_TOUCH, &appCtx.display);
   appCtx.powerManager.init((gpio_num_t)PIN_TOUCH);
   lastUserActivity = millis();
+  Serial.printf("[BOOT] lastUserActivity=%lu\n", (unsigned long)lastUserActivity);
 
+  Serial.println(F("[BOOT] setup(): showing boot screen"));
   appCtx.ui.showBootScreen();
 
   if (appCtx.network.isConnected()) {
+    Serial.println(F("[BOOT] WiFi connected, starting NTP/WebServer/Firebase sync"));
     appCtx.network.triggerNtpSync();
     appCtx.network.startWebServer(OTA_HOSTNAME);
     if (appCtx.network.getWebServer() != nullptr) {
@@ -258,18 +313,23 @@ void setup() {
     // Kích hoạt Firebase Sync ngầm ngay khi vừa nạp code/khởi động xong
     uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
     bool isCharging = appCtx.powerManager.isCharging();
+    Serial.printf("[BOOT] triggerFirebaseSync bat=%u charging=%d\n", batPercent, isCharging ? 1 : 0);
     appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
   } else {
+    Serial.println(F("[BOOT] WiFi not connected, starting provisioning AP"));
     appCtx.display.showMessage("Setup Wi-Fi:\nSendloveBox-Setup");
     appCtx.network.startProvisioningAP("SendloveBox-Setup");
   }
 
+  Serial.println(F("[BOOT] setup(): creating FreeRTOS tasks"));
   xTaskCreate(Task_MediaPlayer, "MediaPlayer", TASK_STACK_MEDIA_PLAYER, nullptr,
               TASK_PRIORITY_MEDIA_PLAYER, nullptr);
   xTaskCreate(Task_UIController, "UIController", TASK_STACK_UI_CONTROLLER,
               nullptr, TASK_PRIORITY_UI_CONTROLLER, nullptr);
   xTaskCreate(Task_NetworkController, "NetworkController", TASK_STACK_NETWORK,
               nullptr, TASK_PRIORITY_NETWORK, nullptr);
+
+  Serial.println(F("[BOOT] setup(): complete"));
 }
 
 void loop() { vTaskDelay(pdMS_TO_TICKS(500)); }

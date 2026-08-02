@@ -38,6 +38,9 @@ public:
     /// Erase a 4KB Flash sector at specified address
     void eraseSector(uint32_t addr);
 
+    /// Erase a continuous flash range using the largest supported erase granularity
+    void eraseRange(uint32_t addr, uint32_t len);
+
     /// Write raw data bytes to Flash address (handles page programming)
     void writeRaw(uint32_t addr, const uint8_t* data, uint32_t len);
 

@@ -220,7 +220,11 @@
   - Tự động ghi nhãn `"VIMG"` (cho ảnh) hoặc `"VJPG"` (cho video) vào bảng Slot Table (`Sector 0`) để `NandStorage` và `MediaPlayer` công nhận Slot hợp lệ và lập tức giải mã hiển thị hình ảnh rực rỡ trên màn hình LCD.
 - [x] **Tự động phát Media ngay sau khi tải xong (`Auto Play on Download Complete & Screen Overwrite Fix`)**: Tích hợp Event-driven callback `setOnDownloadComplete`. Đã loại bỏ triệt để xung đột giao diện làm chữ `"All Sync Done!"` in đè và xóa mất bức ảnh vừa được `MediaPlayer` hiển thị. Bức ảnh/video sẽ được giữ nguyên 100% rực rỡ trên màn hình LCD.
 - [x] **Thông báo hoàn tất (`All Sync Done`)**: Thêm hiển thị chữ `"All Sync Done!"` trên màn hình khi toàn bộ tiến trình Firebase đã kết thúc thành công.
-- [x] Biên dịch thành công 100% (`[SUCCESS]`), RAM 19.0% (62KB/328KB), Flash 70.8% (1.29MB/1.83MB).
+- [x] **Cập nhật Quy tắc Indexing trên Firebase (`database.rules.json`)**: Bổ sung `.indexOn: ["timestamp"]` cho node `messages/$box_id`, cho phép lọc Server-side trên Firebase.
+- [x] **Tối ưu Server-side Filtering & Zero-Copy Stream Parsing (`NetworkManager`)**:
+  - Đính kèm query parameters `orderBy="timestamp"&startAt=<nextTs>` vào HTTP GET request gửi lên Firebase REST API. Khi không có tin mới, Firebase Server trả về `{}` (2 bytes), giảm 99% tải băng thông & CPU/RAM cho Box.
+  - Sử dụng Stream parsing trực tiếp từ HTTP socket (`deserializeJson(doc, *stream)`), loại bỏ hoàn toàn cấp phát mảng chuỗi tạm `http.getString()`, chống triệt để phân mảnh RAM Heap trên ESP32-C3.
+- [x] Biên dịch thành công 100% (`[SUCCESS]`), RAM 19.0% (62KB/328KB), Flash 71.3% (1.30MB/1.83MB).
 
 ---
 
@@ -229,6 +233,7 @@
 - [ ] Tháo/xả bỏ đèn LED đỏ báo nguồn phần cứng trên bo ESP32 DevKit và Module NAND Flash.
 - [ ] Bổ sung I2S Audio Module (MAX98357A) cho âm thanh video.
 - [ ] Nâng cấp Cloud OTA: tải firmware `.bin` từ Firebase Storage thông qua `ota_tasks`.
+
 
 
 

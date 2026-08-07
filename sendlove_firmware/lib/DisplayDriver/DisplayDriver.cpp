@@ -78,6 +78,9 @@ void DisplayDriver::turnOff() {
     releaseSPI();
   }
 
+  // Đặt pin về GPIO mode với mức LOW trước khi gpio_hold_en().
+  // gpio_hold_en() cần pin ở GPIO mode để latch trạng thái LOW đáng tin cậy.
+  // turnOn() sẽ gọi _tft.init() để re-attach LEDC về pin sau khi thức dậy.
   pinMode(PIN_TFT_BLK, OUTPUT);
   digitalWrite(PIN_TFT_BLK, LOW);
   gpio_hold_en((gpio_num_t)PIN_TFT_BLK);
@@ -94,19 +97,19 @@ void DisplayDriver::turnOn(uint8_t cause) {
 
     gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
 
-    // Đánh thức màn hình và xóa đen để tránh hiện ảnh cũ nhòe
+    // Re-init toàn bộ LGFX pipeline (SPI bus + ST7789 panel + LEDC PWM)
     if (acquireSPI()) {
-      _tft.wakeup();
+      _tft.init();
       _tft.setRotation(0);
       _tft.setSwapBytes(true);
       _tft.fillScreen(TFT_BLACK);
       releaseSPI();
-    }
 
-    pinMode(PIN_TFT_BLK, OUTPUT);
-    digitalWrite(PIN_TFT_BLK, HIGH);
-    setBacklight(BACKLIGHT_DAY_PERCENT);
-    _isSleeping = false;
+      setBacklight(BACKLIGHT_DAY_PERCENT);
+      _isSleeping = false;
+    } else {
+      Serial.println(F("[Display] ERROR: acquireSPI() timeout in turnOn()! Display NOT woken up."));
+    }
   }
 }
 

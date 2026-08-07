@@ -190,8 +190,10 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     _writeSlotIndex = (_writeSlotIndex + 1) % NAND_SLOT_COUNT;
     _slotCapacity = 0;
 
-    saveNvsState();
+    // Ghi slot table vào NAND TRƯỚC khi commit unread bitmask vào NVS.
+    // Nếu bị reset giữa chừng, NAND sẽ có data hợp lệ trước khi NVS biết slot là unread.
     _nand.writeSlotTable();
+    saveNvsState();
     Serial.printf("[MONITOR] Written Slot %d (_writeOffset=%lu). Next cur_point->%d. _unreadBitmask: 0x%02X -> 0x%02X\n",
                   writtenSlot, (unsigned long)_writeOffset, _writeSlotIndex, oldUnread, _unreadBitmask);
 }
@@ -225,13 +227,23 @@ uint8_t NandStorageProvider::getUnreadCount() const {
 bool NandStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
     if (!hasUnreadMessage() || !outId || maxLen == 0) return false;
 
-    // Duyệt tìm tin chưa đọc CŨ NHẤT bắt đầu từ cur_point theo vòng tròn modulo
+    // Duyệt tìm tin chưa đọc CŨ NHẤT bắt đầu từ cur_point theo vòng tròn modulo.
+    // Nếu slot được đánh dấu unread nhưng data thực tế không đọc được (bị ngắt khi write),
+    // tự động xóa bit và bỏ qua slot đó để tránh treo vĩnh viễn.
     for (int i = 0; i < NAND_SLOT_COUNT; i++) {
         int8_t slot = (_writeSlotIndex + i) % NAND_SLOT_COUNT;
-        if (_unreadBitmask & (1 << slot)) {
-            snprintf(outId, maxLen, "%d", slot);
-            return true;
+        if (!(_unreadBitmask & (1 << slot))) continue;
+
+        if (!_nand.openSlot(slot)) {
+            Serial.printf("[NandStorageProvider] WARNING: Slot %d marked unread but data is unreadable. Clearing stale bit.\n", slot);
+            _unreadBitmask &= ~(1 << slot);
+            saveNvsState();
+            continue;
         }
+        _nand.closeSlot();
+
+        snprintf(outId, maxLen, "%d", slot);
+        return true;
     }
     return false;
 }

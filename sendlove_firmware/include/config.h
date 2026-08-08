@@ -44,7 +44,7 @@ static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 
 // Timing & Power Constants
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
-static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 150000; // TODO: Increase to 60000-300000 for production
+static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 15000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr uint8_t WIFI_RETRY_MAX = 3;
 static constexpr uint32_t TOUCH_DEBOUNCE_MS = 50;
@@ -109,7 +109,7 @@ static constexpr const char *NVS_NAMESPACE = "sendlove";
 
 // Bật tạm thời để xóa sạch dữ liệu trên NOR/W25Q128 lúc boot kế tiếp.
 // Sau khi nạp xong và xác nhận dữ liệu đã được xóa, đổi về 0 rồi build lại.
-#define ERASE_NOR_ON_BOOT 1
+#define ERASE_NOR_ON_BOOT 0
 #ifdef WOKWI_SIMULATION
 static constexpr uint8_t PIN_BUZZER = 0;
 static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;

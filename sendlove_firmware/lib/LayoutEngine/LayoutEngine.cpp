@@ -54,7 +54,7 @@ bool LayoutEngine::loadConfig(const char *jsonString) {
     _widgets.push_back(cfg);
   }
 
-  Serial.printf("[LayoutEngine] Loaded %d widgets\n", _widgets.size());
+  // Dropped LayoutEngine Loaded widgets log
   return true;
 }
 

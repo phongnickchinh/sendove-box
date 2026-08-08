@@ -1,4 +1,5 @@
 #include "NandStorage.h"
+#include "ScreenLogger.h"
 
 // ============================================================================
 // NandStorage Implementation — Hardware SPI2
@@ -23,7 +24,7 @@ bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     readRaw(0, header, sizeof(header));
 
     if (memcmp(header, "NSLT", 4) != 0) {
-        Serial.println(F("[NandStorage] Table header missing or erased. Initializing clean NSLT table..."));
+        DLOG("[NAND] no table -> init clean");
         memset(_slots, 0, sizeof(_slots));
         writeSlotTable();
         return true;
@@ -297,7 +298,7 @@ bool NandStorage::acquireSPI() {
 
         return true;
     }
-    Serial.println(F("[NAND] ERROR: SPI mutex timeout"));
+    DLOG("[NAND] ERR: SPI mutex timeout");
     return false;
 }
 
@@ -316,14 +317,14 @@ void NandStorage::writeSlotTable() {
     eraseRange(0x000000, 4096);
     writeRaw(0x000000, header, sizeof(header));
     _tableValid = true;
-    Serial.println(F("[NandStorage] Wrote fresh NSLT header table."));
+    // DLOG("[NAND] wrote NSLT table");
 }
 
 void NandStorage::formatAll() {
-    Serial.println(F("[NandStorage] Formatting W25Q128 Flash... Chip Erase..."));
+    DLOG("[NAND] Formatting W25Q128...");
 
     if (!acquireSPI()) {
-        Serial.println(F("[NandStorage] ERROR: SPI mutex timeout during chip erase"));
+        DLOG("[NAND] ERR: format SPI timeout");
         return;
     }
 
@@ -343,5 +344,5 @@ void NandStorage::formatAll() {
     _slotSize = 0;
     memset(_slots, 0, sizeof(_slots));
     writeSlotTable();
-    Serial.println(F("[NandStorage] Flash erase complete. Fresh NSLT table created."));
+    DLOG("[NAND] Format complete");
 }

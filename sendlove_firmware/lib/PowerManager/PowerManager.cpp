@@ -63,13 +63,12 @@ void PowerManager::enterLightSleep(uint64_t sleepDurationUs, DisplayDriver* disp
     configureTimerWakeup(sleepDurationUs);
     configureTouchWakeup(_touchPin);
 
-    Serial.flush();
-    Serial.setTxTimeoutMs(0); // Đặt USB CDC TX timeout = 0ms (chống treo/khựng Task khi ngắt USB Serial)
+    // Serial.flush();
+    // Serial.setTxTimeoutMs(0); // Đặt USB CDC TX timeout = 0ms (chống treo/khựng Task khi ngắt USB Serial)
 
     esp_light_sleep_start();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     delay(50);
-    Serial.setTxTimeoutMs(0); // Giữ non-blocking sau khi thức dậy
 }
 
 void PowerManager::enterDeepSleep(uint64_t sleepDurationUs, DisplayDriver* display) {

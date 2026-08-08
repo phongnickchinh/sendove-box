@@ -86,8 +86,11 @@ public:
   /// Turn off display and lock backlight GPIO LOW for sleep
   void turnOff();
 
-  /// Turn on display and re-initialize LGFX pipeline
-  void turnOn(uint8_t cause = 100);
+  /// Turn on display and re-initialize LGFX pipeline after light sleep
+  void turnOn();
+
+  /// Flash backlight 3x to confirm chip is alive after wakeup (works before LGFX re-init)
+  void wakeupFlash();
 
   /// Fill screen with black
   void clear();
@@ -95,8 +98,11 @@ public:
   /// Get underlying LGFX instance
   LGFX *getTFT();
 
-  /// Acquire SPI bus mutex
+  /// Acquire SPI bus mutex with default 1000ms timeout
   bool acquireSPI();
+
+  /// Acquire SPI bus mutex with custom timeout (used by ScreenLogger)
+  bool acquireSPI(uint32_t timeoutMs);
 
   /// Release SPI bus mutex
   void releaseSPI();

@@ -1,5 +1,6 @@
 #include "NandStorageProvider.h"
 #include "ConfigManager.h"
+#include "ScreenLogger.h"
 #include "config.h"
 
 int8_t NandStorageProvider::parseSlotId(const char* identifier) const {
@@ -16,11 +17,7 @@ void NandStorageProvider::loadNvsState() {
     _unreadBitmask = _prefs.getUChar("unread_mask", 0);
     _writeSlotIndex = _prefs.getChar("write_idx", 0);
     _prefs.end();
-    Serial.printf("[NandStorageProvider] Loaded NVS: unread_mask=0x%02X (bin: %d%d%d%d%d), write_idx=%d\n",
-                  _unreadBitmask,
-                  (_unreadBitmask >> 4) & 1, (_unreadBitmask >> 3) & 1,
-                  (_unreadBitmask >> 2) & 1, (_unreadBitmask >> 1) & 1,
-                  _unreadBitmask & 1, _writeSlotIndex);
+    DLOG("[NANDP] loaded NVS mask=0x%02X", _unreadBitmask);
 }
 
 void NandStorageProvider::saveNvsState() {
@@ -28,11 +25,7 @@ void NandStorageProvider::saveNvsState() {
     _prefs.putUChar("unread_mask", _unreadBitmask);
     _prefs.putChar("write_idx", _writeSlotIndex);
     _prefs.end();
-    Serial.printf("[NandStorageProvider] Saved NVS: unread_mask=0x%02X (bin: %d%d%d%d%d), write_idx=%d\n",
-                  _unreadBitmask,
-                  (_unreadBitmask >> 4) & 1, (_unreadBitmask >> 3) & 1,
-                  (_unreadBitmask >> 2) & 1, (_unreadBitmask >> 1) & 1,
-                  _unreadBitmask & 1, _writeSlotIndex);
+    // DLOG saved every time -> dropped
 }
 
 bool NandStorageProvider::init(SemaphoreHandle_t spiMutex) {
@@ -92,8 +85,7 @@ bool NandStorageProvider::openForWrite(const char* identifier) {
 
     // Kiểm tra nếu slot tại cur_point đang chứa tin nhắn chưa đọc -> từ chối ghi (Bộ nhớ đầy)
     if (_unreadBitmask & (1 << slot)) {
-        Serial.printf("[NandStorageProvider] ERROR: Slot %d contains UNREAD message! Storage full (unread_mask=0x%02X).\n",
-                      slot, _unreadBitmask);
+        DLOG("[NANDP] ERR: slot %d unread full", slot);
         return false;
     }
 
@@ -105,9 +97,7 @@ bool NandStorageProvider::openForWrite(const char* identifier) {
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_writeSlotIndex];
     _nand.eraseRange(slotStartAddr, _slotCapacity);
 
-    Serial.printf("[NandStorageProvider] openForWrite: slot=%d addr=0x%06X slotCap=%lu init _writeOffset=%lu _unreadBitmask=0x%02X\n",
-                  _writeSlotIndex, (unsigned int)slotStartAddr, (unsigned long)_slotCapacity,
-                  (unsigned long)_writeOffset, _unreadBitmask);
+    DLOG("[NANDP] open write slot %d", _writeSlotIndex);
     return true;
 }
 
@@ -118,8 +108,7 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     uint32_t startAddr = slotStartAddr + _writeOffset;
 
     if (_slotCapacity == 0 || (uint64_t)_writeOffset + (uint64_t)len > _slotCapacity) {
-        Serial.printf("[NandStorageProvider] ERROR: write exceeds slot capacity. slot=%d offset=%lu len=%u cap=%lu\n",
-                      _writeSlotIndex, (unsigned long)_writeOffset, (unsigned)len, (unsigned long)_slotCapacity);
+        DLOG("[NANDP] ERR: write exceed cap");
         return 0;
     }
 
@@ -127,11 +116,7 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     uint32_t prevOffset = _writeOffset;
     _writeOffset += len;
 
-    // Log định kỳ mỗi 10KB hoặc chunk đầu tiên để theo dõi tiến độ _writeOffset mà không làm trập Serial
-    if (prevOffset == 4 || (_writeOffset / 10240) != (prevOffset / 10240)) {
-        Serial.printf("[MONITOR] writeChunk: slot=%d _writeOffset %lu -> %lu / capacity %lu\n",
-                      _writeSlotIndex, (unsigned long)prevOffset, (unsigned long)_writeOffset, (unsigned long)_slotCapacity);
-    }
+    // Dropped periodic monitor writeChunk
 
     return len;
 }
@@ -139,8 +124,7 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
 void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_writeSlotIndex];
 
-    Serial.printf("[MONITOR] closeWrite: slot=%d final _writeOffset=%lu. Updating header & unreadBitmask...\n",
-                  _writeSlotIndex, (unsigned long)_writeOffset);
+    DLOG("[NANDP] closeWrite slot %d", _writeSlotIndex);
 
     // Ghi kích thước dữ liệu (4 bytes) vào offset 0
     uint32_t rawJpegSize = (_writeOffset >= 4) ? (_writeOffset - 4) : 0;
@@ -160,13 +144,11 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         if (mediaType == 0x02 || totalFrames <= 1) {
             totalFrames = 1;
             _nand.setSlotInfo(_writeSlotIndex, "VIMG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
-            Serial.printf("[NandStorageProvider] Detected SLBX image (type=0x%02X, fps=%u, frames=%u, total offset=%u).\n",
-                          mediaType, finalFps, totalFrames, _writeOffset);
+            // Dropped Detected SLBX image
         } else {
             if (totalFrames == 0) totalFrames = 1;
             _nand.setSlotInfo(_writeSlotIndex, "VJPG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
-            Serial.printf("[NandStorageProvider] Detected SLBX video (type=0x%02X, fps=%u, frames=%u, total offset=%u).\n",
-                          mediaType, finalFps, totalFrames, _writeOffset);
+            // Dropped Detected SLBX video
         }
     } else if (memcmp(header, "SLOT", 4) == 0 || memcmp(header, "VJPG", 4) == 0 || memcmp(header, "VIMG", 4) == 0) {
         uint32_t dataSize = *(uint32_t*)(header + 4);
@@ -175,10 +157,10 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         if (dataSize == 0 || dataSize > _writeOffset) dataSize = _writeOffset;
         const char* magic = (totalFrames > 1) ? "VJPG" : "VIMG";
         _nand.setSlotInfo(_writeSlotIndex, magic, dataSize, (fps > 0) ? fps : 10, totalFrames, maxDisplayTime);
-        Serial.printf("[NandStorageProvider] Detected pre-encoded container media (%u frames, %u FPS, magic: %s).\n", totalFrames, fps, magic);
+        // Dropped Detected pre-encoded
     } else {
         _nand.setSlotInfo(_writeSlotIndex, "VIMG", _writeOffset, 1, 1, maxDisplayTime);
-        Serial.println(F("[NandStorageProvider] Raw JPEG media registered as VIMG."));
+        // Dropped Raw JPEG
     }
 
     // 1. Đánh dấu bit thứ cur_point là chưa đọc (1)
@@ -194,8 +176,7 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     // Nếu bị reset giữa chừng, NAND sẽ có data hợp lệ trước khi NVS biết slot là unread.
     _nand.writeSlotTable();
     saveNvsState();
-    Serial.printf("[MONITOR] Written Slot %d (_writeOffset=%lu). Next cur_point->%d. _unreadBitmask: 0x%02X -> 0x%02X\n",
-                  writtenSlot, (unsigned long)_writeOffset, _writeSlotIndex, oldUnread, _unreadBitmask);
+    DLOG("[NANDP] written slot %d next %d", writtenSlot, _writeSlotIndex);
 }
 
 bool NandStorageProvider::isFull() const {
@@ -205,7 +186,7 @@ bool NandStorageProvider::isFull() const {
 bool NandStorageProvider::getNextWriteSlotIdentifier(char* outId, size_t maxLen) {
     if (!outId || maxLen == 0) return false;
     if (isFull()) {
-        Serial.printf("[NandStorageProvider] Storage FULL! All slots unread (unread_mask=0x%02X).\n", _unreadBitmask);
+        DLOG("[NANDP] FULL! all slots unread");
         return false;
     }
     snprintf(outId, maxLen, "%d", _writeSlotIndex);
@@ -235,7 +216,7 @@ bool NandStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
         if (!(_unreadBitmask & (1 << slot))) continue;
 
         if (!_nand.openSlot(slot)) {
-            Serial.printf("[NandStorageProvider] WARNING: Slot %d marked unread but data is unreadable. Clearing stale bit.\n", slot);
+            DLOG("[NANDP] WARN: slot %d unreadable", slot);
             _unreadBitmask &= ~(1 << slot);
             saveNvsState();
             continue;
@@ -254,8 +235,7 @@ void NandStorageProvider::markAsRead(const char* identifier) {
         uint8_t oldUnread = _unreadBitmask;
         _unreadBitmask &= ~(1 << slot); // Xóa bit thứ slot về 0 (đã đọc)
         saveNvsState();
-        Serial.printf("[MONITOR] Marked slot %d as READ. _unreadBitmask: 0x%02X -> 0x%02X\n",
-                      slot, oldUnread, _unreadBitmask);
+        DLOG("[NANDP] marked slot %d READ", slot);
     }
 }
 
@@ -289,6 +269,6 @@ bool NandStorageProvider::formatStorage() {
         cfg.end();
     }
 
-    Serial.println(F("[MONITOR] Full NAND storage formatted! Reset _unreadBitmask=0x00, _writeOffset=0"));
+    DLOG("[NANDP] FULL format done");
     return true;
 }

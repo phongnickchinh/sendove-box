@@ -78,38 +78,52 @@ void DisplayDriver::turnOff() {
     releaseSPI();
   }
 
-  // Đặt pin về GPIO mode với mức LOW trước khi gpio_hold_en().
-  // gpio_hold_en() cần pin ở GPIO mode để latch trạng thái LOW đáng tin cậy.
-  // turnOn() sẽ gọi _tft.init() để re-attach LEDC về pin sau khi thức dậy.
+  // Ghim chân BLK ở mức LOW trong suốt light sleep để đèn nền không bị nổi sáng.
+  // gpio_deep_sleep_hold_en() KHÔNG dùng ở đây vì đây là LIGHT SLEEP, không phải deep sleep.
+  // Chỉ cần gpio_hold_en() là đủ để giữ trạng thái GPIO trong light sleep.
   pinMode(PIN_TFT_BLK, OUTPUT);
   digitalWrite(PIN_TFT_BLK, LOW);
   gpio_hold_en((gpio_num_t)PIN_TFT_BLK);
-  gpio_deep_sleep_hold_en();
   _isSleeping = true;
 }
 
-void DisplayDriver::turnOn(uint8_t cause) {
-  if (cause != ESP_SLEEP_WAKEUP_TIMER) {
-    if (!_isSleeping) {
-      setBacklight(BACKLIGHT_DAY_PERCENT);
-      return;
-    }
+void DisplayDriver::wakeupFlash() {
+  // Nháy đèn nền 3 lần ngắn để xác nhận chip đã thức dậy.
+  // Hoạt động ngay cả khi LGFX chưa được re-init, vì chỉ dùng GPIO trực tiếp.
+  gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
+  pinMode(PIN_TFT_BLK, OUTPUT);
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(PIN_TFT_BLK, HIGH);
+    delay(80);
+    digitalWrite(PIN_TFT_BLK, LOW);
+    delay(80);
+  }
+}
 
-    gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
+void DisplayDriver::turnOn() {
+  if (!_isSleeping) {
+    setBacklight(BACKLIGHT_DAY_PERCENT);
+    return;
+  }
 
-    // Re-init toàn bộ LGFX pipeline (SPI bus + ST7789 panel + LEDC PWM)
-    if (acquireSPI()) {
-      _tft.init();
-      _tft.setRotation(0);
-      _tft.setSwapBytes(true);
-      _tft.fillScreen(TFT_BLACK);
-      releaseSPI();
+  // Nhả chốt GPIO BLK để LEDC PWM có thể điều khiển lại sau re-init.
+  gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
 
-      setBacklight(BACKLIGHT_DAY_PERCENT);
-      _isSleeping = false;
-    } else {
-      Serial.println(F("[Display] ERROR: acquireSPI() timeout in turnOn()! Display NOT woken up."));
-    }
+  // Lấy mutex với timeout dài (3s) để tránh xung đột SPI với NOR Flash.
+  // Sau light sleep, Task_MediaPlayer và Task_NetworkController đã resume
+  // và có thể đang dùng SPI bus, nên bắt buộc phải đồng bộ qua mutex.
+  if (xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(3000)) == pdTRUE) {
+    _tft.init();
+    _tft.wakeup();
+    _tft.setRotation(0);
+    _tft.setSwapBytes(true); // Bắt buộc — tránh đảo màu RGB565 sau mỗi wakeup
+    _tft.fillScreen(TFT_BLACK);
+    xSemaphoreGive(_spiMutex);
+
+    setBacklight(BACKLIGHT_DAY_PERCENT);
+    _isSleeping = false;
+  } else {
+    Serial.println(F("[Display] ERROR: acquireSPI() timeout in turnOn()!"));
   }
 }
 
@@ -125,6 +139,11 @@ LGFX *DisplayDriver::getTFT() { return &_tft; }
 bool DisplayDriver::acquireSPI() {
   if (_spiMutex == nullptr) return true;
   return xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(1000)) == pdTRUE;
+}
+
+bool DisplayDriver::acquireSPI(uint32_t timeoutMs) {
+  if (_spiMutex == nullptr) return true;
+  return xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
 void DisplayDriver::releaseSPI() {

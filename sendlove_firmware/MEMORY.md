@@ -236,14 +236,16 @@
 - [x] **Sắp xếp thứ tự phát tin nhắn (`std::sort`)**: Ép mảng `msgList` qua `std::sort` theo mốc `timestamp` tăng dần trước khi lưu NAND, đảm bảo 100% tin nhắn cũ nhất luôn phát trước, tin mới phát sau.
 - [x] **Fix SPI Deadlock khi Render Ảnh lớn (Chunking)**: Sửa hàm `decodeOneFrame()` trong `MediaPlayer.cpp` đọc từng chunk pixel từ NAND trước, sau đó mới acquire SPI để push lên LCD, loại bỏ hoàn toàn hiện tượng xé hình / mất 2/3 ảnh đối với file > 48KB.
 - [x] **KISS 10s Awake Polling & Independent Sleep Timer**: Thiết lập kiểm tra Firebase ngầm định kỳ 10 giây/lần khi ở Standby UI (`now - lastIntervalSyncMs >= 10000`). Đồng thời tách biệt hoàn toàn bộ đếm ngủ `lastUserActivity` (chỉ reset khi chạm tay hoặc đang thực sự tải tệp media `isDownloadingMedia`), giúp box vừa hút tin nhắn nhạy bén 10s/lần vừa đi ngủ chính xác 100% theo thời gian đếm ngược.
+- [x] **Khắc phục triệt để lỗi mất Backlight PWM khi thức dậy**: Loại bỏ hoàn toàn sự quản lý đèn nền của thư viện LovyanGFX (do lỗi từ chối khởi tạo lại và khai báo cứng sai `pwm_channel = 7` không tồn tại trên ESP32-C3). Chuyển sang khởi tạo thủ công bằng Arduino API (Sử dụng Channel 0). Khi ngủ dùng `pinMode(OUTPUT)` / `digitalWrite(LOW)` ép đèn tắt hẳn, khi thức tự gọi `ledcAttach`/`ledcAttachPin` nối lại PWM, giải quyết thành công lỗi đèn sáng mờ khi ngủ và đen màn hình khi thức.
+- [x] **Cập nhật Sleep Timeout Logic**: Chặn thiết bị tự động đếm giờ đi ngủ khi đang phát Video. Khi Video phát hết `max_display_time`, rớt về màn hình UI và reset lại mốc tính thời gian ngủ.
 
 ---
 
-### Sẽ thực hiện tiếp (Phase 3C & Phase 4)
-- [ ] Test thực tế nạp dữ liệu Firebase và xem phản hồi trên thiết bị thật / Wokwi.
-- [ ] Tháo/xả bỏ đèn LED đỏ báo nguồn phần cứng trên bo ESP32 DevKit và Module NAND Flash.
-- [ ] Bổ sung I2S Audio Module (MAX98357A) cho âm thanh video.
-- [ ] Nâng cấp Cloud OTA: tải firmware `.bin` từ Firebase Storage thông qua `ota_tasks`.
+### Phase 4: Xử lý Âm thanh & Thông báo LED (Current - In Progress)
+- [ ] **Bổ sung I2S Audio Module (MAX98357A)**: Cấu hình I2S bus (BCLK, LRC, DOUT) để giải mã và phát âm thanh đồng bộ cùng video từ bộ nhớ NAND.
+- [ ] **Thông báo LED thông minh**: Xử lý logic chớp LED báo hiệu (Notification LED) cho các sự kiện của hệ thống (nhận tin nhắn mới, đang tải file, báo pin yếu, wakeup).
+- [ ] **Nâng cấp Cloud OTA**: Tải firmware `.bin` từ Firebase Storage thông qua `ota_tasks`.
+- [ ] (Hardware) Tháo/xả bỏ đèn LED đỏ báo nguồn phần cứng trên bo ESP32 DevKit và Module NAND Flash để tối ưu hóa 100% thời lượng pin.
 
 
 

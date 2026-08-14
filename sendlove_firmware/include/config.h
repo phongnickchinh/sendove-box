@@ -44,7 +44,7 @@ static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 
 // Timing & Power Constants
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
-static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 15000; // TODO: Increase to 60000-300000 for production
+static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 60000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 static constexpr uint8_t WIFI_RETRY_MAX = 3;
 static constexpr uint32_t TOUCH_DEBOUNCE_MS = 50;
@@ -114,5 +114,16 @@ static constexpr const char *NVS_NAMESPACE = "sendlove";
 static constexpr uint8_t PIN_BUZZER = 0;
 static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;
 #endif
+
+// ============================================================
+// I2S Audio (MAX98357A)
+// ============================================================
+static constexpr uint8_t PIN_I2S_BCLK = 0;
+static constexpr uint8_t PIN_I2S_LRC  = 1;
+static constexpr uint8_t PIN_I2S_DOUT = 2;
+static constexpr uint32_t AUDIO_SAMPLE_RATE    = 8000;  // Hz
+static constexpr uint32_t AUDIO_PCM_CHUNK_SIZE = 1600;  // bytes = 100ms @ 8000Hz Mono
+static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 8;
+static constexpr uint16_t AUDIO_DMA_BUF_LEN    = 512;   // samples per DMA buffer
 
 #endif // CONFIG_H

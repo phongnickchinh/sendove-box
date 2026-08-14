@@ -57,6 +57,10 @@ public:
     /// Đóng item đang ghi
     virtual void closeWrite(uint32_t maxDisplayTime = 60) = 0;
 
+    /// Ghi tiếp dữ liệu vào slot vừa đóng mà không erase (dùng để append audio sau video)
+    /// Mặc định: no-op (chỉ NAND storage hỗ trợ)
+    virtual bool openForAppend(const char* identifier = nullptr) { (void)identifier; return false; }
+
     // --- Quản lý Hàng chờ & Duyệt Item ---
 
     /// Kiểm tra bộ nhớ có đầy 5 tin chưa đọc hay không

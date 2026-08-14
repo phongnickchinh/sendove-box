@@ -167,7 +167,11 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     uint8_t oldUnread = _unreadBitmask;
     _unreadBitmask |= (1 << _writeSlotIndex);
 
-    // 2. Dịch tiến con trỏ cur_point sang Slot tiếp theo (0..4)
+    // 2. Lưu lại slot và offset hiện tại để dùng cho openForAppend (ghi audio nối tiếp)
+    _lastWrittenSlot   = _writeSlotIndex;
+    _lastWrittenOffset = _writeOffset;
+
+    // 3. Dịch tiến con trỏ cur_point sang Slot tiếp theo (0..4)
     int8_t writtenSlot = _writeSlotIndex;
     _writeSlotIndex = (_writeSlotIndex + 1) % NAND_SLOT_COUNT;
     _slotCapacity = 0;
@@ -177,6 +181,23 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     _nand.writeSlotTable();
     saveNvsState();
     DLOG("[NANDP] written slot %d next %d", writtenSlot, _writeSlotIndex);
+}
+
+bool NandStorageProvider::openForAppend(const char* identifier) {
+    int8_t slot = parseSlotId(identifier);
+    if (slot < 0 || slot >= NAND_SLOT_COUNT) {
+        // Fallback về slot vừa ghi
+        slot = _lastWrittenSlot;
+    }
+    if (slot < 0) return false;
+
+    // Không erase lại — tiếp tục ghi từ vị trí cuối của lần ghi video
+    _writeSlotIndex = slot;
+    _writeOffset    = _lastWrittenOffset;
+    _slotCapacity   = ((slot + 1) < NAND_SLOT_COUNT) ? (NAND_SLOT_ADDRS[slot + 1] - NAND_SLOT_ADDRS[slot])
+                                                      : (0x1000000UL - NAND_SLOT_ADDRS[slot]);
+    DLOG("[NANDP] openForAppend slot %d @ offset %lu", slot, (unsigned long)_writeOffset);
+    return true;
 }
 
 bool NandStorageProvider::isFull() const {

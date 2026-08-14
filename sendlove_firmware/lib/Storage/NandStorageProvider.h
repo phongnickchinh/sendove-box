@@ -25,6 +25,9 @@ public:
     size_t writeChunk(const uint8_t* data, size_t len) override;
     void closeWrite(uint32_t maxDisplayTime = 60) override;
 
+    /// Ghi tiếp dữ liệu vào slot vừa đóng (dùng để append audio sau video)
+    bool openForAppend(const char* identifier = nullptr);
+
     // --- Quản lý Hàng chờ & Slot ---
     bool isFull() const override;
     bool getNextWriteSlotIdentifier(char* outId, size_t maxLen) override;
@@ -48,6 +51,9 @@ private:
     int8_t parseSlotId(const char* identifier) const;
     void loadNvsState();
     void saveNvsState();
+
+    int8_t   _lastWrittenSlot   = -1;
+    uint32_t _lastWrittenOffset = 0;
 };
 
 #endif // NAND_STORAGE_PROVIDER_H

@@ -648,6 +648,21 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
+        // Tìm voice URL (audio đính kèm)
+        String rawVoiceUrl = "";
+        const char* voiceKeys[] = { "voice_url", "voiceUrl", "audio_url", "audioUrl" };
+        for (const char* k : voiceKeys) {
+            JsonVariantConst v = msg[k];
+            if (!v.isNull()) {
+                String val = v.as<String>();
+                val.trim();
+                if (val.length() > 0 && val != "null") {
+                    rawVoiceUrl = val;
+                    break;
+                }
+            }
+        }
+
         bool messageSuccess = false;
 
         if (rawMediaUrl.length() > 0) {
@@ -711,6 +726,74 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         // Kiểm tra dữ liệu đã tải trọn vẹn 100% chưa
                         if (!writeError && (initialLen <= 0 || totalRead >= initialLen)) {
                             DLOG("[NET] DL OK slot %s", writeSlotId);
+
+                            // --- Download audio nếu có voice_url ---
+                            if (rawVoiceUrl.length() > 0) {
+                                String voiceUrl = rawVoiceUrl;
+                                if (!voiceUrl.startsWith("http")) {
+                                    if (voiceUrl.startsWith("gs://")) {
+                                        int si = voiceUrl.indexOf('/', 5);
+                                        if (si > 0) voiceUrl = voiceUrl.substring(si + 1);
+                                    }
+                                    if (voiceUrl.startsWith("/")) voiceUrl.remove(0, 1);
+                                    voiceUrl.replace("/", "%2F");
+                                    voiceUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + voiceUrl + "?alt=media";
+                                }
+
+                                DLOG("[NET] voice_url found, downloading...");
+                                HTTPClient httpAudio;
+                                if (httpAudio.begin(client, voiceUrl.c_str())) {
+                                    httpAudio.setTimeout(30000);
+                                    int aCode = httpAudio.GET();
+                                    if (aCode == HTTP_CODE_OK) {
+                                        int aLen = httpAudio.getSize();
+                                        WiFiClient* aStream = httpAudio.getStreamPtr();
+
+                                        // Dùng openForAppend (virtual method trên IStorageProvider)
+                                        // để ghi nối tiếp mà không xóa sector đã có video
+                                        if (storage->openForAppend(writeSlotId)) {
+                                            // Ghi AUDC header (10 bytes)
+                                            uint8_t audcHeader[10];
+                                            memcpy(audcHeader, "AUDC", 4);
+                                            uint16_t sr      = (uint16_t)AUDIO_SAMPLE_RATE;
+                                            uint32_t pcmSize = (aLen > 0) ? (uint32_t)aLen : 0;
+                                            memcpy(audcHeader + 4, &sr,      2);
+                                            memcpy(audcHeader + 6, &pcmSize, 4);
+                                            storage->writeChunk(audcHeader, sizeof(audcHeader));
+
+                                            // Stream PCM data vào slot (không gọi closeWrite vì không đổi metadata)
+                                            uint8_t abuf[256];
+                                            int     aTotalRead = 0;
+                                            while (httpAudio.connected() && (aLen > 0 || aLen == -1)) {
+                                                size_t av = aStream->available();
+                                                if (av) {
+                                                    size_t tr = (av < sizeof(abuf)) ? av : sizeof(abuf);
+                                                    int c = aStream->readBytes(abuf, tr);
+                                                    if (c > 0) {
+                                                        storage->writeChunk(abuf, c);
+                                                        aTotalRead += c;
+                                                        if (aLen > 0) aLen -= c;
+                                                    }
+                                                }
+                                                delay(1);
+                                            }
+                                            DLOG("[NET] Audio DL OK: %d bytes", aTotalRead);
+                                        } else {
+                                            DLOG("[NET] Audio append FAIL (openForAppend)");
+                                        }
+                                    } else {
+                                        DLOG("[NET] Audio DL fail: %d", aCode);
+                                    }
+                                    httpAudio.end();
+                                }
+                            }
+                            // ----------------------------------------
+
+                            // Log: voice_url có được tìm thấy không
+                            if (rawVoiceUrl.length() == 0) {
+                                DLOG("[NET] No voice_url in msg");
+                            }
+
                             messageSuccess = true;
                             downloadedAnyMedia = true;
                             if (_onDownloadComplete) {
@@ -731,6 +814,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         } else {
             messageSuccess = true;
         }
+
 
         // CHỈ CẬP NHẬT TIMESTAMP KHI VÀ CHỈ KHI TASK CỦA TIN NHẮN NÀY ĐÃ HOÀN THÀNH 100%
         if (messageSuccess) {

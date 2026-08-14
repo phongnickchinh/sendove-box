@@ -1,7 +1,18 @@
 #include "DisplayDriver.h"
 #include "config.h"
 #include "driver/gpio.h"
+#include <esp_arduino_version.h>
 
+#if defined(ESP_ARDUINO_VERSION) && ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+// ESP32 Core 3.0+
+#define LEDC_SETUP() ledcAttach(PIN_TFT_BLK, 44100, 9)
+#define LEDC_WRITE(val) ledcWrite(PIN_TFT_BLK, val)
+#else
+// ESP32 Core 2.x
+#define LEDC_CHANNEL 0
+#define LEDC_SETUP() do { ledcSetup(LEDC_CHANNEL, 44100, 9); ledcAttachPin(PIN_TFT_BLK, LEDC_CHANNEL); } while(0)
+#define LEDC_WRITE(val) ledcWrite(LEDC_CHANNEL, val)
+#endif
 bool DisplayDriver::init(SemaphoreHandle_t spiMutex) {
   _spiMutex = spiMutex;
   gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
@@ -10,7 +21,8 @@ bool DisplayDriver::init(SemaphoreHandle_t spiMutex) {
   _tft.setRotation(0);
   _tft.setSwapBytes(true);
   _tft.fillScreen(TFT_BLACK);
-  _tft.setBrightness(0);
+  LEDC_SETUP();
+  setBacklight(0);
   return true;
 }
 
@@ -66,11 +78,13 @@ void DisplayDriver::showMessage(const char *message) {
 }
 
 void DisplayDriver::setBacklight(uint8_t percent) {
-  _tft.setBrightness(map(percent, 0, 100, 0, 255));
+  uint32_t val = map(percent, 0, 100, 0, 511);
+  LEDC_WRITE(val);
 }
 
 void DisplayDriver::turnOff() {
   setBacklight(0);
+  delay(10); // Đợi 10ms để PWM áp dụng mức 0
 
   if (acquireSPI()) {
     _tft.fillScreen(TFT_BLACK);
@@ -78,26 +92,18 @@ void DisplayDriver::turnOff() {
     releaseSPI();
   }
 
-  // Ghim chân BLK ở mức LOW trong suốt light sleep để đèn nền không bị nổi sáng.
-  // gpio_deep_sleep_hold_en() KHÔNG dùng ở đây vì đây là LIGHT SLEEP, không phải deep sleep.
-  // Chỉ cần gpio_hold_en() là đủ để giữ trạng thái GPIO trong light sleep.
+  // Ép chân BLK ở mức LOW trong suốt light sleep để đèn nền tắt hẳn.
   pinMode(PIN_TFT_BLK, OUTPUT);
   digitalWrite(PIN_TFT_BLK, LOW);
+  
+  // Chỉ cần gpio_hold_en() là đủ để giữ trạng thái Pad qua light sleep.
   gpio_hold_en((gpio_num_t)PIN_TFT_BLK);
   _isSleeping = true;
 }
 
 void DisplayDriver::wakeupFlash() {
-  // Nháy đèn nền 3 lần ngắn để xác nhận chip đã thức dậy.
-  // Hoạt động ngay cả khi LGFX chưa được re-init, vì chỉ dùng GPIO trực tiếp.
+  // Nhả chốt hold phần cứng sau khi thức dậy
   gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
-  pinMode(PIN_TFT_BLK, OUTPUT);
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(PIN_TFT_BLK, HIGH);
-    delay(80);
-    digitalWrite(PIN_TFT_BLK, LOW);
-    delay(80);
-  }
 }
 
 void DisplayDriver::turnOn() {
@@ -106,20 +112,19 @@ void DisplayDriver::turnOn() {
     return;
   }
 
-  // Nhả chốt GPIO BLK để LEDC PWM có thể điều khiển lại sau re-init.
+  // Đảm bảo nhả chốt GPIO BLK 
   gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
 
-  // Lấy mutex với timeout dài (3s) để tránh xung đột SPI với NOR Flash.
-  // Sau light sleep, Task_MediaPlayer và Task_NetworkController đã resume
-  // và có thể đang dùng SPI bus, nên bắt buộc phải đồng bộ qua mutex.
   if (xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(3000)) == pdTRUE) {
-    _tft.init();
+    // Không gọi _tft.init() vì có thể làm hỏng trạng thái SPI chung
     _tft.wakeup();
     _tft.setRotation(0);
-    _tft.setSwapBytes(true); // Bắt buộc — tránh đảo màu RGB565 sau mỗi wakeup
+    _tft.setSwapBytes(true); // Bắt buộc — tránh đảo màu RGB565 sau wakeup
     _tft.fillScreen(TFT_BLACK);
     xSemaphoreGive(_spiMutex);
 
+    // Bật lại LEDC PWM hoàn toàn độc lập
+    LEDC_SETUP();
     setBacklight(BACKLIGHT_DAY_PERCENT);
     _isSleeping = false;
   } else {

@@ -165,6 +165,7 @@ void Task_MediaPlayer(void *pvParameters) {
            appCtx.player.stop();
            currentAppState = AppState::STATE_STANDBY;
            forceStandbyRedraw = true;
+           lastUserActivity = millis();
         }
       }
     }
@@ -230,7 +231,8 @@ void Task_UIController(void *pvParameters) {
         appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
     }
 
-    if (!appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
+    if (currentAppState != AppState::STATE_VIDEO &&
+        !appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
         !appCtx.network.isFirebaseSyncing() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
       DLOG("[SLP] timeout -> sleeping");
@@ -275,10 +277,21 @@ void Task_UIController(void *pvParameters) {
       } else {
         lastUserActivity = millis();
         activeSleepTimeoutMs = 2000;
+
+        // Nháy đèn xanh dương (GPIO 8 - Bản SuperMini, trùng chân NAND CS) để báo hiệu wakeup ngầm.
+        // Cực kì an toàn vì lúc này (vừa thức dậy) bus SPI hoàn toàn rảnh, chưa kích hoạt Sync.
+        pinMode(8, OUTPUT);
+        digitalWrite(8, LOW);  // Đèn sáng (Active LOW) / NAND CS ghim xuống
+        delay(30);
+        digitalWrite(8, HIGH); // Đèn tắt / NAND CS nhả ra
+        delay(70);
+        digitalWrite(8, LOW);
+        delay(30);
+        digitalWrite(8, HIGH);
       }
 
       // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm
-      vTaskDelay(pdMS_TO_TICKS(2000));
+      vTaskDelay(pdMS_TO_TICKS(200));
 
       // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy (cả Touch và Timer)
       if (appCtx.storage && appCtx.storage->isFull()) {
@@ -369,6 +382,10 @@ void setup() {
 #endif
 
   appCtx.player.init(appCtx.storage, &appCtx.display);
+  
+  // Phát beep test loa khi khởi động
+  appCtx.player.testAudioBeep();
+  
   appCtx.ui.init(PIN_TOUCH, &appCtx.display);
   appCtx.powerManager.init((gpio_num_t)PIN_TOUCH);
   lastUserActivity = millis();

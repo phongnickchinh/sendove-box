@@ -8,7 +8,6 @@ if (!admin.apps.length) {
     storageBucket: 'iot-app-839a2.firebasestorage.app'
   };
 
-  // Explicitly load the service account to bypass Firebase Emulator's ADC
   const serviceAccountPath = path.resolve(__dirname, '../serviceAccountKey.json');
   if (fs.existsSync(serviceAccountPath)) {
     const serviceAccount = require(serviceAccountPath);

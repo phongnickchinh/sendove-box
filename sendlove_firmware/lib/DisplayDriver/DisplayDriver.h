@@ -10,7 +10,6 @@
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI _bus_instance;
-  lgfx::Light_PWM _light_instance;
 
 public:
   LGFX(void) {
@@ -18,7 +17,7 @@ public:
       auto cfg = _bus_instance.config();
       cfg.spi_host = SPI2_HOST;
       cfg.spi_mode = 3;
-      cfg.freq_write = 40000000;
+      cfg.freq_write = 20000000;
       cfg.freq_read = 16000000;
       cfg.pin_sclk = PIN_SPI_SCK;
       cfg.pin_mosi = PIN_SPI_MOSI;
@@ -46,16 +45,6 @@ public:
       cfg.bus_shared = true;
 
       _panel_instance.config(cfg);
-    }
-    {
-      auto cfg = _light_instance.config();
-      cfg.pin_bl = PIN_TFT_BLK;
-      cfg.invert = false;
-      cfg.freq = 44100;
-      cfg.pwm_channel = 7;
-
-      _light_instance.config(cfg);
-      _panel_instance.setLight(&_light_instance);
     }
 
     setPanel(&_panel_instance);

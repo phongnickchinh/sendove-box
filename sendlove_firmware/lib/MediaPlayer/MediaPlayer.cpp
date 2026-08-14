@@ -160,6 +160,22 @@ bool MediaPlayer::playItem(const char* identifier) {
 
     DLOG("[PLAY] setup OK: frames=%d", _totalFrames);
 
+    // Khởi tạo I2S nếu chưa có (chỉ init 1 lần trong vòng đời MediaPlayer)
+    if (!_audio.isInitialized()) {
+        _audio.init();
+    }
+
+    // Tìm audio (AUDC header) ngay sau phần video data
+    // _currentDataSize là kích thước video (từ SlotEntry.dataSize)
+    // AUDC header nằm ở offset _currentDataSize tính từ đầu slot
+    bool hasAudio = _audio.loadFromStorage(_storage, _currentDataSize);
+    if (hasAudio) {
+        _audio.prefill(); // Nạp 2 DMA buffer trước để tránh tiếng click đầu bài
+    }
+
+    // Seek về đầu phần video để bắt đầu phát
+    _storage->seek(_frameBaseOffset);
+
     if (info.type == StorageItemType::IMAGE) {
         _state = PlaybackState::SHOWING;
         decodeOneFrame();
@@ -177,6 +193,9 @@ void MediaPlayer::update() {
     if (_state == PlaybackState::PLAYING) {
         uint32_t frameStart = millis();
 
+        // 1. Tick audio TRƯỚC decode JPEG — nạp DMA buffer nếu cần (non-blocking)
+        _audio.tick();
+
         if (!decodeOneFrame()) {
             _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
@@ -188,6 +207,12 @@ void MediaPlayer::update() {
         if (_totalFrames > 0 && _currentFrame >= _totalFrames) {
             _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
+            // Restart audio khi video loop về đầu
+            if (_audio.hasAudio()) {
+                _audio.loadFromStorage(_storage, _currentDataSize);
+                _audio.prefill();
+                _storage->seek(_frameBaseOffset);
+            }
         }
 
         uint32_t elapsed = millis() - frameStart;
@@ -207,6 +232,8 @@ void MediaPlayer::stop() {
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
         _storage->closeRead();
     }
+    // Dừng I2S audio
+    _audio.stop();
     if (_jpegBuffer != nullptr) {
         free(_jpegBuffer);
         _jpegBuffer = nullptr;
@@ -217,6 +244,10 @@ void MediaPlayer::stop() {
     _currentFrame = 0;
 
     if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
+}
+
+void MediaPlayer::testAudioBeep() {
+    _audio.testBeep();
 }
 
 PlaybackState MediaPlayer::getState() const {

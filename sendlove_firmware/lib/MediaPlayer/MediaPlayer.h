@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include "IStorageProvider.h"
+#include "AudioPlayer.h"
 #include "config.h"
 
 class DisplayDriver;
@@ -47,6 +48,9 @@ public:
     /// Stop current playback
     void stop();
 
+    /// Test I2S speaker beep
+    void testAudioBeep();
+
     /// Get current playback state
     PlaybackState getState() const;
 
@@ -81,6 +85,8 @@ private:
 
     /// Callback function for JPEGDEC pixel output
     static int jpegDrawCallback(JPEGDRAW* pDraw);
+
+    AudioPlayer _audio;
 };
 
 #endif // MEDIA_PLAYER_H

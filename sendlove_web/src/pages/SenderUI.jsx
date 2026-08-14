@@ -40,7 +40,8 @@ export default function SenderUI() {
       if (type === 'video') {
         const file = mediaData;
         const encodeRes = await encodeVideoToBin(file, setProgress);
-        const voiceBlob = await extractAudioFromVideo(file);
+        setProgress(0); // Reset progress cho bước trích xuất âm thanh
+        const voiceBlob = await extractAudioFromVideo(file, setProgress);
         
         payload = {
           ...payload,

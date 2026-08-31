@@ -777,6 +777,11 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                                 }
                                                 delay(1);
                                             }
+                                            // Chốt phiên append: ghi audioSize vào bảng
+                                            // slot. Không có bước này thì phần audio nằm
+                                            // trên flash nhưng AudioPlayer không biết nó
+                                            // ở đâu và dài bao nhiêu -> hộp câm.
+                                            storage->closeAppend();
                                             DLOG("[NET] Audio DL OK: %d bytes", aTotalRead);
                                         } else {
                                             DLOG("[NET] Audio append FAIL (openForAppend)");

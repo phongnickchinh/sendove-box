@@ -72,7 +72,9 @@ private:
     uint16_t _fps          = 10;
     uint16_t _totalFrames  = 0;
     uint16_t _currentFrame = 0;
+    uint32_t _nextFrameDeadline = 0;   // Mốc millis() của frame kế; cộng dồn để không trôi
     uint32_t _currentDataSize = 0;
+    uint32_t _currentAudioSize = 0;   // Byte audio nối sau video (từ SlotEntry.audioSize)
     uint32_t _frameBaseOffset = 0;
     bool     _readFrameSizeHeader = true;
 

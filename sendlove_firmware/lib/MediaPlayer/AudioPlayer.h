@@ -26,8 +26,9 @@ public:
     void testBeep();
 
     /// Tìm AUDC header trong storage bắt đầu từ byte thứ videoDataSize.
+    /// appendedSize = số byte audio bảng slot ghi nhận (gồm cả header AUDC), 0 = không rõ.
     /// Trả về true nếu tìm thấy audio hợp lệ.
-    bool loadFromStorage(IStorageProvider* storage, uint32_t videoDataSize);
+    bool loadFromStorage(IStorageProvider* storage, uint32_t videoDataSize, uint32_t appendedSize = 0);
 
     /// Nạp trước 2 DMA buffer đầu tiên để tránh tiếng click khi bắt đầu.
     void prefill();
@@ -41,6 +42,8 @@ public:
 private:
     // 10 bytes: "AUDC" (4) + sampleRate uint16 (2) + pcmSize uint32 (4)
     static constexpr size_t AUDC_HEADER_SIZE = 10;
+    // Header RIFF/WAVE chuẩn 44 byte do mediaEncoder.js sinh ra
+    static constexpr size_t WAV_HEADER_SIZE = 44;
 
     IStorageProvider* _storage      = nullptr;
     bool              _hasAudio     = false;
@@ -49,9 +52,12 @@ private:
     uint32_t _audioPcmOffset = 0; // Offset tuyệt đối trong slot: sau video + 10 bytes AUDC header
     uint32_t _audioPcmSize   = 0; // Tổng bytes PCM
     uint32_t _audioCursor    = 0; // Bytes đã đưa vào DMA
+    uint32_t _sampleRate     = AUDIO_SAMPLE_RATE; // Đọc từ header AUDC, không hardcode
 
     // Buffer đọc 1 chunk PCM từ NAND (stack-allocated, tránh malloc)
     uint8_t _chunk[AUDIO_PCM_CHUNK_SIZE];
+    // Mono -> Stereo: mỗi mẫu 2 byte thành 4 byte, nên đệm gấp đôi.
+    int16_t _stereo[AUDIO_PCM_CHUNK_SIZE / 2 * 2];
 
     /// Đọc 1 chunk PCM từ NAND và ghi vào I2S (Mono → Stereo expand)
     void fillChunk();

@@ -35,8 +35,8 @@ public:
     /// Check if Wi-Fi is connected
     bool isConnected() const;
 
-    /// Force RF reconnect if Wi-Fi is disconnected
-    void ensureConnected();
+    /// Force RF reconnect if Wi-Fi is disconnected (with fallback & timeout)
+    bool ensureConnected(uint32_t timeoutMs = 5000);
 
     /// Get current formatted time string ("14:30")
     void getTimeString(char* buffer, size_t maxLen) const;
@@ -47,11 +47,17 @@ public:
     /// Get Wi-Fi RSSI signal strength
     int getWifiRSSI() const;
 
+    /// Synchronize NTP time blocking within timeoutMs (called by background task)
+    bool syncNtpTime(uint32_t timeoutMs = 5000);
+
     /// Trigger non-blocking NTP time sync in background task
     void triggerNtpSync();
 
     /// Check if time has been synchronized at least once
     bool isTimeSynced() const;
+
+    /// Check if NTP sync is currently running in background
+    bool isNtpSyncing() const { return _isNtpSyncing; }
 
     /// Periodic update task for web server only (NTP logic moved to background task)
     void update();
@@ -81,7 +87,10 @@ public:
     bool isDownloadingMedia() const { return _isDownloadingMedia; }
 
     /// Check if Firebase sync is currently running in background
-    bool isFirebaseSyncing() const { return _isFirebaseSyncing; }
+    bool isFirebaseSyncing() const { return _isFirebaseSyncing || _isSyncing; }
+
+    /// Check if any network background sync (NTP, Firebase, Download) is in progress
+    bool isSyncing() const { return _isSyncing || _isFirebaseSyncing || _isNtpSyncing || _isDownloadingMedia; }
 
     /// Trả về tổng số tin nhắn mới (chưa đọc + đang chờ trên mây)
     uint32_t getNumOfNewMsg() const { return _numOfNewMsg; }
@@ -91,33 +100,47 @@ public:
     /// Check if there are pending messages on the server (aborted due to full storage)
     bool hasPendingMessages() const { return _hasPendingMessages; }
 
-    /// Đồng bộ dữ liệu Firebase ngầm khi thức dậy (Status, Flags, Messages, Alarms)
-    bool syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
+    /// Đồng bộ toàn diện ngầm khi thức dậy (Wi-Fi ensure + NTP Time + Firebase Status, Flags, Messages, Alarms)
+    bool syncWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
+
+    /// Kích hoạt Wakeup Sync ngầm trên background task (không làm block UI Task)
+    void triggerWakeupSync(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
+
+    /// Đồng bộ dữ liệu Firebase ngầm (backward compatible wrapper)
+    bool syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr) {
+        return syncWakeup(batteryPercent, isCharging, storage);
+    }
+
+    /// Kích hoạt Firebase Sync ngầm (backward compatible wrapper)
+    void triggerFirebaseSync(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr) {
+        triggerWakeupSync(batteryPercent, isCharging, storage);
+    }
 
     /// Set callback khi tải media hoàn tất
     void setOnDownloadComplete(std::function<void()> cb) { _onDownloadComplete = cb; }
 
-    /// Kích hoạt Firebase Sync ngầm trên background task (không làm block UI Task)
-    void triggerFirebaseSync(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
-
 private:
+    char _wifiSsid[WIFI_SSID_MAX_LEN] = "";
+    char _wifiPassword[WIFI_PASS_MAX_LEN] = "";
+
     bool updateFirebaseStatus(uint8_t batteryPercent, bool isCharging);
     bool checkFirebaseFlags();
     bool syncFirebaseAlarms();
     bool checkAndDownloadNewMessages(class IStorageProvider* storage);
 
-    static void firebaseSyncTaskWorker(void* param);
+    static void wakeupSyncTaskWorker(void* param);
+    static void ntpTaskWorker(void* param);
+
+    volatile bool _isSyncing = false;
     volatile bool _isFirebaseSyncing = false;
+    volatile bool _isNtpSyncing = false;
     volatile bool _hasPendingMessages = false;
     volatile uint32_t _numOfNewMsg = 0;
     volatile bool _isDownloadingMedia = false;
     std::function<void()> _onDownloadComplete = nullptr;
 
     bool _isTimeSynced = false;
-    volatile bool _isNtpSyncing = false;
     uint32_t _lastTimeSync = 0;
-
-    static void ntpTaskWorker(void* param);
 
     WebServer* _webServer = nullptr;
     bool _webServerRunning = false;

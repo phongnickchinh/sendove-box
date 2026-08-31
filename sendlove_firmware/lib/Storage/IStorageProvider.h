@@ -14,7 +14,8 @@ enum class StorageItemType : uint8_t {
 /// Thông tin của một media item
 struct StorageItemInfo {
     StorageItemType type = StorageItemType::UNKNOWN;
-    uint32_t dataSize = 0;
+    uint32_t dataSize = 0;      // Chỉ phần video/ảnh
+    uint32_t audioSize = 0;     // Phần audio nối sau video (gồm header AUDC); 0 = không có
     uint16_t fps = 10;
     uint16_t totalFrames = 0;
     char id[32] = "";
@@ -40,6 +41,14 @@ public:
     /// Di chuyển con trỏ đọc đến offset cụ thể
     virtual void seek(uint32_t offset) = 0;
 
+    /// Đọc tại offset tuyệt đối trong item đang mở, KHÔNG giới hạn bởi dataSize và
+    /// KHÔNG đụng con trỏ đọc tuần tự. Cần cho vùng audio nối sau video —
+    /// nếu dùng seek()+readData() thì AudioPlayer và MediaPlayer giẫm lên nhau.
+    /// Mặc định trả 0 (provider chưa hỗ trợ).
+    virtual int readAt(uint32_t offset, uint8_t* buffer, uint32_t len) {
+        (void)offset; (void)buffer; (void)len; return 0;
+    }
+
     /// Đóng item đang đọc
     virtual void closeRead() = 0;
 
@@ -61,9 +70,13 @@ public:
     /// Mặc định: no-op (chỉ NAND storage hỗ trợ)
     virtual bool openForAppend(const char* identifier = nullptr) { (void)identifier; return false; }
 
+    /// Chốt phần vừa append: ghi kích thước audio vào bảng slot. Không gọi thì
+    /// dữ liệu audio nằm trên flash nhưng không ai biết nó dài bao nhiêu.
+    virtual void closeAppend() {}
+
     // --- Quản lý Hàng chờ & Duyệt Item ---
 
-    /// Kiểm tra bộ nhớ có đầy 5 tin chưa đọc hay không
+    /// Kiểm tra bộ nhớ đã đầy tin chưa đọc hay chưa
     virtual bool isFull() const = 0;
 
     /// Lấy ID của Slot tiếp theo cho phép ghi (trả về false nếu bộ nhớ đầy)

@@ -9,26 +9,46 @@
 
 static const byte DNS_PORT = 53;
 static DNSServer dnsServer;
+static volatile bool s_ntpSyncDone = false;
+
+static void onNtpSyncCallback(struct timeval *tv) {
+    s_ntpSyncDone = true;
+}
 
 void NetworkManager::init() {
     WiFi.mode(WIFI_STA);
-    // Initialize timezone once at boot
-    configTzTime("ICT-7", NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+    WiFi.setAutoReconnect(true);
+    WiFi.persistent(false);
+
+    // Đăng ký callback chính thức nhận thông báo khi SNTP sync thành công
+    sntp_set_time_sync_notification_cb(onNtpSyncCallback);
+
+    // Cấu hình múi giờ + SNTP servers bằng Arduino API đã chứng minh hoạt động
+    configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 }
 
 WiFiConnectResult NetworkManager::connectWiFi(const char* ssid, const char* password) {
     DLOG("[NET] connect: %s", ssid ? ssid : "(null)");
+    if (ssid != nullptr) {
+        strncpy(_wifiSsid, ssid, sizeof(_wifiSsid) - 1);
+        _wifiSsid[sizeof(_wifiSsid) - 1] = '\0';
+    }
+    if (password != nullptr) {
+        strncpy(_wifiPassword, password, sizeof(_wifiPassword) - 1);
+        _wifiPassword[sizeof(_wifiPassword) - 1] = '\0';
+    }
+
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(_wifiSsid, _wifiPassword);
 
     uint32_t start = millis();
     while (WiFi.status() != WL_CONNECTED && (millis() - start < WIFI_CONNECT_TIMEOUT_MS)) {
-        delay(500);
+        delay(200);
     }
 
     if (WiFi.status() == WL_CONNECTED) {
         DLOG("[NET] WiFi OK");
-        triggerNtpSync();
         return WiFiConnectResult::CONNECTED;
     }
     DLOG("[NET] WiFi FAIL");
@@ -48,11 +68,42 @@ bool NetworkManager::isConnected() const {
     return (WiFi.status() == WL_CONNECTED);
 }
 
-void NetworkManager::ensureConnected() {
-    if (WiFi.status() != WL_CONNECTED) {
-        DLOG("[NET] reconnecting...");
-        WiFi.reconnect();
+bool NetworkManager::ensureConnected(uint32_t timeoutMs) {
+    if (WiFi.status() == WL_CONNECTED) {
+        return true;
     }
+
+    DLOG("[NET] reconnecting...");
+    WiFi.reconnect();
+
+    uint32_t start = millis();
+    uint32_t phase1 = (timeoutMs > 2000) ? 2000 : timeoutMs;
+    while (WiFi.status() != WL_CONNECTED && (millis() - start < phase1)) {
+        delay(100);
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        DLOG("[NET] WiFi reconnected");
+        return true;
+    }
+
+    // Nếu soft reconnect chưa thành công và có thông tin Wi-Fi, restart lại kết nối
+    if (_wifiSsid[0] != '\0') {
+        DLOG("[NET] full WiFi restart...");
+        WiFi.disconnect(false);
+        delay(50);
+        WiFi.mode(WIFI_STA);
+        WiFi.setAutoReconnect(true);
+        WiFi.begin(_wifiSsid, _wifiPassword);
+
+        while (WiFi.status() != WL_CONNECTED && (millis() - start < timeoutMs)) {
+            delay(100);
+        }
+    }
+
+    bool ok = (WiFi.status() == WL_CONNECTED);
+    DLOG("[NET] WiFi status: %s", ok ? "OK" : "FAIL");
+    return ok;
 }
 
 bool NetworkManager::isTimeSynced() const {
@@ -71,55 +122,57 @@ void NetworkManager::update() {
     }
 }
 
-void NetworkManager::triggerNtpSync() {
-    if (WiFi.status() != WL_CONNECTED) return;
-    if (_isNtpSyncing) return;
-
-    // Re-apply timezone mỗi lần sync để chống drift sau Light Sleep (thời gian bị lệch sau 1 ngày)
-    configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
-
-    _isNtpSyncing = true;
-    xTaskCreate(ntpTaskWorker, "NtpSync", 4096, this, 1, nullptr);
-}
-
-void NetworkManager::ntpTaskWorker(void* param) {
-    NetworkManager* self = static_cast<NetworkManager*>(param);
-    if (self == nullptr) {
-        vTaskDelete(nullptr);
-        return;
+bool NetworkManager::syncNtpTime(uint32_t timeoutMs) {
+    if (WiFi.status() != WL_CONNECTED) {
+        if (!ensureConnected(timeoutMs)) {
+            DLOG("[NET] NTP skip: no wifi");
+            return false;
+        }
     }
 
-    // Record RTC time BEFORE waiting for NTP response
-    time_t rtcBefore = time(nullptr);
+    // Nếu đã sync gần đây (trong 60 giây qua), bỏ qua
+    if (_isTimeSynced && (millis() - _lastTimeSync < 60000)) {
+        return true;
+    }
 
-    struct tm timeinfo;
-    // Wait for NTP update in background task (up to 10 seconds timeout)
-    bool syncOk = getLocalTime(&timeinfo, 10000);
+    _isNtpSyncing = true;
 
-    if (syncOk) {
-        time_t ntpNow = mktime(&timeinfo);
-        time_t rtcNow = time(nullptr);
+    // Reset cờ callback và kích hoạt lại SNTP qua Arduino API chính thức
+    s_ntpSyncDone = false;
+    configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 
-        if (!self->_isTimeSynced) {
-            // First time sync after boot
-            self->_isTimeSynced = true;
-            DLOG("[NET] NTP OK");
-        } else {
-            // Compare drift between NTP time and running RTC time
-            long diffSec = std::abs((long)(ntpNow - rtcNow));
-            DLOG("[NET] NTP drift: %d", (int)diffSec);
+    // Chờ callback onNtpSyncCallback() được gọi bởi LWIP SNTP daemon
+    uint32_t start = millis();
+    while (!s_ntpSyncDone && (millis() - start < timeoutMs)) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 
-            // If drift is larger than 5 seconds, settimeofday was already applied by getLocalTime/sntp.
-            // If drift <= 5 seconds, settimeofday adjustment is minor and ignored to prevent screen jumps.
-            if (diffSec > 5) {
-                DLOG("[NET] time updated");
-            }
-        }
+    if (s_ntpSyncDone) {
+        _isTimeSynced = true;
+        _lastTimeSync = millis();
+        time_t now = time(nullptr);
+        struct tm ti;
+        localtime_r(&now, &ti);
+        DLOG("[NET] NTP OK: %02d:%02d:%02d", ti.tm_hour, ti.tm_min, ti.tm_sec);
     } else {
         DLOG("[NET] NTP timeout");
     }
 
-    self->_isNtpSyncing = false;
+    _isNtpSyncing = false;
+    return s_ntpSyncDone;
+}
+
+void NetworkManager::triggerNtpSync() {
+    if (_isNtpSyncing || _isSyncing) return;
+    _isNtpSyncing = true;
+    xTaskCreate(ntpTaskWorker, "NtpSync", 4096, this, 2, nullptr);
+}
+
+void NetworkManager::ntpTaskWorker(void* param) {
+    NetworkManager* self = static_cast<NetworkManager*>(param);
+    if (self != nullptr) {
+        self->syncNtpTime(5000);
+    }
     vTaskDelete(nullptr);
 }
 
@@ -154,7 +207,7 @@ void NetworkManager::getDateString(char* buffer, size_t maxLen) const {
         return;
     }
 
-    const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sar"};
+    const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
     snprintf(buffer, maxLen, "%s, %02d.%02d",
              days[timeinfo.tm_wday],
@@ -204,6 +257,11 @@ void NetworkManager::handleCaptiveSubmit() {
         _provisionedSsid = _captiveServer->arg("ssid");
         _provisionedPass = _captiveServer->arg("password");
         _provisioningDone = true;
+
+        strncpy(_wifiSsid, _provisionedSsid.c_str(), sizeof(_wifiSsid) - 1);
+        _wifiSsid[sizeof(_wifiSsid) - 1] = '\0';
+        strncpy(_wifiPassword, _provisionedPass.c_str(), sizeof(_wifiPassword) - 1);
+        _wifiPassword[sizeof(_wifiPassword) - 1] = '\0';
 
         ConfigManager cfg;
         if (cfg.init(NVS_NAMESPACE)) {
@@ -273,55 +331,55 @@ struct FirebaseTaskParams {
     DisplayDriver* display;
 };
 
-void NetworkManager::triggerFirebaseSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
-    if (WiFi.status() != WL_CONNECTED) return;
-    if (_isFirebaseSyncing) return;
+void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
+    if (_isSyncing) return;
 
-    _isFirebaseSyncing = true;
+    _isSyncing = true;
     FirebaseTaskParams* p = new FirebaseTaskParams{this, batteryPercent, isCharging, storage, nullptr};
-    BaseType_t res = xTaskCreate(firebaseSyncTaskWorker, "FbSync", 12288, p, 2, nullptr);
+    BaseType_t res = xTaskCreate(wakeupSyncTaskWorker, "WakeSync", 12288, p, 2, nullptr);
     if (res != pdPASS) {
-        _isFirebaseSyncing = false;
+        _isSyncing = false;
         delete p;
-        DLOG("[NET] FbSync task RAM!");
+        DLOG("[NET] WakeSync task RAM!");
     }
 }
 
-void NetworkManager::firebaseSyncTaskWorker(void* param) {
+void NetworkManager::wakeupSyncTaskWorker(void* param) {
     FirebaseTaskParams* p = static_cast<FirebaseTaskParams*>(param);
     if (p && p->self) {
-        p->self->syncFirebaseWakeup(p->batteryPercent, p->isCharging, p->storage);
-        p->self->_isFirebaseSyncing = false;
+        p->self->syncWakeup(p->batteryPercent, p->isCharging, p->storage);
         delete p;
     }
     vTaskDelete(nullptr);
 }
 
-bool NetworkManager::syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
-    // Chờ tối đa 5s cho Wi-Fi tái kết nối ổn định sau khi chip thức dậy từ Light Sleep
-    uint32_t waitStart = millis();
-    while (WiFi.status() != WL_CONNECTED && (millis() - waitStart < 5000)) {
-        delay(100);
-    }
+bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
+    _isSyncing = true;
 
-    if (WiFi.status() != WL_CONNECTED) {
+    // 1. Tái kết nối Wi-Fi (chờ tối đa 5s với fallback)
+    if (!ensureConnected(5000)) {
         DLOG("[NET] sync skip: no wifi");
+        _isSyncing = false;
         return false;
     }
 
-    // 1. Update Status (Heartbeat)
+    // 2. Đồng bộ thời gian NTP trước để các mốc timestamp phía sau luôn chính xác
+    syncNtpTime(5000);
+
+    // 3. Update Status (Heartbeat)
     updateFirebaseStatus(batteryPercent, isCharging);
-    delay(150);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 2. Check Flags (Alarms, OTA, Pairing)
+    // 4. Check Flags (Alarms, OTA, Pairing)
     checkFirebaseFlags();
-    delay(150);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 3. Check and download new messages
+    // 5. Check and download new messages
     if (storage != nullptr) {
         checkAndDownloadNewMessages(storage);
     }
 
+    _isSyncing = false;
     return true;
 }
 
@@ -777,6 +835,11 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                                 }
                                                 delay(1);
                                             }
+                                            // Chốt phiên append: ghi audioSize vào bảng
+                                            // slot. Không có bước này thì phần audio nằm
+                                            // trên flash nhưng AudioPlayer không biết nó
+                                            // ở đâu và dài bao nhiêu -> hộp câm.
+                                            storage->closeAppend();
                                             DLOG("[NET] Audio DL OK: %d bytes", aTotalRead);
                                         } else {
                                             DLOG("[NET] Audio append FAIL (openForAppend)");

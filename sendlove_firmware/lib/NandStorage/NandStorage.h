@@ -8,22 +8,25 @@
 // ============================================================================
 // NandStorage — Driver cho W25Q128 NAND Flash trên Hardware SPI2
 // ============================================================================
-// Quản lý 5 slot video/ảnh lưu trên flash NAND W25Q128 (16MB).
+// Quản lý NAND_SLOT_COUNT slot video/ảnh lưu trên flash NAND W25Q128 (16MB).
 // Sử dụng Hardware SPI2 (chia sẻ bus với DisplayDriver ST7789).
 //
 // Slot Table nằm ở sector đầu tiên (0x000000):
-//   Magic "NSLT" + 5 × SlotEntry (16 bytes mỗi entry)
+//   Magic "NSL2" + NAND_SLOT_COUNT × SlotEntry (20 bytes mỗi entry)
+//   Magic đổi NSLT -> NSL2 vì SlotEntry dài thêm 4 byte (audioSize): bảng cũ
+//   phải bị từ chối chứ không được đọc lệch trường.
 //
 // Phase 1: Chế độ READ-ONLY — không erase/write để bảo toàn dữ liệu.
 // ============================================================================
 
-/// Thông tin 1 slot (16 bytes, giữ nguyên binary format từ test project)
+/// Thông tin 1 slot (20 bytes)
 struct SlotEntry {
     char     magic[4];       // "VJPG" for video, "VIMG" for static image, "\0" for empty
-    uint32_t dataSize;       // Data size in bytes
+    uint32_t dataSize;       // Video data size in bytes (KHÔNG gồm audio nối phía sau)
     uint16_t fps;            // Frame rate (video)
     uint16_t totalFrames;    // Total frame count
     uint32_t maxDisplayTime; // Max display time in seconds
+    uint32_t audioSize;      // Byte audio nối sau video (gồm header AUDC 10 byte); 0 = không có
 };
 
 /// Hardware SPI driver for W25Q128 NAND Flash storage
@@ -49,6 +52,13 @@ public:
 
     /// Write / sync current slot table to Sector 0 with "NSLT" magic header
     void writeSlotTable();
+
+    /// Ghi kích thước phần audio nối sau video vào bảng slot (không đụng trường khác)
+    void setSlotAudioSize(uint8_t slot, uint32_t audioSize);
+
+    /// Đọc tại offset tuyệt đối trong slot đang mở, KHÔNG bị chặn bởi dataSize và
+    /// KHÔNG đụng con trỏ đọc tuần tự của readData(). Dùng cho vùng audio.
+    int readAtSlot(uint32_t offset, uint8_t* buf, uint32_t len);
 
     /// Set slot metadata in RAM table (used after writing slot data)
     void setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize, uint16_t fps, uint16_t totalFrames, uint32_t maxDisplayTime);
@@ -85,6 +95,10 @@ public:
 
     /// Get currently opened slot index (-1 if none)
     int8_t getCurrentSlot() const;
+
+    /// false = init() vua tao bang slot moi (magic khong khop / chip trong).
+    /// Moi metadata cu da bi xoa, phia tren phai reset hang cho theo.
+    bool isTableValid() const { return _tableValid; }
 
 private:
     SemaphoreHandle_t _spiMutex = nullptr;

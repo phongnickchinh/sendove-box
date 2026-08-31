@@ -17,7 +17,15 @@ public:
       auto cfg = _bus_instance.config();
       cfg.spi_host = SPI2_HOST;
       cfg.spi_mode = 3;
-      cfg.freq_write = 20000000;
+      // 40MHz thay vi 20MHz. Day mot frame 240x240 RGB565 = 921.600 bit;
+      // o 20MHz rieng phan day len LCD da ton ~46ms, trong khi ngan sach
+      // mot frame o 15fps chi la 66ms -> cong them giai ma JPEG (~22ms) va
+      // doc flash (~4ms) thanh ~74ms, vuot ngan sach ~8ms va troi dan so voi
+      // audio (I2S chay bang clock phan cung, khong bao gio cho).
+      // 40MHz cat phan day con ~23ms -> ~52ms, du duoi ngan sach.
+      // Khong day cao hon: chan 4/5/6 khong trung IOMUX cua FSPI tren
+      // ESP32-C3 nen SPI di qua GPIO matrix, tran thuc te quanh 40MHz.
+      cfg.freq_write = 40000000;
       cfg.freq_read = 16000000;
       cfg.pin_sclk = PIN_SPI_SCK;
       cfg.pin_mosi = PIN_SPI_MOSI;

@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include "config.h"
 
 // ============================================================================
 // ConfigManager — Quản lý cấu hình lưu trữ trên NVS (Non-Volatile Storage)
@@ -11,10 +12,6 @@
 // - Wi-Fi credentials (SSID + Password)
 // - Wi-Fi backup (rollback khi đổi Wi-Fi thất bại)
 // ============================================================================
-
-/// Kích thước buffer tối đa cho SSID và Password
-static constexpr size_t WIFI_SSID_MAX_LEN = 33;  // 32 chars + null terminator
-static constexpr size_t WIFI_PASS_MAX_LEN = 65;  // 64 chars + null terminator
 
 struct AlarmItem {
     char id[16] = "";

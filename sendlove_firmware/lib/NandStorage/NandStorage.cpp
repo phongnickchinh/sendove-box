@@ -14,6 +14,14 @@ static constexpr uint8_t W25Q_READ_STATUS_1  = 0x05;
 // Tăng lên 20-33MHz chỉ khi dùng PCB chính thức với đường trace ngắn.
 static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
+// Riêng đường ĐỌC chạy 20MHz. Không phải phỏng đoán: acquireSPI() bên dưới đã
+// mở transaction 20MHz trên đúng bộ dây này trước mỗi lần truy cập flash, nên
+// bus vốn đã chạy ở tốc độ đó. Opcode 0x03 của W25Q128JV chịu tới ~50MHz.
+// Không đẩy cao hơn: chân 4/5/6 không trùng IOMUX của FSPI trên ESP32-C3 nên
+// SPI đi qua GPIO matrix, trần thực tế quanh 40MHz.
+// Đường GHI/XOÁ vẫn giữ nguyên 4MHz vì không nằm trong luồng phát.
+static const SPISettings NAND_READ_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE3);
+
 bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     _spiMutex = spiMutex;
 
@@ -23,7 +31,7 @@ bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     uint8_t header[4 + NAND_SLOT_COUNT * sizeof(SlotEntry)];
     readRaw(0, header, sizeof(header));
 
-    if (memcmp(header, "NSLT", 4) != 0) {
+    if (memcmp(header, "NSL2", 4) != 0) {
         DLOG("[NAND] no table -> init clean");
         memset(_slots, 0, sizeof(_slots));
         writeSlotTable();
@@ -46,6 +54,25 @@ void NandStorage::setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize
     _slots[slot].fps = fps;
     _slots[slot].totalFrames = totalFrames;
     _slots[slot].maxDisplayTime = maxDisplayTime;
+}
+
+void NandStorage::setSlotAudioSize(uint8_t slot, uint32_t audioSize) {
+    if (slot >= NAND_SLOT_COUNT) return;
+    _slots[slot].audioSize = audioSize;
+}
+
+int NandStorage::readAtSlot(uint32_t offset, uint8_t* buf, uint32_t len) {
+    if (_currentSlot < 0 || len == 0) return 0;
+
+    // Trần cứng là biên slot vật lý, không phải dataSize: vùng audio nằm SAU dataSize.
+    uint32_t slotSpan = ((_currentSlot + 1) < NAND_SLOT_COUNT)
+                            ? (NAND_SLOT_ADDRS[_currentSlot + 1] - NAND_SLOT_ADDRS[_currentSlot])
+                            : (0x1000000UL - NAND_SLOT_ADDRS[_currentSlot]);
+    if (offset >= slotSpan) return 0;
+    if (offset + len > slotSpan) len = slotSpan - offset;
+
+    readRaw(NAND_SLOT_ADDRS[_currentSlot] + offset, buf, len);
+    return (int)len;
 }
 
 SlotEntry NandStorage::getSlotInfo(uint8_t slot) const {
@@ -125,7 +152,7 @@ int8_t NandStorage::getCurrentSlot() const {
 void NandStorage::readRaw(uint32_t addr, uint8_t* data, uint32_t len) {
     if (!acquireSPI()) return;
 
-    SPI.beginTransaction(NAND_SPI_SETTINGS);
+    SPI.beginTransaction(NAND_READ_SPI_SETTINGS);
     digitalWrite(PIN_NAND_CS, LOW);
 
     SPI.transfer(W25Q_READ_DATA);
@@ -133,9 +160,9 @@ void NandStorage::readRaw(uint32_t addr, uint8_t* data, uint32_t len) {
     SPI.transfer((addr >> 8) & 0xFF);
     SPI.transfer(addr & 0xFF);
 
-    for (uint32_t i = 0; i < len; i++) {
-        data[i] = SPI.transfer(0x00);
-    }
+    // Nạp cả khối một lần thay vì gọi SPI.transfer() từng byte: vòng lặp cũ
+    // trả ~3.5us/byte (phần lớn là overhead lời gọi), bulk transfer ~0.45us/byte.
+    SPI.transferBytes(nullptr, data, len);
 
     digitalWrite(PIN_NAND_CS, HIGH);
     SPI.endTransaction();
@@ -310,7 +337,7 @@ void NandStorage::releaseSPI() {
 
 void NandStorage::writeSlotTable() {
     uint8_t header[4 + NAND_SLOT_COUNT * sizeof(SlotEntry)];
-    memcpy(header, "NSLT", 4);
+    memcpy(header, "NSL2", 4);
     for (uint8_t i = 0; i < NAND_SLOT_COUNT; i++) {
         memcpy(header + 4 + i * sizeof(SlotEntry), &_slots[i], sizeof(SlotEntry));
     }

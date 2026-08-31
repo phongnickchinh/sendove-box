@@ -62,9 +62,9 @@ static constexpr uint32_t FRAME_DURATION_MS = 1000 / TARGET_FPS;
 // static constexpr uint8_t  I2S_BITS_PER_SAMPLE   = 16;
 
 // NAND Slot Config
-static constexpr uint8_t NAND_SLOT_COUNT = 5;
+static constexpr uint8_t NAND_SLOT_COUNT = 3;
 static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
-    0x010000, 0x340000, 0x670000, 0x9A0000, 0xCD0000};
+    0x010000, 0x560000, 0xAB0000};
 
 // Firebase Configuration (Lưu trong config_secrets.h để chống lộ API trên Git)
 #include "config_secrets.h"
@@ -78,6 +78,8 @@ static constexpr const char *OTA_HOSTNAME = "sendlovebox";
 static constexpr const char *FW_VERSION = "2.1.0";
 
 // Wi-Fi & NTP Configuration (Fallback credentials if NVS is empty)
+static constexpr size_t WIFI_SSID_MAX_LEN = 33;  // 32 chars + null terminator
+static constexpr size_t WIFI_PASS_MAX_LEN = 65;  // 64 chars + null terminator
 static constexpr const char *DEFAULT_WIFI_SSID = "@Ruijie-s4617";
 static constexpr const char *DEFAULT_WIFI_PASSWORD = "56Daiyen";
 // static constexpr const char *DEFAULT_WIFI_SSID = "@Ruijie-s4617";
@@ -121,7 +123,10 @@ static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;
 static constexpr uint8_t PIN_I2S_BCLK = 0;
 static constexpr uint8_t PIN_I2S_LRC  = 1;
 static constexpr uint8_t PIN_I2S_DOUT = 2;
-static constexpr uint32_t AUDIO_SAMPLE_RATE    = 8000;  // Hz
+static constexpr uint32_t AUDIO_SAMPLE_RATE    = 8000;  // Hz — mặc định khi header AUDC hỏng
+// Trần an toàn cho pcmSize đọc từ header AUDC: 16kHz mono 16-bit × 18s.
+// Video bị web cắt ở 15s, audio cũng phải bị cắt theo — đây chỉ là chốt chặn cuối.
+static constexpr uint32_t AUDIO_MAX_PCM_BYTES  = 600000;
 static constexpr uint32_t AUDIO_PCM_CHUNK_SIZE = 1600;  // bytes = 100ms @ 8000Hz Mono
 static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 8;
 static constexpr uint16_t AUDIO_DMA_BUF_LEN    = 512;   // samples per DMA buffer

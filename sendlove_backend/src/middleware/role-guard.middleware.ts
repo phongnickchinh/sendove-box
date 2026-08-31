@@ -5,7 +5,9 @@ import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.rep
 
 const boxRepo = new FirebaseBoxRepository();
 
-export const requireRole = (requiredRole: 'sender' | 'receiver') => {
+export const requireRole = (requiredRole: 'sender' | 'receiver' | ('sender' | 'receiver')[]) => {
+  const allowedRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+
   return async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
       const uid = req.user?.uid;
@@ -17,12 +19,12 @@ export const requireRole = (requiredRole: 'sender' | 'receiver') => {
       const box = await boxRepo.getById(boxId);
       if (!box) throw new AppError(404, 'box_not_found', 'Box not found');
 
-      if (requiredRole === 'sender' && box.pairing.sender_id !== uid) {
-        throw new AppError(403, 'forbidden', 'Only sender can perform this action');
-      }
+      const pairing = box.pairing || {};
+      const isSender = allowedRoles.includes('sender') && pairing.sender_id === uid;
+      const isReceiver = allowedRoles.includes('receiver') && pairing.receiver_id === uid;
 
-      if (requiredRole === 'receiver' && box.pairing.receiver_id !== uid) {
-        throw new AppError(403, 'forbidden', 'Only receiver can perform this action');
+      if (!isSender && !isReceiver) {
+        throw new AppError(403, 'forbidden', `Only ${allowedRoles.join(' or ')} can perform this action`);
       }
 
       next();

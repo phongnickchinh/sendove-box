@@ -18,6 +18,8 @@ export interface BoxPairing {
   receiver_paired_time?: number | null;
 }
 
+export type LedState = 'OFF' | 'BREATHING' | 'SOLID' | 'BLINK_FAST';
+
 export interface BoxConfig {
   /** Danh sách báo thức, key = alarmId */
   alarm_list: Record<string, Alarm>;
@@ -26,13 +28,18 @@ export interface BoxConfig {
     ssid: string;
     pwd: string;
   };
+
+  led_state?: LedState;
+  display_brightness?: number; // 0-100
+  playback_volume?: number;    // 0-100
 }
 
 export interface BoxFlags {
 
   a_flag: boolean; /** Cờ báo alarm list đã thay đổi — ESP32 cần đọc lại */
-  ota_flag: boolean; /** Cờ báo có OTA firmware đang chờ */ 
+  ota_flag: boolean; /** Cờ báo có OTA firmware đang chờ */
   p_flag: boolean; /** Cờ báo có thay đổi pairing (thêm/ngắt kết nối) */
+  config_flag: boolean; /** Cờ báo led_state/display_brightness/playback_volume đã thay đổi — ESP32 cần đọc lại */
 }
 
 export interface BoxStatus {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { BoxController } from '../controllers/box.controller';
 import { requireAuth } from '../middleware/auth.middleware';
-import { validate, pairBoxSchema, updateWifiSchema } from '../middleware/validation.middleware';
+import { validate, pairBoxSchema, updateWifiSchema, updateBoxConfigSchema } from '../middleware/validation.middleware';
 
 export default function boxRoutes(
   controller: BoxController,
@@ -16,6 +16,7 @@ export default function boxRoutes(
   router.delete('/:boxId/unpair', controller.unpairBox);
   router.get('/:boxId', controller.getBoxDetails);
   router.put('/:boxId/wifi', validate(updateWifiSchema), controller.updateWifi);
+  router.put('/:boxId/config', validate(updateBoxConfigSchema), controller.updateBoxConfig);
 
   // Mount nested routes
   router.use('/:boxId/messages', messageRouter);

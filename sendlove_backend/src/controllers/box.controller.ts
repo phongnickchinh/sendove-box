@@ -48,9 +48,26 @@ export class BoxController {
       
       await this.boxService.updateWifi(uid, boxId, ssid, password);
       
-      res.status(200).json({ 
-        success: true, 
-        data: { status: 'pending', message: 'WiFi config queued. Box will apply on next poll.' } 
+      res.status(200).json({
+        success: true,
+        data: { status: 'pending', message: 'WiFi config queued. Box will apply on next poll.' }
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  public updateBoxConfig = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+    try {
+      const uid = req.user!.uid;
+      const { boxId } = req.params;
+      const { led_state, display_brightness, playback_volume } = req.body;
+
+      await this.boxService.updateBoxConfig(uid, boxId, { led_state, display_brightness, playback_volume });
+
+      res.status(200).json({
+        success: true,
+        data: { status: 'pending', message: 'Box config queued. Box will apply on next poll.' }
       });
     } catch (error) {
       next(error);

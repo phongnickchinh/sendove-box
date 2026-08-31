@@ -11,6 +11,7 @@ function boxRoutes(controller, messageRouter, alarmRouter) {
     router.delete('/:boxId/unpair', controller.unpairBox);
     router.get('/:boxId', controller.getBoxDetails);
     router.put('/:boxId/wifi', (0, validation_middleware_1.validate)(validation_middleware_1.updateWifiSchema), controller.updateWifi);
+    router.put('/:boxId/config', (0, validation_middleware_1.validate)(validation_middleware_1.updateBoxConfigSchema), controller.updateBoxConfig);
     // Mount nested routes
     router.use('/:boxId/messages', messageRouter);
     router.use('/:boxId/alarms', alarmRouter);

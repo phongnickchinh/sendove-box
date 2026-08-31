@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.heartbeatSchema = exports.registerDeviceSchema = exports.updateAlarmSchema = exports.createAlarmSchema = exports.updateProfileSchema = exports.confirmMessageSchema = exports.initiateMessageSchema = exports.updateWifiSchema = exports.pairBoxSchema = exports.validate = void 0;
+exports.heartbeatSchema = exports.registerDeviceSchema = exports.updateAlarmSchema = exports.createAlarmSchema = exports.updateProfileSchema = exports.confirmMessageSchema = exports.initiateMessageSchema = exports.updateBoxConfigSchema = exports.updateWifiSchema = exports.pairBoxSchema = exports.validate = void 0;
 const error_handler_middleware_1 = require("./error-handler.middleware");
 /**
  * Validation middleware factory.
@@ -90,6 +90,12 @@ exports.pairBoxSchema = {
 exports.updateWifiSchema = {
     ssid: { type: 'string', required: true, minLength: 1, maxLength: 32 },
     password: { type: 'string', maxLength: 63 },
+};
+/** PUT /boxes/:boxId/config */
+exports.updateBoxConfigSchema = {
+    led_state: { type: 'string', enum: ['OFF', 'BREATHING', 'SOLID', 'BLINK_FAST'] },
+    display_brightness: { type: 'number', min: 0, max: 100 },
+    playback_volume: { type: 'number', min: 0, max: 100 },
 };
 /** POST /boxes/:boxId/messages/initiate */
 exports.initiateMessageSchema = {

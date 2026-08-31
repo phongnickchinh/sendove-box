@@ -13,10 +13,10 @@ function messageRoutes(controller) {
     router.post('/initiate', (0, role_guard_middleware_1.requireRole)('sender'), rate_limiter_middleware_1.messageSendRateLimit, (0, validation_middleware_1.validate)(validation_middleware_1.initiateMessageSchema), controller.initiateMessage);
     // Sender: Bước 2 — Upload xong, xác nhận ghi message vào RTDB (Validated)
     router.post('/confirm', (0, role_guard_middleware_1.requireRole)('sender'), (0, validation_middleware_1.validate)(validation_middleware_1.confirmMessageSchema), controller.confirmMessage);
-    // Receiver: Xem lịch sử tin nhắn
-    router.get('/', (0, role_guard_middleware_1.requireRole)('receiver'), controller.getMessages);
-    // Receiver: Xem chi tiết 1 tin nhắn
-    router.get('/:msgId', (0, role_guard_middleware_1.requireRole)('receiver'), controller.getMessageDetails);
+    // Sender & Receiver: Xem lịch sử tin nhắn
+    router.get('/', (0, role_guard_middleware_1.requireRole)(['sender', 'receiver']), controller.getMessages);
+    // Sender & Receiver: Xem chi tiết 1 tin nhắn
+    router.get('/:msgId', (0, role_guard_middleware_1.requireRole)(['sender', 'receiver']), controller.getMessageDetails);
     return router;
 }
 //# sourceMappingURL=message.routes.js.map

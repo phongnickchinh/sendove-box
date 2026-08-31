@@ -73,6 +73,7 @@ export class DeviceService {
         a_flag: false,
         ota_flag: false,
         p_flag: false,
+        config_flag: false,
       },
 
       status: {
@@ -169,6 +170,16 @@ export class DeviceService {
     if (box.flags.p_flag) {
       response.pairing = box.pairing;
       await this.boxRepo.updateFlags(boxId, { p_flag: false });
+    }
+
+    // Nếu config_flag = true → trả led_state/display_brightness/playback_volume mới
+    if (box.flags.config_flag) {
+      response.config = {
+        led_state: box.config.led_state,
+        display_brightness: box.config.display_brightness,
+        playback_volume: box.config.playback_volume,
+      };
+      await this.boxRepo.updateFlags(boxId, { config_flag: false });
     }
 
     return response;

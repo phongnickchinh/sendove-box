@@ -5,6 +5,7 @@ const error_handler_middleware_1 = require("./error-handler.middleware");
 const firebase_box_repository_1 = require("../repositories/firebase/firebase-box.repository");
 const boxRepo = new firebase_box_repository_1.FirebaseBoxRepository();
 const requireRole = (requiredRole) => {
+    const allowedRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
     return async (req, res, next) => {
         try {
             const uid = req.user?.uid;
@@ -16,11 +17,11 @@ const requireRole = (requiredRole) => {
             const box = await boxRepo.getById(boxId);
             if (!box)
                 throw new error_handler_middleware_1.AppError(404, 'box_not_found', 'Box not found');
-            if (requiredRole === 'sender' && box.pairing.sender_id !== uid) {
-                throw new error_handler_middleware_1.AppError(403, 'forbidden', 'Only sender can perform this action');
-            }
-            if (requiredRole === 'receiver' && box.pairing.receiver_id !== uid) {
-                throw new error_handler_middleware_1.AppError(403, 'forbidden', 'Only receiver can perform this action');
+            const pairing = box.pairing || {};
+            const isSender = allowedRoles.includes('sender') && pairing.sender_id === uid;
+            const isReceiver = allowedRoles.includes('receiver') && pairing.receiver_id === uid;
+            if (!isSender && !isReceiver) {
+                throw new error_handler_middleware_1.AppError(403, 'forbidden', `Only ${allowedRoles.join(' or ')} can perform this action`);
             }
             next();
         }

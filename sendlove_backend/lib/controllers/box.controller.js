@@ -53,6 +53,21 @@ class BoxController {
                 next(error);
             }
         };
+        this.updateBoxConfig = async (req, res, next) => {
+            try {
+                const uid = req.user.uid;
+                const { boxId } = req.params;
+                const { led_state, display_brightness, playback_volume } = req.body;
+                await this.boxService.updateBoxConfig(uid, boxId, { led_state, display_brightness, playback_volume });
+                res.status(200).json({
+                    success: true,
+                    data: { status: 'pending', message: 'Box config queued. Box will apply on next poll.' }
+                });
+            }
+            catch (error) {
+                next(error);
+            }
+        };
     }
 }
 exports.BoxController = BoxController;

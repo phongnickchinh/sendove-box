@@ -1,13 +1,9 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /media/{boxId}/{msgId}/{fileName} {
-      // Cho phép web app đọc các file media để hiển thị (thumbnail, original video)
-      allow read: if request.auth != null;
-      // Việc upload bắt buộc phải thông qua signed URL do server cấp
-      allow write: if false;
-    }
-    
+    // Mọi truy cập đọc/ghi trực tiếp đều bị chặn.
+    // Upload: server cấp signed POST policy. Download: server cấp signed URL.
+    // Signed URL/POST bypass các rule này (xác thực bằng chữ ký GCS), nên không bị ảnh hưởng.
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -109,6 +109,23 @@ class BoxService {
             updated_at: now,
         });
     }
+    /**
+     * Cập nhật led_state / display_brightness / playback_volume cho box.
+     * Chỉ các field được truyền vào mới bị ghi đè.
+     */
+    async updateBoxConfig(uid, boxId, data) {
+        await this.getBoxDetails(uid, boxId); // Validates ownership
+        const updates = { updated_at: Date.now() };
+        if (data.led_state !== undefined)
+            updates['config/led_state'] = data.led_state;
+        if (data.display_brightness !== undefined)
+            updates['config/display_brightness'] = data.display_brightness;
+        if (data.playback_volume !== undefined)
+            updates['config/playback_volume'] = data.playback_volume;
+        await this.boxRepo.update(boxId, updates);
+        // Set config_flag để ESP32 biết cần đọc lại cấu hình
+        await this.boxRepo.updateFlags(boxId, { config_flag: true });
+    }
 }
 exports.BoxService = BoxService;
 //# sourceMappingURL=box.service.js.map

@@ -1,7 +1,7 @@
 {
   "rules": {
-    ".read": "auth != null || true",
-    ".write": "auth != null || true",
+    ".read": false,
+    ".write": false,
     "messages": {
       "$box_id": {
         ".indexOn": ["timestamp"]
@@ -9,4 +9,3 @@
     }
   }
 }
-

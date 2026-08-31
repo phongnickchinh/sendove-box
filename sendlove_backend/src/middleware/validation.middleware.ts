@@ -117,6 +117,13 @@ export const updateWifiSchema: ValidationSchema = {
   password: { type: 'string', maxLength: 63 },
 };
 
+/** PUT /boxes/:boxId/config */
+export const updateBoxConfigSchema: ValidationSchema = {
+  led_state: { type: 'string', enum: ['OFF', 'BREATHING', 'SOLID', 'BLINK_FAST'] },
+  display_brightness: { type: 'number', min: 0, max: 100 },
+  playback_volume: { type: 'number', min: 0, max: 100 },
+};
+
 /** POST /boxes/:boxId/messages/initiate */
 export const initiateMessageSchema: ValidationSchema = {
   types: { type: 'array', required: true, itemType: 'string' },

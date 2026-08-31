@@ -16,11 +16,11 @@ export default function messageRoutes(controller: MessageController) {
   // Sender: Bước 2 — Upload xong, xác nhận ghi message vào RTDB (Validated)
   router.post('/confirm', requireRole('sender'), validate(confirmMessageSchema), controller.confirmMessage);
 
-  // Receiver: Xem lịch sử tin nhắn
-  router.get('/', requireRole('receiver'), controller.getMessages);
-  
-  // Receiver: Xem chi tiết 1 tin nhắn
-  router.get('/:msgId', requireRole('receiver'), controller.getMessageDetails);
+  // Sender & Receiver: Xem lịch sử tin nhắn
+  router.get('/', requireRole(['sender', 'receiver']), controller.getMessages);
+
+  // Sender & Receiver: Xem chi tiết 1 tin nhắn
+  router.get('/:msgId', requireRole(['sender', 'receiver']), controller.getMessageDetails);
 
   return router;
 }

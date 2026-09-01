@@ -347,6 +347,9 @@ void setup() {
   ScreenLogger::init(&appCtx.display);
   DLOG("[BOOT] cpu=%uMHz heap=%u", ESP.getCpuFreqMHz(), ESP.getFreeHeap());
   DLOG("[BOOT] wakeup=%d", (int)esp_sleep_get_wakeup_cause());
+  // reset=1 POWERON, 3 SW, 4 INT_WDT, 5 TASK_WDT, 6 WDT, 9 BROWNOUT, 12 PANIC.
+  // Nếu dòng này lặp lại đều đặn trong log ⇒ box đang reset vòng lặp, không phải lỗi audio.
+  DLOG("[BOOT] reset=%d", (int)esp_reset_reason());
 
   appCtx.network.init();
   appCtx.configManager.init(NVS_NAMESPACE);

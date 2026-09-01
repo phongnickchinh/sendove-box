@@ -952,19 +952,36 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                             uint32_t pcmSize = (aLen > 0) ? (uint32_t)aLen : 0;
                                             memcpy(audcHeader + 4, &sr,      2);
                                             memcpy(audcHeader + 6, &pcmSize, 4);
-                                            storage->writeChunk(audcHeader, sizeof(audcHeader));
+                                            // Ghi hut header thi AudioPlayer khong khop magic
+                                            // "AUDC" -> phat video im lang. Van phai bao ra log,
+                                            // neu khong loi NAND o nhanh audio hoan toan vo hinh.
+                                            bool aWriteError =
+                                                storage->writeChunk(audcHeader, sizeof(audcHeader)) < sizeof(audcHeader);
+                                            if (aWriteError) {
+                                                DLOG("[NET] Audio hdr write SHORT");
+                                            }
 
                                             // Stream PCM data vào slot (không gọi closeWrite vì không đổi metadata)
                                             uint8_t abuf[256];
                                             int     aTotalRead = 0;
                                             uint32_t aLastProgressMs = millis();
-                                            while (httpAudio.connected() && (aLen > 0 || aLen == -1)) {
+                                            while (!aWriteError && httpAudio.connected() && (aLen > 0 || aLen == -1)) {
                                                 size_t av = aStream->available();
                                                 if (av) {
                                                     size_t tr = (av < sizeof(abuf)) ? av : sizeof(abuf);
                                                     int c = aStream->readBytes(abuf, tr);
                                                     if (c > 0) {
-                                                        storage->writeChunk(abuf, c);
+                                                        size_t aw = storage->writeChunk(abuf, c);
+                                                        if (aw < (size_t)c) {
+                                                            // Y het nhanh video dong 892. closeAppend()
+                                                            // ben duoi tinh audioSize theo _writeOffset
+                                                            // that, nen phan da ghi van khop; chi la
+                                                            // tieng bi cut o day.
+                                                            DLOG("[NET] audio write SHORT %u/%d @ %d",
+                                                                 (unsigned)aw, c, aTotalRead);
+                                                            aWriteError = true;
+                                                            break;
+                                                        }
                                                         aTotalRead += c;
                                                         if (aLen > 0) aLen -= c;
                                                         aLastProgressMs = millis();
@@ -982,7 +999,8 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                             // trên flash nhưng AudioPlayer không biết nó
                                             // ở đâu và dài bao nhiêu -> hộp câm.
                                             storage->closeAppend();
-                                            DLOG("[NET] Audio DL OK: %d bytes", aTotalRead);
+                                            DLOG("[NET] Audio DL %s: %d bytes",
+                                                 aWriteError ? "SHORT" : "OK", aTotalRead);
                                         } else {
                                             DLOG("[NET] Audio append FAIL (openForAppend)");
                                         }

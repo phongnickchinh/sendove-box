@@ -56,8 +56,9 @@ private:
 
     // Buffer đọc 1 chunk PCM từ NAND (stack-allocated, tránh malloc)
     uint8_t _chunk[AUDIO_PCM_CHUNK_SIZE];
-    // Mono -> Stereo: mỗi mẫu 2 byte thành 4 byte, nên đệm gấp đôi.
-    int16_t _stereo[AUDIO_PCM_CHUNK_SIZE / 2 * 2];
+    // Mono -> Stereo (x2) rồi lặp mỗi mẫu AUDIO_OVERSAMPLE lần (I2S mở ở tốc độ
+    // file x AUDIO_OVERSAMPLE, xem config.h) để BCLK đủ cao cho MAX98357A.
+    int16_t _stereo[AUDIO_PCM_CHUNK_SIZE / 2 * 2 * AUDIO_OVERSAMPLE];
 
     /// Đọc 1 chunk PCM từ NAND và ghi vào I2S (Mono → Stereo expand)
     /// Tra ve true neu DMA nhan het chunk (con cho, nen nap tiep).

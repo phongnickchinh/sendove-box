@@ -8,7 +8,10 @@
 bool AudioPlayer::init() {
     i2s_config_t cfg = {
         .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-        .sample_rate          = _sampleRate,
+        // x AUDIO_OVERSAMPLE: BCLK ở đúng tốc độ file (8kHz) quá thấp cho
+        // MAX98357A -> rè. Mỗi mẫu file được lặp lại trong fillChunk()/testBeep()
+        // để cao độ không đổi. Xem giải thích đầy đủ ở config.h.
+        .sample_rate          = _sampleRate * AUDIO_OVERSAMPLE,
         .bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
@@ -50,12 +53,15 @@ void AudioPlayer::stop() {
 
 void AudioPlayer::testBeep() {
     if (!init()) return;
-    
-    DLOG("[AUD] Playing boot beep test");
+
+    // init() đã mở I2S ở _sampleRate * AUDIO_OVERSAMPLE (32kHz mặc định) nên
+    // không cần set lại sample rate ở đây - cứ ghi thẳng ở tốc độ đó.
+    uint32_t rate = _sampleRate * AUDIO_OVERSAMPLE;
+    DLOG("[AUD] Playing boot beep test (%lu Hz)", (unsigned long)rate);
     int16_t beepFrame[2];
-    // Phát sóng sin 400Hz mượt mà thay vì sóng vuông để tránh tiếng rè (rẹt rẹt)
+    // Phát sóng sin mượt mà thay vì sóng vuông để tránh tiếng rè (rẹt rẹt)
     const int16_t sine[20] = {0, 1236, 2351, 3236, 3804, 4000, 3804, 3236, 2351, 1236, 0, -1236, -2351, -3236, -3804, -4000, -3804, -3236, -2351, -1236};
-    int samples = (AUDIO_SAMPLE_RATE * 150) / 1000;
+    int samples = (rate * 150) / 1000;
     for (int i = 0; i < samples; i++) {
         int16_t sample = sine[i % 20];
         beepFrame[0] = sample;
@@ -64,6 +70,10 @@ void AudioPlayer::testBeep() {
         // Block until written
         i2s_write(I2S_NUM_0, beepFrame, sizeof(beepFrame), &written, portMAX_DELAY);
     }
+    // Nếu stop() (i2s_driver_uninstall) ngay sau vòng ghi thì DMA còn dữ liệu
+    // chưa phát hết bị xoá giữa chừng ⇒ nghe thành tiếng rẹt chứ không phải
+    // tiếng bíp trọn vẹn. Chờ đủ thời lượng phát rồi mới gỡ driver.
+    delay(200);
     stop();
 }
 

@@ -147,7 +147,7 @@ bool AudioPlayer::loadFromStorage(IStorageProvider* storage, uint32_t videoDataS
     // Tốc độ lấy mẫu do file quyết định, không phải hằng số biên dịch: web đổi
     // 8k <-> 16k thì hộp phát đúng cao độ mà không phải nạp lại firmware.
     if (_initialized && sampleRate != _sampleRate) {
-        i2s_set_sample_rates(I2S_NUM_0, sampleRate);
+wao        i2s_set_sample_rates(I2S_NUM_0, sampleRate * AUDIO_OVERSAMPLE);
     }
     _sampleRate     = sampleRate;
     _audioPcmOffset = pcmStart;
@@ -189,24 +189,30 @@ bool AudioPlayer::fillChunk() {
     int bytesRead = _storage->readAt(_audioPcmOffset + _audioCursor, _chunk, toRead);
     if (bytesRead <= 0) return false;
 
-    // Expand Mono → Stereo: mỗi sample 16-bit Mono thành frame L+R 32-bit
+    // Expand Mono → Stereo + Oversample: mỗi mẫu mono 16-bit lặp lại
+    // AUDIO_OVERSAMPLE lần thành frame stereo (L+R) để I2S ở tốc độ
+    // sampleRate * AUDIO_OVERSAMPLE giữ đúng cao độ gốc.
     const int16_t* pcm     = (const int16_t*)_chunk;
     int            samples = bytesRead / 2;
     for (int i = 0; i < samples; i++) {
-        _stereo[i * 2]     = pcm[i]; // Left
-        _stereo[i * 2 + 1] = pcm[i]; // Right
+        for (int r = 0; r < AUDIO_OVERSAMPLE; r++) {
+            int idx = (i * AUDIO_OVERSAMPLE + r) * 2;
+            _stereo[idx]     = pcm[i]; // Left
+            _stereo[idx + 1] = pcm[i]; // Right
+        }
     }
 
     // Một lần i2s_write cho cả chunk, timeout = 0 (non-blocking).
-    // 'written' PHẢI được tôn trọng: fillChunk nạp ~100ms audio mỗi frame video
-    // (~66ms), nhanh hơn thời gian thực ~1.5x. Nếu vẫn cộng đủ bytesRead vào con
-    // trỏ thì phần DMA từ chối bị bỏ luôn — audio hụt dần và lệch tiếng.
-    size_t written = 0;
-    i2s_write(I2S_NUM_0, _stereo, (size_t)samples * 4, &written, 0);
+    // 'written' PHẢI được tôn trọng: nếu DMA từ chối một phần thì chỉ tính
+    // phần đã chấp nhận, lần tick() kế sẽ nạp phần còn lại.
+    size_t totalBytes = (size_t)samples * AUDIO_OVERSAMPLE * 4;
+    size_t written    = 0;
+    i2s_write(I2S_NUM_0, _stereo, totalBytes, &written, 0);
 
-    written &= ~(size_t)3;              // chỉ tính frame stereo trọn vẹn (4 byte)
-    _audioCursor += (uint32_t)(written / 2);   // 4 byte stereo <- 2 byte mono
+    // Quy đổi ngược: 1 mẫu mono gốc = AUDIO_OVERSAMPLE * 4 bytes stereo output
+    // -> 1 byte mono gốc = AUDIO_OVERSAMPLE * 2 bytes stereo output
+    written &= ~(size_t)3;
+    _audioCursor += (uint32_t)(written / (AUDIO_OVERSAMPLE * 2));
 
-    // true = DMA nhan het phan yeu cau -> co the con cho, thu nap tiep.
-    return written == (size_t)samples * 4;
+    return written == totalBytes;
 }

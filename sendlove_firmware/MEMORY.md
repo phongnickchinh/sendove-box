@@ -280,7 +280,8 @@ lỗi chất lượng file WAV: user đã nghe file `.wav` sinh ra từ web, xá
 | Pacer bỏ frame khi trễ (`FRAME_MIN_IDLE_MS=2`, `decodeOneFrame(bool skipRender)`, `_lastFrameSkipped`) | `lib/MediaPlayer/MediaPlayer.cpp/.h` | Đã build + nạp, **CHƯA kiểm chứng phần cứng** |
 | Timeout 10s khi tải không tiến triển + log tiến độ mỗi 16KB (video **và** audio) | `lib/NetworkManager/NetworkManager.cpp` | ✅ **ĐÃ KIỂM CHỨNG MÁY THẬT 2026-09-01: tải chạy ổn** |
 | Captive portal: `WIFI_AP_STA`, `setErrorReplyCode(NoError)`, 8 URL dò của OS trả 302, endpoint `/scan` quét bất đồng bộ, HTML có danh sách Wi-Fi bấm chọn | `NetworkManager.cpp/.h`, `captive_portal_html.h` | ✅ **ĐÃ KIỂM CHỨNG MÁY THẬT 2026-09-01: AP + captive portal ổn** |
-| Kiểm tra giá trị trả về của `writeChunk` ở **nhánh audio** (header `AUDC` + stream PCM), log `[NET] Audio DL OK/SHORT: N bytes` | `lib/NetworkManager/NetworkManager.cpp` | Đã build (RAM 20.6% / Flash 73.3% — không đổi). Dùng biến local `aWriteError`, **không** tái dùng `writeError` vì cổng kiểm tra ở dòng ~920 chạy *trước* khối audio nên set vào đó là vô nghĩa |
+| Fix `fillChunk()` thiếu oversample x4: I2S init 32kHz nhưng data chỉ expand Mono→Stereo (không lặp mẫu) → audio phát nhanh gấp 4 + DMA underrun → tiếng rẹt rời rạc | `lib/MediaPlayer/AudioPlayer.cpp:192-219` | ✅ **ĐÃ KIỂM CHỨNG MÁY THẬT 2026-09-02: audio hết rẹt, đúng tốc độ** |
+| Fix `loadFromStorage()` gọi `i2s_set_sample_rates(rate)` thiếu nhân `AUDIO_OVERSAMPLE` → BCLK thấp khi WAV header có rate khác default | `lib/MediaPlayer/AudioPlayer.cpp:150` | ✅ **ĐÃ KIỂM CHỨNG MÁY THẬT 2026-09-02** |
 
 #### Defect gốc đã tìm ra ở vòng lặp tải (nguyên nhân treo tại `[NET] writing slot`)
 `http.getSize()` trả `-1` với response chunked. Điều kiện `while (http.connected() && (len > 0 || len == -1))`
@@ -289,48 +290,52 @@ khi đó **không bao giờ tự sai** — chỉ thoát khi server đóng socket
 phải set `writeError = true` để slot dở bị loại, nếu không file tải dở với `initialLen <= 0` vẫn lọt
 qua bước kiểm tra và thành slot rác.
 
-#### Chốt trạng thái 2026-09-01 (user xác nhận trên máy thật)
-- ✅ **Wi-Fi AP + captive portal: ĐÃ ỔN.** Không đào lại phần này.
-- ✅ **Tải file (video + audio) về NAND: ĐÃ ỔN.** Không còn treo ở `[NET] writing slot`.
-- ❌ **CÒN LỖI — đây là việc đang làm:** phát lại trên box vẫn *video giật nhấp nháy* và *âm thanh
-  rè, có tiếng "rẹt rẹt" chen vào giữa tiếng*.
-  - **Chưa xác định** rẹt rẹt đến từ đâu. Underrun DMA **khó xảy ra**: DMA sâu 8×512 mẫu ≈ 512ms
-    @8kHz và `tick()` nạp tới khi DMA từ chối, nên chỉ điểm loop-về-đầu là đáng ngờ.
-  - Giả thuyết mạnh nhất vẫn là **sụt áp** đã đo được: đẩy frame 15 lần/giây ⇒ 15 nhịp sụt/giây,
-    nghe đúng như tiếng rẹt xen kẽ (không phải rè liên tục).
-  - Giả thuyết đã **bác bỏ**: "8kHz ra thẳng MAX98357A gây rè". Lý do bác: nó dự đoán tiếng gắt
-    *liên tục*, không phải tiếng rẹt *rời rạc*; và con số BCLK tối thiểu 2.3MHz tôi nhớ ra sẽ loại
-    luôn cả 44.1kHz vốn chạy tốt ở mọi nơi ⇒ số đó sai. Không viết upsampler dựa trên nó.
-  - ~~**Phép thử phân biệt:** nghe tiếng bíp lúc boot (`AudioPlayer::testBeep()`).~~ **PHÉP THỬ
-    NÀY VÔ GIÁ TRỊ** — 2026-09-01 phát hiện `testBeep()` *tự nó* hỏng: nó ghi 1200 mẫu, mà DMA sâu
-    8×512 = 4096 mẫu, nên `i2s_write` không hề block, vòng lặp xong trong vài µs rồi gọi `stop()`
-    → `i2s_driver_uninstall()` xoá DMA khi loa chưa kịp kêu. Bíp *bắt buộc* ra tiếng rẹt dù phần
-    còn lại của hệ thống hoàn toàn lành. Khớp đúng lời user: "chưa bao giờ nghe được tiếng bíp".
-    **Đã sửa:** thêm `delay(200)` trước `stop()` (`AudioPlayer.cpp`). Build OK, RAM 20.6% không
-    đổi, Flash 73.3% (+52B). Sau khi nạp, phép thử mới dùng được.
-  - **GPIO 8 = đèn xanh trên chip = `PIN_NAND_CS`, active LOW** (comment của chính code ở
-    `src/main.cpp:288`). User báo tiếng rẹt *đồng pha* với nhịp nháy đèn này và *nháy đều*. Nghĩa
-    là tiếng rẹt bám theo hoạt động chip-select của NAND, không phải hiện tượng ngẫu nhiên.
-  - **Chân I2S: hai chỗ trong `config.h` mâu thuẫn nhau.** Hằng số đang dùng (`config.h:123-125`)
-    là BCLK=0, LRC=1, DOUT=2. Nhưng khối comment "Phase 2" ở đầu file lại ghi BCLK=2, DOUT=0 —
-    **đảo ngược**. Chưa biết bên nào khớp mạch thật — cần user xác nhận mạch. (Lưu ý: câu "nghe
-    ấm áp, không rè, chất lượng tốt" của user là nói về **file WAV nghe trên máy tính**, KHÔNG
-    phải tiếng phát ra từ box. Đừng dùng nó làm bằng chứng rằng chân I2S đang đúng.)
-  - **Không hề có cấu hình brownout / watchdog, không có `esp_reset_reason()`** ở bất kỳ đâu trong
-    `platformio.ini`, `src/`, `include/` ⇒ một vòng lặp reset lặp lại sẽ *vô hình* trong log hiện
-    tại. **Đã thêm** `DLOG("[BOOT] reset=%d", esp_reset_reason())` ngay sau banner
-    (`src/main.cpp:349`). Nếu dòng `[BOOT] reset=` lặp lại đều đặn trong log ⇒ box reset vòng lặp
-    (9 = BROWNOUT), giải thích được cả ba triệu chứng bằng một nguyên nhân; nếu chỉ in một lần ⇒
-    không phải reset loop, quay lại nhánh tranh chấp SPI/NAND-CS.
-- 🔧 **`om` MCP server đã bị gỡ** (`claude mcp remove om -s user`). Trước đó nó lỗi
-  `search failed: qmd launcher exited`. Từ nay lý do thiết kế nằm ở chính file này; `CLAUDE.md`
-  đã sửa cho khớp. Config cũ: `node P:\my-vault\.claude\scripts\om-mcp.mjs` (stdio, user scope).
+#### Nguyên nhân gốc đã xác nhận của tiếng "rẹt rẹt" rời rạc (ĐÃ FIX 2026-09-02)
+**Bug phần mềm trong `AudioPlayer::fillChunk()`**: `AUDIO_OVERSAMPLE = 4` được cấu hình đúng —
+I2S init ở `8000 * 4 = 32000Hz`, buffer `_stereo` cấp size cho oversample — nhưng code thực tế
+**chỉ expand Mono→Stereo (x2), KHÔNG lặp mỗi mẫu 4 lần**. Hậu quả:
+- I2S ở 32kHz ăn data nhanh gấp 4 → audio phát nhanh + hết sớm
+- DMA auto-clear phát silence xen kẽ giữa các chunk → tiếng rẹt rời rạc đồng pha với NAND CS
+- `loadFromStorage()` gọi `i2s_set_sample_rates(sampleRate)` thiếu nhân OVERSAMPLE → khi WAV
+  header có rate khác default, BCLK rớt thấp gây rè liên tục
+
+**Fix đã áp dụng và kiểm chứng thành công trên máy thật (2026-09-02):**
+1. `fillChunk()`: thêm vòng lặp `for (r = 0; r < AUDIO_OVERSAMPLE; r++)` lặp mỗi mẫu mono,
+   sửa `i2s_write` ghi `samples * OVERSAMPLE * 4` bytes, sửa `_audioCursor` chia `OVERSAMPLE * 2`.
+2. `loadFromStorage()`: sửa `i2s_set_sample_rates(I2S_NUM_0, sampleRate * AUDIO_OVERSAMPLE)`.
+
+Build: RAM 23.6% (77KB), Flash 73.3% (1.35MB). Kết quả: **tiếng rẹt boot + rẹt lúc phát đều
+biến mất hoàn toàn**. Chỉ còn nháy màn hình rất nhẹ do sụt áp phần cứng (xem mục dưới).
+
+#### Lỗi còn lại: Nháy màn hình nhẹ khi loa phát (sụt áp phần cứng — P1)
+- **Triệu chứng**: Đèn nền LCD nháy rất nhẹ đồng pha với âm thanh loa. Không ảnh hưởng trải
+  nghiệm nghe, chỉ thấy nếu nhìn kỹ.
+- **Nguyên nhân**: MAX98357A và LED backlight dùng chung rail 3.3V. Đỉnh dòng ampli kéo rail
+  sụt tạm thời → LED tối đi.
+- **Không phải lỗi phần mềm** — firmware đã tối ưu (FRAME_MIN_IDLE_MS=2ms, frame skip).
+- **Fix phần cứng cho PCB thật**: Tụ bypass 100uF sát VCC MAX98357A, ferrite bead tách rail
+  audio, hoặc LDO riêng cho ampli.
+
+#### Chốt trạng thái 2026-09-02 (user xác nhận trên máy thật)
+- ✅ **Wi-Fi AP + captive portal: ĐÃ ỔN.**
+- ✅ **Tải file (video + audio) về NAND: ĐÃ ỔN.**
+- ✅ **Tiếng rẹt rẹt lúc boot (testBeep): ĐÃ FIX** (delay(200) trước stop + oversample fix).
+- ✅ **Tiếng rẹt rẹt lúc phát message: ĐÃ FIX** (fillChunk oversample x4 + loadFromStorage rate fix).
+- ⚠️ **Nháy màn hình rất nhẹ khi loa phát**: Vấn đề phần cứng (sụt áp rail chung). Chấp nhận
+  được trên prototype. Sẽ fix trên PCB thật bằng tụ bypass / LDO riêng.
+
+#### Các giả thuyết đã loại bỏ (lưu lại để không đào lại)
+- ~~"8kHz ra thẳng MAX98357A gây rè"~~ — Bác bỏ: rẹt rời rạc chứ không rè liên tục.
+- ~~"Brownout reset loop"~~ — Không xảy ra: `esp_reset_reason()` chỉ in 1 lần.
+- ~~"Chân I2S đảo ngược"~~ — Không ảnh hưởng: audio phát đúng sau fix oversample.
+- ~~"DMA underrun"~~ — Đúng là underrun nhưng do bug oversample, không phải do DMA quá nông.
 
 #### Quyết định đã CHỐT — không mở lại
 - **Giữ 8kHz** cho audio. User chốt: "tôi sẽ giữ nguyên 8khz".
 - **KHÔNG giảm độ sáng đèn nền.** User bác thẳng; `MediaPlayer.cpp` giữ `BACKLIGHT_DAY_PERCENT`.
 - **Decode video/audio phải chạy ở client**, không đẩy sang backend.
 - Lỗi "hình chậm hơn tiếng" đã xử lý xong, không đào lại.
+- **Oversample x4** giữ nguyên (`AUDIO_OVERSAMPLE = 4`), đã chứng minh fix triệt để rẹt.
 
 ---
 

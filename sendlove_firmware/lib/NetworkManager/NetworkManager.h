@@ -152,6 +152,12 @@ private:
 
     void handleCaptiveRoot();
     void handleCaptiveSubmit();
+    /// Tra ve JSON danh sach Wi-Fi xung quanh. Quet bat dong bo nen khong chan
+    /// web server: lan goi dau tra {"status":"scanning"}, client poll lai.
+    void handleCaptiveScan();
+    /// Cac URL do he dieu hanh goi de kiem tra "co internet khong". Tra 302 ve
+    /// trang portal de may tu bat cua so dang nhap.
+    void handleCaptiveProbe();
     String buildCaptivePortalHTML();
 };
 

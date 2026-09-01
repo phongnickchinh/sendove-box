@@ -69,6 +69,13 @@ bool NetworkManager::isConnected() const {
 }
 
 bool NetworkManager::ensureConnected(uint32_t timeoutMs) {
+    // Dang chay captive portal: nhanh "full WiFi restart" ben duoi chuyen sang
+    // WIFI_STA, pha huy SoftAP dang phuc vu nguoi dung -> AP bat len roi tat.
+    if (isProvisioningActive()) {
+        DLOG("[NET] ensureConnected skip: provisioning AP");
+        return false;
+    }
+
     if (WiFi.status() == WL_CONNECTED) {
         return true;
     }
@@ -220,20 +227,112 @@ int NetworkManager::getWifiRSSI() const {
     return WiFi.RSSI();
 }
 
+// Cac duong dan he dieu hanh goi de do "co internet khong". Tra 302 o day thi
+// may bao "can dang nhap" va tu bung trang portal len.
+//   Android : /generate_204, /gen_204
+//   Apple   : /hotspot-detect.html, /library/test/success.html
+//   Windows : /connecttest.txt, /ncsi.txt, /redirect, /fwlink
+// Luu y: KHONG duoc tra dung noi dung Windows cho (Microsoft NCSI...) o cac
+// duong dan nay, vi lam vay Windows se ket luan la mang co internet that.
+static const char* const CAPTIVE_PROBE_PATHS[] = {
+    "/generate_204", "/gen_204",
+    "/hotspot-detect.html", "/library/test/success.html",
+    "/connecttest.txt", "/ncsi.txt", "/redirect", "/fwlink"
+};
+
 void NetworkManager::startProvisioningAP(const char* apSsid, const char* apPassword) {
-    WiFi.mode(WIFI_AP);
+    // Danh dau dang provisioning NGAY tu dau. isProvisioningActive() dua vao
+    // _captiveServer khac null; neu de viec cap phat xuong duoi thi trong luc
+    // dung AP van con mot khe cua so ma ensureConnected() tuong la khong
+    // provisioning va di keo Wi-Fi ve che do STA.
+    if (_captiveServer == nullptr) _captiveServer = new WebServer(80);
+    _provisioningDone = false;
+
+    // Khong tat auto-reconnect thi lop Wi-Fi cua ESP van tu thu ket noi lai bang
+    // credential cu va keo chip ra khoi che do AP chi sau vai giay.
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(true, true);
+    delay(100);
+
+    // AP_STA chu khong phai AP: quet Wi-Fi can giao dien STA song. Dat mode SAU
+    // disconnect() o tren de STA len o trang thai roi, khong tu di ket noi.
+    WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(apSsid, apPassword);
 
+    // Moi truy van DNS deu tra ve IP cua box -> go ten mien nao cung ra portal.
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
-
-    if (_captiveServer == nullptr) _captiveServer = new WebServer(80);
 
     _captiveServer->on("/", [this]() { handleCaptiveRoot(); });
     _captiveServer->on("/save", [this]() { handleCaptiveSubmit(); });
+    _captiveServer->on("/scan", [this]() { handleCaptiveScan(); });
+    for (size_t i = 0; i < sizeof(CAPTIVE_PROBE_PATHS) / sizeof(CAPTIVE_PROBE_PATHS[0]); i++) {
+        _captiveServer->on(CAPTIVE_PROBE_PATHS[i], [this]() { handleCaptiveProbe(); });
+    }
+    // Giu nguyen cach cu: duong dan la tra thang trang portal (200). Doi sang
+    // 302 o day se lam chinh cac request con cua trang portal bi day di lung tung.
     _captiveServer->onNotFound([this]() { handleCaptiveRoot(); });
 
     _captiveServer->begin();
-    _provisioningDone = false;
+
+    // Quet truoc mot lan de den luc nguoi dung mo trang thi danh sach da co san.
+    WiFi.scanNetworks(true, false);
+}
+
+void NetworkManager::handleCaptiveProbe() {
+    if (!_captiveServer) return;
+    String target = "http://" + WiFi.softAPIP().toString() + "/";
+    _captiveServer->sendHeader("Location", target, true);
+    _captiveServer->sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    _captiveServer->send(302, "text/plain", "");
+}
+
+// SSID duoc phep chua dau nhay va dau gach nguoc -> phai escape truoc khi nhet
+// vao JSON, khong noi chuoi tho.
+static String jsonEscape(const String& s) {
+    String out;
+    out.reserve(s.length() + 8);
+    for (size_t i = 0; i < s.length(); i++) {
+        // unsigned: SSID la UTF-8, byte > 127 khi de char co dau se thanh am
+        // va bi cat nham o nhanh ky tu dieu khien ben duoi.
+        unsigned char ch = (unsigned char)s[i];
+        if (ch == '"' || ch == 0x5C) { out += (char)0x5C; out += (char)ch; }
+        else if (ch < 0x20)            { out += ' '; }
+        else                            { out += (char)ch; }
+    }
+    return out;
+}
+
+void NetworkManager::handleCaptiveScan() {
+    if (!_captiveServer) return;
+
+    int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_FAILED) {          // -2: chua chay lan nao (hoac vua xoa ket qua)
+        WiFi.scanNetworks(true, false);
+        _captiveServer->send(200, "application/json", "{\"status\":\"scanning\"}");
+        return;
+    }
+    if (n == WIFI_SCAN_RUNNING) {         // -1: dang quet
+        _captiveServer->send(200, "application/json", "{\"status\":\"scanning\"}");
+        return;
+    }
+
+    String json = "{\"status\":\"done\",\"nets\":[";
+    bool first = true;
+    for (int i = 0; i < n; i++) {
+        String ssid = WiFi.SSID(i);
+        if (ssid.length() == 0) continue;  // mang an, khong bam chon duoc
+        if (!first) json += ',';
+        first = false;
+        json += "{\"ssid\":\"" + jsonEscape(ssid) + "\",\"rssi\":" + String(WiFi.RSSI(i))
+              + ",\"lock\":" + String(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? 0 : 1) + "}";
+    }
+    json += "]}";
+
+    // Xoa ket qua -> scanComplete() ve lai -2, nen lan poll sau se quet moi.
+    // Do la hanh vi mong muon cho nut "Quet lai".
+    WiFi.scanDelete();
+    _captiveServer->send(200, "application/json", json);
 }
 
 bool NetworkManager::isProvisioningDone() const {
@@ -323,6 +422,13 @@ bool NetworkManager::isWebServerRunning() const {
 #include "ConfigManager.h"
 #include "DisplayDriver.h"
 
+// Bao ve buoc gianh quyen co _isSyncing giua cac task khac do uu tien.
+static portMUX_TYPE s_syncMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Bao lau khong nhan them byte nao thi coi la stream chet. http.setTimeout(30000)
+// chi ap cho mot lan doc, khong chot duoc ca vong lap.
+static const uint32_t DOWNLOAD_STALL_TIMEOUT_MS = 10000;
+
 struct FirebaseTaskParams {
     NetworkManager* self;
     uint8_t batteryPercent;
@@ -332,9 +438,18 @@ struct FirebaseTaskParams {
 };
 
 void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
-    if (_isSyncing) return;
+    // Hai task khac do uu tien (UIController=5, MediaPlayer=3) cung goi ham nay.
+    // Doc roi ghi _isSyncing thanh hai lenh rieng thi ca hai deu co the lot qua
+    // va tao 2 task WakeSync ghi de len cung mot slot flash.
+    bool claimed = false;
+    portENTER_CRITICAL(&s_syncMux);
+    if (!_isSyncing) {
+        _isSyncing = true;
+        claimed = true;
+    }
+    portEXIT_CRITICAL(&s_syncMux);
+    if (!claimed) return;
 
-    _isSyncing = true;
     FirebaseTaskParams* p = new FirebaseTaskParams{this, batteryPercent, isCharging, storage, nullptr};
     BaseType_t res = xTaskCreate(wakeupSyncTaskWorker, "WakeSync", 12288, p, 2, nullptr);
     if (res != pdPASS) {
@@ -762,6 +877,12 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         DLOG("[NET] writing slot %s", writeSlotId);
                         uint8_t buffer[256];
                         bool writeError = false;
+                        // Voi len == -1 (chunked, khong co Content-Length) dieu kien
+                        // vong lap khong bao gio tu sai: chi thoat khi server dong
+                        // ket noi. Mot stream nua-mo khong gui byte nao se treo o day
+                        // vinh vien. Chot lai bang moc thoi gian co tien do that su.
+                        uint32_t lastProgressMs = millis();
+                        int lastLoggedRead = 0;
                         while (http.connected() && (len > 0 || len == -1)) {
                             size_t sizeAvail = stream->available();
                             if (sizeAvail) {
@@ -775,7 +896,21 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                     }
                                     totalRead += c;
                                     if (len > 0) len -= c;
+                                    lastProgressMs = millis();
+                                    // Log thua tay (moi 16KB) de khong doi nhip vong lap.
+                                    if (totalRead - lastLoggedRead >= 16384) {
+                                        lastLoggedRead = totalRead;
+                                        DLOG("[NET] dl %d/%d", totalRead, initialLen);
+                                    }
                                 }
+                            }
+                            if (millis() - lastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
+                                DLOG("[NET] dl STALL %d/%d", totalRead, initialLen);
+                                // writeError = true de slot dang do bi loai o buoc kiem
+                                // tra ben duoi. Khong co dong nay thi mot file tai dang
+                                // do voi initialLen <= 0 van lot qua -> slot rac.
+                                writeError = true;
+                                break;
                             }
                             delay(1);
                         }
@@ -822,6 +957,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                             // Stream PCM data vào slot (không gọi closeWrite vì không đổi metadata)
                                             uint8_t abuf[256];
                                             int     aTotalRead = 0;
+                                            uint32_t aLastProgressMs = millis();
                                             while (httpAudio.connected() && (aLen > 0 || aLen == -1)) {
                                                 size_t av = aStream->available();
                                                 if (av) {
@@ -831,7 +967,13 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                                         storage->writeChunk(abuf, c);
                                                         aTotalRead += c;
                                                         if (aLen > 0) aLen -= c;
+                                                        aLastProgressMs = millis();
                                                     }
+                                                }
+                                                // Cung dang treo vo han nhu vong lap video.
+                                                if (millis() - aLastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
+                                                    DLOG("[NET] audio dl STALL %d bytes", aTotalRead);
+                                                    break;
                                                 }
                                                 delay(1);
                                             }

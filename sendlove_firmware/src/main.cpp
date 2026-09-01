@@ -220,12 +220,19 @@ void Task_UIController(void *pvParameters) {
     uint32_t now = millis();
     static uint32_t lastIntervalSyncMs = millis();
 
+    // Trong luc sync chay ngam, day moc thoi gian theo -> chu ky 10s duoc tinh
+    // tu luc sync KET THUC, thay vi tu luc bat dau (tai xong 30s roi sync lai ngay).
+    if (appCtx.network.isSyncing()) {
+        lastIntervalSyncMs = now;
+    }
+
     // Periodic check if device is kept awake in Standby UI (every 10s)
     bool isStorageFull = (appCtx.storage && appCtx.storage->isFull());
-    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !appCtx.network.isFirebaseSyncing() && currentAppState == AppState::STATE_STANDBY) {
+    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
-        appCtx.network.ensureConnected();
-        appCtx.network.triggerNtpSync();
+        // triggerFirebaseSync -> syncWakeup da tu goi ensureConnected() va
+        // syncNtpTime(). Goi them o day chi lam task uu tien 5 dung toi 5s va
+        // tao them mot task NtpSync chay dua voi WakeSync tren cung s_ntpSyncDone.
         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
         bool isCharging = appCtx.powerManager.isCharging();
         appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
@@ -233,7 +240,7 @@ void Task_UIController(void *pvParameters) {
 
     if (currentAppState != AppState::STATE_VIDEO &&
         !appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
-        !appCtx.network.isFirebaseSyncing() &&
+        !appCtx.network.isSyncing() &&
         (now - lastUserActivity >= activeSleepTimeoutMs)) {
       DLOG("[SLP] timeout -> sleeping");
       
@@ -297,8 +304,7 @@ void Task_UIController(void *pvParameters) {
       if (appCtx.storage && appCtx.storage->isFull()) {
           DLOG("[SLP] post-wakeup sync skip: FULL");
       } else {
-          appCtx.network.ensureConnected();
-          appCtx.network.triggerNtpSync();
+          // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
           uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
           bool isCharging = appCtx.powerManager.isCharging();
           appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
@@ -393,7 +399,6 @@ void setup() {
 
   if (appCtx.network.isConnected()) {
     DLOG("[BOOT] WiFi OK -> NTP+Firebase");
-    appCtx.network.triggerNtpSync();
     appCtx.network.startWebServer(OTA_HOSTNAME);
     if (appCtx.network.getWebServer() != nullptr) {
       appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());

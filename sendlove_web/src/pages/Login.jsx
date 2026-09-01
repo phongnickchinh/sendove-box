@@ -51,11 +51,25 @@ export default function Login() {
         
         {/* Logo / Header */}
         <div>
-          <h1 className="text-gradient" style={{ fontSize: '3rem', marginBottom: '8px' }}>
-            Sendlove Box
+          <div className="text-gradient" style={{ 
+            fontFamily: 'var(--font-heading)', 
+            fontSize: '2.5rem', 
+            fontWeight: 700,
+            marginBottom: '4px'
+          }}>
+            Sendlovebox
+          </div>
+          <h1 style={{ 
+            fontSize: '1.5rem', 
+            fontWeight: 700, 
+            fontFamily: 'var(--font-body)', 
+            color: 'var(--color-text-main)', 
+            marginBottom: '8px' 
+          }}>
+            Get Started now
           </h1>
           <p style={{ color: 'var(--color-text-muted)', fontSize: '0.95rem' }}>
-            Gửi yêu thương qua những thông điệp nhỏ bé.
+            Create an account or log in to explore our app
           </p>
         </div>
 

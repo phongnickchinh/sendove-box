@@ -1,0 +1,285 @@
+/* ============================================================
+   Sendlove Box — primitive dựng từ auto-layout của file Figma.
+   Quy tắc chuyển đổi:
+     AL(VERTICAL|HORIZONTAL)   -> flex container
+     itemSpacing               -> gap
+     padding[T,R,B,L]          -> padding
+     primary/counterAxisAlign  -> justify-content / align-items
+     fillW(node)               -> align-self: stretch
+     acts() ghim y=932-34-h    -> margin-top:auto (không position:absolute)
+   Toạ độ tuyệt đối của thiết kế (430x932, thân y=131) trở thành một cột
+   flex cao 100dvh: giữ nguyên thứ tự, khoảng cách và tỉ lệ, nhưng không
+   vỡ khi bàn phím mobile đẩy viewport hay khi nội dung dài ra.
+   ============================================================ */
+
+/* ---------- nền trang + khung cột ---------- */
+.sl-page {
+  min-height: 100dvh;
+  background: var(--caramel-50);
+  font-family: var(--font);
+  color: var(--caramel-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* index.css cũ đặt h1-h6 sang Dancing Script màu hồng và ép font cho input.
+   Các màn đã chuyển sang hệ mới phải thoát khỏi hai luật đó; giữ nguyên
+   index.css để những màn chưa chuyển không đổi dáng giữa chừng. */
+.sl-page h1, .sl-page h2, .sl-page h3,
+.sl-page h4, .sl-page h5, .sl-page h6 {
+  font-family: var(--font);
+}
+.sl-page button, .sl-page input, .sl-page textarea, .sl-page select {
+  font-family: var(--font);
+}
+
+.sl-shell {
+  width: 100%;
+  max-width: var(--frame-w);
+  margin-inline: auto;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--caramel-50);
+  position: relative;
+}
+
+/* Desktop: thiết kế vẫn là mobile, nên giữ nguyên cột 430 và chỉ tách nó
+   khỏi nền bằng một viền mảnh — không dựng khung điện thoại giả. */
+@media (min-width: 768px) {
+  .sl-page { background: var(--rose-50); padding: var(--sp-8) 0; }
+  .sl-shell {
+    min-height: min(932px, calc(100dvh - var(--sp-8) * 2));
+    border: 1px solid var(--rose-100);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+  }
+}
+
+/* ---------- appbar ---------- */
+.sl-appbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: calc(var(--safe-top) + var(--sp-3)) var(--sp-5) var(--sp-3);
+  min-height: 44px;
+}
+.sl-appbar__spacer { flex: 1 1 auto; }
+
+.sl-iconbtn {
+  flex: 0 0 auto;
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; cursor: pointer;
+  border-radius: var(--r-full);
+  color: var(--caramel-800);
+}
+.sl-iconbtn:hover { background: var(--rose-50); }
+
+.sl-step {
+  flex: 0 0 auto;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-full);
+  background: var(--rose-50);
+  color: var(--rose-700);
+  font-size: 12px; font-weight: 600; line-height: 1.4;
+}
+
+/* ---------- thân màn hình: body(frame) pad [8,20,10,20] gap 16 ---------- */
+.sl-body-col {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-5) 10px;
+  min-height: 0;
+}
+/* Man ket qua khong co appbar. Thiet ke dat than o y=131 roi cong them
+   paddingTop 72 -> noi dung bat dau ~203 trong khung 932; o day la
+   safe-top + 72 (khoang appbar) + 72. */
+.sl-body-col--center {
+  align-items: center; text-align: center;
+  padding-top: calc(var(--safe-top) + 144px);
+}
+
+/* ---------- hdr(): tiêu đề + "Love to <tên>" ---------- */
+.sl-hdr { display: flex; flex-direction: column; gap: 2px; }
+.sl-hdr__to {
+  display: flex; align-items: center; gap: var(--sp-1);
+  color: var(--neutral-500);
+}
+
+/* ---------- thẻ: r16 sw1, r12 sw0.5, KHÔNG đổ bóng ---------- */
+.sl-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4);
+  border-radius: 16px;
+  background: var(--neutral-0);
+  border: 1px solid var(--caramel-300);
+}
+.sl-card--center { align-items: center; justify-content: center; text-align: center; }
+
+.sl-listcard {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--neutral-0);
+  border: 0.5px solid var(--caramel-300);
+  width: 100%;
+  text-align: left;
+}
+.sl-listcard__mid { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+
+/* ---------- chip 44x44 r8 ---------- */
+.sl-chip {
+  flex: 0 0 auto;
+  width: 44px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-sm);
+  background: var(--rose-200);
+  color: var(--rose-800);
+}
+
+/* ---------- circle(): vòng tròn icon ---------- */
+.sl-circle {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-full);
+}
+
+/* ---------- tips(): dải nhắc nhỏ ---------- */
+.sl-tips {
+  display: flex; align-items: flex-start; gap: 5px;
+  color: var(--rose-800);
+  font-size: 12px; line-height: 1.4;
+}
+.sl-tips svg { flex: 0 0 auto; margin-top: 1px; }
+
+/* ---------- btn(): 390x44, r8. Chữ trên nút hồng là caramel/900 ---------- */
+.sl-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-2);
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-sm);
+  border: none;
+  font-family: var(--font);
+  font-size: 14px; font-weight: 600; line-height: 1.4;
+  cursor: pointer;
+  transition: filter .18s ease, background .18s ease;
+}
+.sl-btn:disabled { opacity: .5; cursor: not-allowed; }
+.sl-btn--pri { background: var(--rose-400); color: var(--caramel-900); }
+.sl-btn--pri:hover:not(:disabled) { filter: brightness(.96); }
+.sl-btn--gho { background: transparent; color: var(--rose-700); }
+.sl-btn--gho:hover:not(:disabled) { background: var(--rose-50); }
+.sl-btn--block { width: 100%; }
+
+/* ---------- acts(): hàng nút ghim đáy, cách safe-area 34 ----------
+   Nằm trong .sl-body-col nên thừa hưởng padding ngang 20 của thân; 24 ở đây
+   cộng với 10 padding-bottom của thân ra đúng 34 như trong thiết kế. */
+.sl-acts {
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-4) 0 calc(var(--safe-bottom) + var(--sp-6));
+  align-self: stretch;
+}
+
+/* ---------- field: nhãn + ô nhập r8 sw0.5 ---------- */
+.sl-field { display: flex; flex-direction: column; gap: 6px; }
+.sl-input {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--neutral-0);
+  border: 0.5px solid var(--caramel-300);
+  font-family: var(--font);
+  font-size: 15px; line-height: 1.4;
+  color: var(--caramel-900);
+  resize: vertical;
+}
+.sl-input::placeholder { color: var(--neutral-500); }
+.sl-input:focus {
+  outline: none;
+  border-color: var(--rose-400);
+  box-shadow: 0 0 0 3px var(--rose-50);
+}
+
+/* ---------- lưới chọn loại nội dung ---------- */
+.sl-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.sl-typecard {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-5) var(--sp-3);
+  border-radius: 16px;
+  background: var(--neutral-0);
+  border: 1px solid var(--caramel-300);
+  cursor: pointer;
+  font-family: var(--font);
+  transition: border-color .18s ease, background .18s ease;
+}
+.sl-typecard:hover { border-color: var(--rose-400); background: var(--rose-50); }
+
+/* ---------- scrim + modal (nơi DUY NHẤT có đổ bóng) ---------- */
+.sl-scrim {
+  position: absolute; inset: 0;
+  background: rgba(61, 42, 32, 0.45);
+  display: flex; flex-direction: column; justify-content: flex-end;
+  padding: var(--sp-5) var(--sp-5) calc(var(--safe-bottom) + 34px);
+  z-index: 10;
+}
+.sl-modal {
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  padding: var(--sp-6);
+  border-radius: var(--r-lg);
+  background: var(--neutral-0);
+  box-shadow: var(--shadow-modal);
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+/* ---------- progress ---------- */
+.sl-progress { display: flex; flex-direction: column; gap: var(--sp-2); }
+.sl-track {
+  height: 8px; border-radius: var(--r-full);
+  background: var(--neutral-100); overflow: hidden;
+}
+.sl-track__bar {
+  height: 100%; border-radius: var(--r-full);
+  background: var(--rose-400);
+  transition: width .3s ease;
+}
+
+/* ---------- steps trong popup ---------- */
+.sl-steps { display: flex; flex-direction: column; gap: 10px; }
+.sl-step-row { display: flex; align-items: center; gap: var(--sp-2); font-size: 12px; line-height: 1.4; }
+.sl-step-row--done { color: var(--neutral-500); font-weight: 400; }
+.sl-step-row--now  { color: var(--caramel-900); font-weight: 600; }
+.sl-step-row--wait { color: var(--neutral-400); font-weight: 400; }
+
+/* ---------- khối lý do lỗi ---------- */
+.sl-reason {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--error-bg);
+  color: var(--error-text);
+  font-size: 14px; font-weight: 500; line-height: 1.5;
+  align-self: stretch;
+  text-align: left;
+}
+
+/* ---------- khung xem trước 1:1 = màn hộp 240x240 ---------- */
+.sl-preview {
+  width: 240px; height: 240px;
+  max-width: 100%;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--caramel-100);
+  position: relative;
+}
+.sl-preview > video,
+.sl-preview > img { width: 100%; height: 100%; object-fit: cover; display: block; }

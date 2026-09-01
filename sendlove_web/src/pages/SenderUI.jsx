@@ -1,23 +1,49 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import VideoInput from '../components/sender/VideoInput';
 import ImageInput from '../components/sender/ImageInput';
 import VoiceInput from '../components/sender/VoiceInput';
 import EncodingProgress from '../components/sender/EncodingProgress';
+import Icon from '../components/ui/Icon';
+import { Screen, AppBar, Body, Actions, Button, Header, Tips } from '../components/ui/Screen';
 import { encodeVideoToBin, encodeImageToBin, extractAudioFromVideo } from '../utils/mediaEncoder';
 import { uploadMessage } from '../utils/mediaUploader';
+
+const TYPES = [
+  { key: 'video', icon: 'video', label: 'Video', hint: 'Tối đa 15 giây' },
+  { key: 'image', icon: 'image', label: 'Ảnh', hint: 'Khung vuông' },
+  { key: 'voice', icon: 'mic', label: 'Ghi âm', hint: 'Tối đa 15 giây' },
+  { key: 'text', icon: 'text', label: 'Văn bản', hint: 'Gửi được ngay' },
+];
+
+const STEP2_TITLE = {
+  video: 'Gửi một đoạn video',
+  image: 'Gửi một bức ảnh',
+  voice: 'Ghi một lời nhắn',
+  text: 'Gửi một dòng chữ',
+};
 
 export default function SenderUI() {
   const { boxId } = useParams();
   const navigate = useNavigate();
-  
-  const [step, setStep] = useState(1); // 1: Choose Type, 2: Input Content, 3: Encode & Upload
+
+  const [step, setStep] = useState(1); // 1: Chọn loại, 2: Nhập nội dung, 3: Mã hoá & gửi
   const [type, setType] = useState(null); // 'video' | 'image' | 'voice' | 'text'
   const [text, setText] = useState('');
-  
+
   // Encoding & Uploading states
   const [phase, setPhase] = useState('encoding'); // 'encoding' | 'uploading' | 'done' | 'error'
   const [progress, setProgress] = useState(0);
+  // Thông tin hiển thị trên thẻ tóm tắt của bước 3
+  const [summary, setSummary] = useState({ fileName: null, duration: 0 });
+  // Giữ lại media của lần gửi gần nhất để nút "Thử lại" gửi lại đúng file đó,
+  // đúng như dòng "còn giữ trên máy này" ở màn báo lỗi.
+  const [lastMedia, setLastMedia] = useState(null);
+  // Mỗi lần gửi có một số thứ tự; promise của lần cũ không được ghi đè
+  // trạng thái của lần mới (xảy ra khi người dùng bấm "Để sau" rồi gửi tiếp).
+  const sendIdRef = useRef(0);
+
+  const boxName = `Hộp ${boxId}`;
 
   const handleTypeSelect = (selectedType) => {
     setType(selectedType);
@@ -30,19 +56,26 @@ export default function SenderUI() {
   };
 
   const processAndUpload = async (mediaData) => {
+    const sendId = ++sendIdRef.current;
+    const alive = () => sendIdRef.current === sendId;
+    const setProgressIfAlive = (v) => { if (alive()) setProgress(v); };
+
+    setLastMedia(mediaData);
     setStep(3);
     setPhase('encoding');
     setProgress(0);
 
     try {
       let payload = { type, text };
-      
+
       if (type === 'video') {
         const file = mediaData;
-        const encodeRes = await encodeVideoToBin(file, setProgress);
+        setSummary({ fileName: file.name, duration: 0 });
+        const encodeRes = await encodeVideoToBin(file, setProgressIfAlive);
+        setSummary({ fileName: file.name, duration: encodeRes.duration });
         setProgress(0); // Reset progress cho bước trích xuất âm thanh
-        const voiceBlob = await extractAudioFromVideo(file, setProgress);
-        
+        const voiceBlob = await extractAudioFromVideo(file, setProgressIfAlive);
+
         payload = {
           ...payload,
           binBlob: encodeRes.binBlob,
@@ -52,14 +85,14 @@ export default function SenderUI() {
           metadata: {
             duration: encodeRes.duration,
             frameCount: encodeRes.frameCount,
-            width: 128,
-            height: 160
+            width: 240,
+            height: 240
           }
         };
       } else if (type === 'image') {
         const file = mediaData;
         const encodeRes = await encodeImageToBin(file);
-        
+
         payload = {
           ...payload,
           binBlob: encodeRes.binBlob,
@@ -67,13 +100,14 @@ export default function SenderUI() {
           originalBlob: file,
           metadata: {
             frameCount: 1,
-            width: 128,
-            height: 160
+            width: 240,
+            height: 240
           }
         };
       } else if (type === 'voice') {
         const { wavBlob, duration } = mediaData; // from VoiceRecorder
-        
+        setSummary({ fileName: null, duration });
+
         payload = {
           ...payload,
           voiceBlob: wavBlob,
@@ -84,82 +118,128 @@ export default function SenderUI() {
       setPhase('uploading');
       setProgress(0);
 
-      await uploadMessage(boxId, payload, setProgress);
+      await uploadMessage(boxId, payload, setProgressIfAlive);
 
-      setPhase('done');
+      if (alive()) setPhase('done');
     } catch (err) {
       console.error(err);
-      setPhase('error');
+      if (alive()) setPhase('error');
     }
   };
 
-  return (
-    <div style={{ maxWidth: '400px', margin: '0 auto', padding: '20px' }}>
-      <h2 style={{ textAlign: 'center', marginBottom: '30px' }}>Gửi Yêu Thương</h2>
-      
-      {step === 1 && (
-        <div className="type-selection" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-          <button className="glass-panel" onClick={() => handleTypeSelect('video')} style={{ padding: '30px 10px', fontSize: '18px', border: 'none', cursor: 'pointer' }}>
-            <span style={{ fontSize: '30px', display: 'block', marginBottom: '10px' }}>🎥</span>
-            Video
-          </button>
-          <button className="glass-panel" onClick={() => handleTypeSelect('image')} style={{ padding: '30px 10px', fontSize: '18px', border: 'none', cursor: 'pointer' }}>
-            <span style={{ fontSize: '30px', display: 'block', marginBottom: '10px' }}>🖼️</span>
-            Ảnh
-          </button>
-          <button className="glass-panel" onClick={() => handleTypeSelect('voice')} style={{ padding: '30px 10px', fontSize: '18px', border: 'none', cursor: 'pointer' }}>
-            <span style={{ fontSize: '30px', display: 'block', marginBottom: '10px' }}>🎤</span>
-            Ghi âm
-          </button>
-          <button className="glass-panel" onClick={() => handleTypeSelect('text')} style={{ padding: '30px 10px', fontSize: '18px', border: 'none', cursor: 'pointer' }}>
-            <span style={{ fontSize: '30px', display: 'block', marginBottom: '10px' }}>✍️</span>
-            Văn bản
-          </button>
-          
-          <button 
-            className="glass-button secondary" 
-            style={{ gridColumn: '1 / -1', marginTop: '20px' }}
-            onClick={() => navigate(`/box/${boxId}/sender/dashboard`)}
-          >
-            Lịch sử tin nhắn
-          </button>
-        </div>
-      )}
+  // ---------- Bước 3: popup mã hoá / màn kết quả ----------
+  if (step === 3) {
+    return (
+      <EncodingProgress
+        phase={phase}
+        progress={progress}
+        type={type}
+        duration={summary.duration}
+        fileName={summary.fileName}
+        boxName={boxName}
+        onHome={() => navigate('/dashboard')}
+        onRetry={() => processAndUpload(lastMedia)}
+        onSendAnother={handleCancel}
+        onLeave={handleCancel}
+      />
+    );
+  }
 
-      {step === 2 && (
-        <div className="input-section">
-          {type !== 'voice' && (
-            <textarea 
-              className="glass-input" 
-              placeholder="Thêm lời nhắn (tuỳ chọn)..."
+  // ---------- Bước 1: chọn loại nội dung ----------
+  if (step === 1) {
+    return (
+      <Screen>
+        <AppBar step="Bước 1/3" />
+        <Body>
+          <Header title="Gửi yêu thương" to={boxName} />
+
+          <div className="sl-grid2">
+            {TYPES.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className="sl-typecard"
+                onClick={() => handleTypeSelect(t.key)}
+              >
+                <span className="sl-chip">
+                  <Icon name={t.icon} size={24} />
+                </span>
+                <span className="sl-label-s">{t.label}</span>
+                <span className="sl-caption">{t.hint}</span>
+              </button>
+            ))}
+          </div>
+
+          <Tips>Nội dung chỉ hiện trên hộp của bạn, không đăng ở đâu khác.</Tips>
+
+          <Actions>
+            <Button kind="gho" onClick={() => navigate('/dashboard')}>
+              Lịch sử tin nhắn
+            </Button>
+          </Actions>
+        </Body>
+      </Screen>
+    );
+  }
+
+  // ---------- Bước 2: nhập nội dung ----------
+  return (
+    <Screen>
+      <AppBar step="Bước 2/3" onBack={handleCancel} />
+      <Body>
+        <Header title={STEP2_TITLE[type]} to={boxName} />
+
+        {/* Màn ghi âm KHÔNG có ô nhập lời nhắn — loại voice không mang text. */}
+        {type !== 'voice' && type !== 'text' && (
+          <div className="sl-field">
+            <label className="sl-label" htmlFor="sl-note">Lời nhắn (tuỳ chọn)</label>
+            <textarea
+              id="sl-note"
+              className="sl-input"
+              rows={3}
+              placeholder="Vài chữ gửi kèm..."
               value={text}
               onChange={(e) => setText(e.target.value)}
-              style={{ marginBottom: '20px', minHeight: '80px', resize: 'vertical' }}
             />
-          )}
+          </div>
+        )}
 
-          {type === 'video' && <VideoInput onVideoSelect={processAndUpload} onCancel={handleCancel} />}
-          {type === 'image' && <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} />}
-          {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} />}
-          {type === 'text' && (
-            <div className="glass-panel" style={{ padding: '20px', textAlign: 'center' }}>
-              <button className="glass-button primary" onClick={() => processAndUpload(null)}>Gửi Text</button>
-              <button className="glass-button secondary" onClick={handleCancel} style={{ marginLeft: '10px' }}>Hủy</button>
+        {type === 'video' && <VideoInput onVideoSelect={processAndUpload} onCancel={handleCancel} />}
+        {type === 'image' && <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} />}
+        {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} />}
+
+        {type === 'text' && (
+          <>
+            <div className="sl-field">
+              <label className="sl-label" htmlFor="sl-text">Lời nhắn của bạn</label>
+              <textarea
+                id="sl-text"
+                className="sl-input"
+                rows={6}
+                placeholder="Viết điều bạn muốn hiện lên màn hình hộp"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+              />
             </div>
-          )}
-        </div>
-      )}
 
-      {step === 3 && (
-        <EncodingProgress 
-          phase={phase} 
-          progress={progress} 
-          onCancel={() => {
-            if (phase === 'done') navigate(`/box/${boxId}/sender/dashboard`);
-            else setStep(1);
-          }} 
-        />
-      )}
-    </div>
+            <div className="sl-card sl-card--center">
+              <span className="sl-chip"><Icon name="text" size={24} /></span>
+              <span className="sl-caption">
+                Chỉ có chữ — không cần mã hoá nên gửi được ngay.
+              </span>
+            </div>
+
+            <Tips>Hiện trên màn hình 240x240 của hộp.</Tips>
+
+            <Actions>
+              <Button kind="pri" disabled={!text.trim()} onClick={() => processAndUpload(null)}>
+                Gửi
+              </Button>
+              <Button kind="gho" onClick={handleCancel}>Huỷ</Button>
+            </Actions>
+          </>
+        )}
+      </Body>
+    </Screen>
   );
 }

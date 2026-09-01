@@ -2,7 +2,12 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Navbar from './Navbar';
 
-export default function AuthRoute() {
+/**
+ * bare = route tự dựng toàn bộ màn hình (luồng gửi theo thiết kế mới có
+ * appbar riêng và chạy tràn viền). Vẫn chặn khách chưa đăng nhập, chỉ bỏ
+ * Navbar và khung <main> có padding.
+ */
+export default function AuthRoute({ bare = false }) {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -17,6 +22,8 @@ export default function AuthRoute() {
   if (!user) {
     return <Navigate to="/" replace />;
   }
+
+  if (bare) return <Outlet />;
 
   // Nếu đã đăng nhập, render Navbar và các child routes (Outlet)
   return (

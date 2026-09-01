@@ -30,7 +30,7 @@ public:
     /// Trả về true nếu tìm thấy audio hợp lệ.
     bool loadFromStorage(IStorageProvider* storage, uint32_t videoDataSize, uint32_t appendedSize = 0);
 
-    /// Nạp trước 2 DMA buffer đầu tiên để tránh tiếng click khi bắt đầu.
+    /// Xoa DMA roi nap day truoc khi phat (goi ca luc bat dau lan khi loop).
     void prefill();
 
     /// Gọi mỗi frame để refill I2S DMA buffer. Non-blocking.
@@ -60,7 +60,8 @@ private:
     int16_t _stereo[AUDIO_PCM_CHUNK_SIZE / 2 * 2];
 
     /// Đọc 1 chunk PCM từ NAND và ghi vào I2S (Mono → Stereo expand)
-    void fillChunk();
+    /// Tra ve true neu DMA nhan het chunk (con cho, nen nap tiep).
+    bool fillChunk();
 };
 
 #endif // AUDIO_PLAYER_H

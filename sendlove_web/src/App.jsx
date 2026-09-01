@@ -18,8 +18,12 @@ function App() {
         <Route element={<AuthRoute />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/pair" element={<PairBox />} />
-          <Route path="/box/:boxId/sender" element={<SenderUI />} />
           <Route path="/box/:boxId/receiver" element={<ReceiverUI />} />
+        </Route>
+
+        {/* Luồng gửi dựng nguyên màn hình theo thiết kế mới nên không dùng Navbar */}
+        <Route element={<AuthRoute bare />}>
+          <Route path="/box/:boxId/sender" element={<SenderUI />} />
         </Route>
 
         {/* Bắt mọi path sai về trang chủ */}

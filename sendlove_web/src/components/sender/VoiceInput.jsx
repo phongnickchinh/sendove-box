@@ -1,11 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { VoiceRecorder } from '../../utils/voiceRecorder';
-import './VoiceInput.css'; // You can create this or use global styles
+import Icon from '../ui/Icon';
+import { Actions, Button, Tips } from '../ui/Screen';
+
+/**
+ * Thân của "create-content-dialog for voice" (01-voice.js):
+ * thẻ ghi âm nền trắng đặc cao 236, vòng tròn mic 72 nền rose/200,
+ * nhãn trạng thái + trần 15 giây + đồng hồ 0:00 / 0:15.
+ */
+const mmss = (s) => `0:${String(Math.min(s, 15)).padStart(2, '0')}`;
 
 const VoiceInput = ({ onRecordComplete, onCancel }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [time, setTime] = useState(0);
-  const [recordedData, setRecordedData] = useState(null); // { blob, duration }
+  const [recordedData, setRecordedData] = useState(null); // { wavBlob, duration }
   const recorderRef = useRef(null);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
@@ -31,10 +39,10 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const dataArray = recorderRef.current.getWaveformData();
-    
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgba(255, 117, 140, 0.5)';
-    
+    ctx.fillStyle = '#F4A3AF'; // rose/300
+
     const barWidth = (canvas.width / dataArray.length) * 2.5;
     let barHeight;
     let x = 0;
@@ -63,7 +71,7 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
     if (!recorderRef.current || !isRecording) return;
     setIsRecording(false);
     cancelAnimationFrame(animationRef.current);
-    
+
     const data = await recorderRef.current.stop();
     setRecordedData(data);
   };
@@ -75,41 +83,56 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
   };
 
   return (
-    <div className="voice-input-container glass-panel fade-in">
-      <h3>Ghi âm lời nhắn</h3>
-      
-      {!recordedData ? (
-        <div className="recording-section">
-          <div className="timer">{time}s / 15s</div>
-          
-          <canvas ref={canvasRef} width="300" height="100" className="waveform-canvas" />
-          
-          <div className="controls">
-            {!isRecording ? (
-              <button className="glass-button record-btn" onClick={startRecording}>🎤 Bắt đầu thu</button>
-            ) : (
-              <button className="glass-button stop-btn spin-stop" onClick={stopRecording}>⏹️ Dừng</button>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="preview-section">
-          <div className="timer">Đã thu {recordedData.duration}s</div>
-          <audio controls src={URL.createObjectURL(recordedData.wavBlob)} className="audio-preview" />
-          
-          <div className="controls">
-            <button className="glass-button secondary" onClick={() => setRecordedData(null)}>Thu lại</button>
-            <button className="glass-button primary" onClick={handleConfirm}>Xác nhận</button>
-          </div>
-        </div>
-      )}
-      
-      <button className="glass-button cancel-btn" onClick={onCancel} style={{marginTop: '20px', background: 'transparent', color: '#666', boxShadow: 'none'}}>
-        Quay lại
-      </button>
-    </div>
+    <>
+      <div className="sl-card sl-card--center" style={{ minHeight: 236 }}>
+        {!recordedData ? (
+          <>
+            <button
+              type="button"
+              className="sl-circle"
+              onClick={isRecording ? stopRecording : startRecording}
+              style={{
+                width: 72,
+                height: 72,
+                border: 'none',
+                cursor: 'pointer',
+                background: isRecording ? 'var(--rose-400)' : 'var(--rose-200)',
+                color: 'var(--rose-800)',
+              }}
+              aria-label={isRecording ? 'Dừng thu' : 'Bắt đầu thu'}
+            >
+              <Icon name={isRecording ? 'x' : 'mic'} size={32} />
+            </button>
+
+            <span className="sl-label-s">{isRecording ? 'Chạm để dừng' : 'Chạm để thu'}</span>
+            <span className="sl-caption">Tối đa 15 giây</span>
+            <span className="sl-caption-s">{mmss(time)} / 0:15</span>
+
+            <canvas ref={canvasRef} width="300" height="56" style={{ maxWidth: '100%' }} />
+          </>
+        ) : (
+          <>
+            <span className="sl-chip"><Icon name="mic" size={24} /></span>
+            <span className="sl-label-s">Đã thu {recordedData.duration}s</span>
+            <audio controls src={URL.createObjectURL(recordedData.wavBlob)} style={{ width: '100%' }} />
+          </>
+        )}
+      </div>
+
+      <Tips>Lời nhắn thu ở 16 kHz mono. Loại này không kèm dòng chữ nào.</Tips>
+
+      <Actions>
+        {recordedData ? (
+          <>
+            <Button kind="pri" onClick={handleConfirm}>Xác nhận</Button>
+            <Button kind="gho" onClick={() => setRecordedData(null)}>Thu lại</Button>
+          </>
+        ) : (
+          <Button kind="gho" onClick={onCancel} disabled={isRecording}>Quay lại</Button>
+        )}
+      </Actions>
+    </>
   );
 };
 
 export default VoiceInput;
-

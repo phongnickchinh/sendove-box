@@ -179,7 +179,7 @@ bool MediaPlayer::playItem(const char* identifier) {
 
     if (info.type == StorageItemType::IMAGE) {
         _state = PlaybackState::SHOWING;
-        decodeOneFrame();
+        decodeOneFrame(false);
     } else {
         _state = PlaybackState::PLAYING;
         _nextFrameDeadline = millis();
@@ -196,18 +196,32 @@ void MediaPlayer::update() {
         // 1. Tick audio TRƯỚC decode JPEG — nạp DMA buffer nếu cần (non-blocking)
         _audio.tick();
 
-        if (!decodeOneFrame()) {
+        uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
+
+        // Đã trễ mốc của chính frame này => bỏ render nó.
+        // Cách cũ là giải mã dồn hai frame dính liền nhau không nghỉ: đọc NAND +
+        // JPEGDEC + đẩy nguyên frame qua SPI ở 100% CPU, tạo đỉnh dòng chồng đúng
+        // lúc ampli đang kéo dòng -> sụt áp -> rè tiếng + nhấp nháy đèn nền.
+        // Bỏ frame thì RẺ hơn giải mã, nên khi trễ máy tiêu thụ ÍT đi chứ không
+        // nhiều lên, mà nhịp hình vẫn bám đúng mốc thời gian của audio.
+        bool skipRender = !_lastFrameSkipped &&
+                          (int32_t)(_nextFrameDeadline - millis()) < 0;
+
+        if (!decodeOneFrame(skipRender)) {
             _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
+            _lastFrameSkipped = false;
             _nextFrameDeadline = millis();
             if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             return;
         }
+        _lastFrameSkipped = skipRender;
 
         _currentFrame++;
         if (_totalFrames > 0 && _currentFrame >= _totalFrames) {
             _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
+            _lastFrameSkipped = false;
             // Restart audio khi video loop về đầu
             if (_audio.hasAudio()) {
                 _audio.loadFromStorage(_storage, _currentDataSize, _currentAudioSize);
@@ -216,8 +230,6 @@ void MediaPlayer::update() {
             }
             _nextFrameDeadline = millis();
         }
-
-        uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
 
         // Pacer cộng dồn mốc thay vì "ngủ nếu còn dư": I2S chạy bằng clock phần
         // cứng và không bao giờ chờ, nên với cách cũ mỗi frame chậm đẩy video
@@ -235,10 +247,15 @@ void MediaPlayer::update() {
         if (remain < -(int32_t)(targetMs * 4)) {
             DLOG("[PLAY] late resync: -%ldms", (long)(-remain));
             _nextFrameDeadline = now;
+            remain = 0;
         }
 
+        // Luôn chừa lại một khoảng nghỉ: kể cả khi bỏ frame vẫn chưa bù đủ,
+        // không bao giờ được chạy hai lần decode dính liền nhau.
+        if (remain < (int32_t)FRAME_MIN_IDLE_MS) remain = (int32_t)FRAME_MIN_IDLE_MS;
+
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
-        if (remain > 0) vTaskDelay(pdMS_TO_TICKS((uint32_t)remain));
+        vTaskDelay(pdMS_TO_TICKS((uint32_t)remain));
     } else {
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -277,7 +294,7 @@ int8_t MediaPlayer::getCurrentSlot() const {
     return _currentSlot;
 }
 
-bool MediaPlayer::decodeOneFrame() {
+bool MediaPlayer::decodeOneFrame(bool skipRender) {
     if (_jpegBuffer == nullptr || _storage == nullptr) return false;
 
     // Serial.printf("[MediaPlayer] decodeOneFrame: slot=%d state=%d totalFrames=%u baseOffset=%lu readHeader=%d\n",
@@ -307,9 +324,11 @@ bool MediaPlayer::decodeOneFrame() {
             }
 
             // Lấy SPI mutex chỉ trong lúc push lên LCD
-            if (!_display->acquireSPI()) return false;
-            _display->pushImage(x, currentY, _slbxWidth, linesToRead, (const uint16_t*)_jpegBuffer);
-            _display->releaseSPI();
+            if (!skipRender) {
+                if (!_display->acquireSPI()) return false;
+                _display->pushImage(x, currentY, _slbxWidth, linesToRead, (const uint16_t*)_jpegBuffer);
+                _display->releaseSPI();
+            }
 
             currentY += linesToRead;
             remainingLines -= linesToRead;
@@ -363,6 +382,10 @@ bool MediaPlayer::decodeOneFrame() {
         }
         return false;
     }
+
+    // Đã đọc xong dữ liệu nên con trỏ file đã đúng vị trí frame kế; thoát sớm
+    // để bỏ đúng phần đắt nhất (JPEGDEC + đẩy full frame qua SPI).
+    if (skipRender) return true;
 
     // 3. Khóa bus SPI và giải mã trực tiếp lên màn hình
     if (!_display->acquireSPI()) return false;

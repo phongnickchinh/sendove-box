@@ -92,6 +92,25 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
     input[type=submit]:hover {
       opacity: 0.9;
     }
+    .rescan {
+      float: right; background: none; border: none; color: #ff4081;
+      font-size: 13px; cursor: pointer; padding: 0;
+    }
+    .netlist {
+      max-height: 186px; overflow-y: auto; text-align: left;
+      background: #121214; border: 1px solid #29292e; border-radius: 8px;
+    }
+    .netlist .msg { padding: 12px; color: #a8a8b3; font-size: 13px; }
+    .net {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 11px 12px; background: none; border: none;
+      border-bottom: 1px solid #29292e; color: #e1e1e6;
+      font-size: 14px; text-align: left; cursor: pointer;
+    }
+    .net:last-child { border-bottom: none; }
+    .net:hover, .net.sel { background: #29292e; }
+    .net .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .net .meta { color: #a8a8b3; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -99,6 +118,12 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
     <div class="logo">❤️ Sendlove Box</div>
     <div class="subtitle">Cấu hình kết nối Wi-Fi cho thiết bị</div>
     <form action="/save" method="POST">
+      <div class="input-group">
+        <label>Mạng xung quanh
+          <button type="button" class="rescan" id="rescan">Quét lại</button>
+        </label>
+        <div class="netlist" id="netlist"><div class="msg">Đang quét…</div></div>
+      </div>
       <div class="input-group">
         <label for="ssid">Tên Wi-Fi (SSID)</label>
         <input type="text" id="ssid" name="ssid" placeholder="Nhập tên mạng Wi-Fi" required autocomplete="off">
@@ -114,6 +139,70 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
     </form>
   </div>
   <script>
+    // Poll /scan: box quet bat dong bo nen lan dau tra "scanning", phai hoi lai.
+    // Dung han khi "done" — khong duoc poll vo han vi moi vong lai kich mot lan
+    // quet moi, lam nghen chinh cai AP nguoi dung dang nối vao.
+    var pollLeft = 0;
+
+    function setMsg(t) {
+      var box = document.getElementById("netlist");
+      box.innerHTML = "";
+      var d = document.createElement("div");
+      d.className = "msg";
+      d.textContent = t;
+      box.appendChild(d);
+    }
+
+    function bars(r) { return r >= -60 ? "▂▄▆" : (r >= -75 ? "▂▄" : "▂"); }
+
+    function render(nets) {
+      var box = document.getElementById("netlist");
+      box.innerHTML = "";
+      if (!nets.length) { setMsg("Không thấy mạng nào. Bấm Quét lại."); return; }
+      nets.sort(function (a, b) { return b.rssi - a.rssi; });
+      var seen = {};
+      nets.forEach(function (n) {
+        if (seen[n.ssid]) return;   // cung mot ten phat tu nhieu AP
+        seen[n.ssid] = 1;
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "net";
+        var nm = document.createElement("span");
+        nm.className = "name";
+        nm.textContent = n.ssid;    // textContent: ten mang la khong pha duoc trang
+        var mt = document.createElement("span");
+        mt.className = "meta";
+        mt.textContent = (n.lock ? "🔒 " : "") + bars(n.rssi);
+        b.appendChild(nm);
+        b.appendChild(mt);
+        b.onclick = function () {
+          document.getElementById("ssid").value = n.ssid;
+          var all = box.getElementsByClassName("net");
+          for (var i = 0; i < all.length; i++) all[i].classList.remove("sel");
+          b.classList.add("sel");
+          document.getElementById("password").focus();
+        };
+        box.appendChild(b);
+      });
+    }
+
+    function poll() {
+      fetch("/scan").then(function (r) { return r.json(); }).then(function (d) {
+        if (d.status === "done") { render(d.nets); return; }
+        if (pollLeft-- > 0) setTimeout(poll, 1200);
+        else setMsg("Quét lâu quá. Bấm Quét lại.");
+      }).catch(function () { setMsg("Không đọc được danh sách. Bấm Quét lại."); });
+    }
+
+    function rescan() {
+      pollLeft = 10;
+      setMsg("Đang quét…");
+      poll();
+    }
+
+    document.getElementById("rescan").onclick = rescan;
+    rescan();
+
     function togglePass() {
       var p = document.getElementById("password");
       if (p.type === "password") { p.type = "text"; }

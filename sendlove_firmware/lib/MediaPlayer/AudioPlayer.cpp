@@ -151,26 +151,33 @@ bool AudioPlayer::loadFromStorage(IStorageProvider* storage, uint32_t videoDataS
 
 void AudioPlayer::prefill() {
     if (!_hasAudio || !_initialized) return;
-    // Nạp trước 2 DMA buffer để tránh khoảng lặng đầu bài
-    fillChunk();
-    fillChunk();
+    // Xoa DMA truoc khi nap: prefill() con duoc goi lai moi khi video loop ve
+    // dau. Neu khong xoa, tan du toi 512ms cua vong truoc van dang xep hang va
+    // se phat chong len doan dau moi -> nghe nhu vap/giat tai diem loop.
+    i2s_zero_dma_buffer(I2S_NUM_0);
+    // Nap day DMA thay vi dung 2 chunk: 2 chunk chi la 200ms trong khi DMA sau
+    // 512ms, khong du dem khi mot vai frame JPEG giai ma cham.
+    while (_audioCursor < _audioPcmSize && fillChunk()) {}
 }
 
 void AudioPlayer::tick() {
     if (!_hasAudio || !_initialized) return;
-    if (_audioCursor >= _audioPcmSize) return; // Hết audio
-    fillChunk();
+    // Nap cho toi khi DMA tu choi. Cach cu nap dung 1 chunk co dinh moi frame
+    // nen luong nap phu thuoc fps va sample rate: 1600 byte/frame chi du o
+    // 8kHz. O 16kHz/15fps can 2133 byte/frame -> thieu 25% -> DMA can dan ->
+    // re/giat. Vong lap nay tu dieu tiet theo toc do tieu thu that cua I2S.
+    while (_audioCursor < _audioPcmSize && fillChunk()) {}
 }
 
-void AudioPlayer::fillChunk() {
+bool AudioPlayer::fillChunk() {
     uint32_t remaining = _audioPcmSize - _audioCursor;
-    if (remaining == 0) return;
+    if (remaining == 0) return false;
 
     uint32_t toRead = (remaining < AUDIO_PCM_CHUNK_SIZE) ? remaining : AUDIO_PCM_CHUNK_SIZE;
 
     // readAt(): offset tuyệt đối, không đụng con trỏ tuần tự của MediaPlayer
     int bytesRead = _storage->readAt(_audioPcmOffset + _audioCursor, _chunk, toRead);
-    if (bytesRead <= 0) return;
+    if (bytesRead <= 0) return false;
 
     // Expand Mono → Stereo: mỗi sample 16-bit Mono thành frame L+R 32-bit
     const int16_t* pcm     = (const int16_t*)_chunk;
@@ -189,4 +196,7 @@ void AudioPlayer::fillChunk() {
 
     written &= ~(size_t)3;              // chỉ tính frame stereo trọn vẹn (4 byte)
     _audioCursor += (uint32_t)(written / 2);   // 4 byte stereo <- 2 byte mono
+
+    // true = DMA nhan het phan yeu cau -> co the con cho, thu nap tiep.
+    return written == (size_t)samples * 4;
 }

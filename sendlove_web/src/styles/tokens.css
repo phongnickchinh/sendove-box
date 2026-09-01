@@ -1,0 +1,74 @@
+/* ============================================================
+   Sendlove Box — Design tokens
+   Nguồn: bộ script Figma "Warm Minimalism + Motion-led delight"
+   (figma-scripts/_prelude.js). Mọi giá trị ở đây là 1-1 với biến
+   màu / thang chữ / thang khoảng cách trong file thiết kế.
+   ============================================================ */
+
+:root {
+  /* --- Rose --- */
+  --rose-50:  #FDF0EF;
+  --rose-100: #FAD6D3;
+  --rose-200: #F7BCBE;
+  --rose-300: #F4A3AF;
+  --rose-400: #F28AA1;
+  --rose-500: #E0758E;
+  --rose-700: #9E3A52;
+  --rose-800: #7A2A3D;
+  --rose-900: #4F1A27;
+
+  /* --- Caramel --- */
+  --caramel-50:  #FDF8F3;
+  --caramel-100: #F6DFB3;
+  --caramel-300: #E7AE75;
+  --caramel-700: #83513E;
+  --caramel-800: #603A2C;
+  --caramel-900: #3D2A20;
+
+  /* --- Neutral --- */
+  --neutral-0:   #FFFFFF;
+  --neutral-100: #EAE0D6;
+  --neutral-400: #A89689;
+  --neutral-500: #8A7767;
+  --neutral-700: #5C4A3E;
+
+  /* --- Semantic --- */
+  --success-fill: #4A7C59;
+  --success-bg:   #E3F0E7;
+  --success-text: #2F5C3D;
+  --error-fill:   #C4443C;
+  --error-bg:     #FBE6E4;
+  --error-text:   #8E2F29;
+  --warning-fill: #D89B3C;
+  --warning-bg:   #FBF0DC;
+  --warning-text: #8A5F16;
+
+  /* --- Typography --- */
+  --font: 'Quicksand', 'Segoe UI', system-ui, sans-serif;
+
+  /* --- Spacing: thang 4px, không dùng giá trị ngoài thang --- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-9: 36px;
+
+  /* --- Radius --- */
+  --r-sm: 8px; --r-md: 12px; --r-lg: 20px; --r-full: 999px;
+
+  /* --- Đổ bóng: CHỈ dùng cho popover/modal, thẻ không có bóng --- */
+  --shadow-modal: 0 8px 24px rgba(61, 42, 32, 0.24);
+
+  /* --- Khung máy trong thiết kế (430x932, iPhone 14 Pro Max) --- */
+  --frame-w: 430px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* ============================================================
+   Thang chữ — dùng qua class, không đặt font-size rời rạc
+   ============================================================ */
+.sl-title   { font-size: 22px; font-weight: 700; line-height: 1.2;  color: var(--caramel-900); }
+.sl-heading { font-size: 17px; font-weight: 600; line-height: 1.3;  color: var(--caramel-900); }
+.sl-body    { font-size: 15px; font-weight: 400; line-height: 1.6;  color: var(--neutral-500); }
+.sl-label   { font-size: 14px; font-weight: 500; line-height: 1.4;  color: var(--neutral-700); }
+.sl-label-s { font-size: 14px; font-weight: 600; line-height: 1.4;  color: var(--caramel-800); }
+.sl-caption { font-size: 12px; font-weight: 400; line-height: 1.4;  color: var(--neutral-500); }
+.sl-caption-s { font-size: 12px; font-weight: 600; line-height: 1.4; color: var(--rose-700); }

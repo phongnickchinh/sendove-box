@@ -1,5 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
+import Icon from '../ui/Icon';
+import { Actions, Button, Tips } from '../ui/Screen';
 
 const createImage = (url) =>
   new Promise((resolve, reject) => {
@@ -69,56 +71,54 @@ const ImageInput = ({ onImageSelect, onCancel }) => {
   };
 
   return (
-    <div className="image-input-container glass-panel fade-in" style={{ padding: '20px', textAlign: 'center' }}>
-      <h3>Gửi một bức ảnh</h3>
-      <p style={{fontSize: '12px', color: '#666'}}>Khung vuông 240x240</p>
-      
-      {!previewUrl ? (
-        <div className="upload-section" style={{ margin: '30px 0' }}>
-          <label className="glass-button" style={{ display: 'inline-block', cursor: 'pointer' }}>
-            📷 Chọn ảnh
-            <input 
-              type="file" 
-              accept="image/*" 
-              onChange={handleFileChange} 
-              style={{ display: 'none' }} 
-            />
-          </label>
-        </div>
-      ) : (
-        <div className="preview-section">
-          <div style={{ 
-            width: '240px', height: '240px', 
-            margin: '20px auto', 
-            position: 'relative',
-            background: '#333',
-            borderRadius: '8px',
-            overflow: 'hidden'
-          }}>
-            <Cropper
-              image={previewUrl}
-              crop={crop}
-              zoom={zoom}
-              aspect={1}
-              onCropChange={setCrop}
-              onZoomChange={setZoom}
-              onCropComplete={onCropComplete}
-            />
-          </div>
-          
-          <div className="controls" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-            <button className="glass-button secondary" onClick={() => setPreviewUrl(null)} disabled={isCropping}>Chọn lại</button>
-            <button className="glass-button primary" onClick={handleConfirm} disabled={isCropping}>
-              {isCropping ? 'Đang xử lý...' : 'Cắt & Xác nhận'}
-            </button>
-          </div>
-        </div>
-      )}
-      
-      <button className="glass-button cancel-btn" onClick={onCancel} style={{marginTop: '20px', background: 'transparent', color: '#666', boxShadow: 'none'}}>
-        Quay lại
-      </button>
-    </div>
+    <>
+      <div className="sl-card sl-card--center">
+        {!previewUrl ? (
+          <>
+            <span className="sl-chip"><Icon name="image" size={24} /></span>
+            <span className="sl-label-s">Chọn một bức ảnh</span>
+            <span className="sl-caption">Cắt vuông 240x240</span>
+            <label className="sl-btn sl-btn--pri" style={{ marginTop: 'var(--sp-1)' }}>
+              Chọn ảnh
+              <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+            </label>
+          </>
+        ) : (
+          <>
+            {/* Khung cắt đúng bằng màn hộp: cái nhìn thấy ở đây là cái hộp hiện */}
+            <div className="sl-preview" style={{ background: 'var(--caramel-900)' }}>
+              <Cropper
+                image={previewUrl}
+                crop={crop}
+                zoom={zoom}
+                aspect={1}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropComplete={onCropComplete}
+              />
+            </div>
+            <span className="sl-caption">Kéo để chọn vùng, chụm hai ngón để phóng to</span>
+          </>
+        )}
+      </div>
+
+      <Tips>Ảnh được nén JPEG rồi lưu thẳng vào bộ nhớ của hộp.</Tips>
+
+      <Actions>
+        {previewUrl ? (
+          <>
+            <Button kind="pri" onClick={handleConfirm} disabled={isCropping}>
+              {isCropping ? 'Đang xử lý...' : 'Cắt & xác nhận'}
+            </Button>
+            <Button kind="gho" onClick={() => setPreviewUrl(null)} disabled={isCropping}>
+              Chọn lại
+            </Button>
+          </>
+        ) : (
+          <Button kind="gho" onClick={onCancel}>Quay lại</Button>
+        )}
+      </Actions>
+    </>
   );
 };
 

@@ -1,5 +1,12 @@
 import React, { useState, useRef } from 'react';
+import Icon from '../ui/Icon';
+import { Actions, Button, Tips } from '../ui/Screen';
 
+/**
+ * Thân của "create-content-dialog for video": một thẻ r16 nền trắng viền
+ * caramel/300, bên trong là chip loại nội dung hoặc khung xem trước 240x240.
+ * Khung máy (appbar, tiêu đề, ô lời nhắn) do SenderUI dựng.
+ */
 const VideoInput = ({ onVideoSelect, onCancel }) => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -15,59 +22,54 @@ const VideoInput = ({ onVideoSelect, onCancel }) => {
 
   const handleConfirm = () => {
     if (selectedFile && onVideoSelect) {
-      // Check duration if possible, though we cap it during encoding anyway
+      // Độ dài được cắt về 15s ngay trong lúc mã hoá nên không chặn ở đây
       onVideoSelect(selectedFile);
     }
   };
 
+  const reset = () => {
+    setPreviewUrl(null);
+    setSelectedFile(null);
+  };
+
   return (
-    <div className="video-input-container glass-panel fade-in" style={{ padding: '20px', textAlign: 'center' }}>
-      <h3>Gửi một đoạn Video</h3>
-      <p style={{fontSize: '12px', color: '#666'}}>Tối đa 15 giây</p>
-      
-      {!previewUrl ? (
-        <div className="upload-section" style={{ margin: '30px 0' }}>
-          <label className="glass-button" style={{ display: 'inline-block', cursor: 'pointer' }}>
-            🎥 Chọn/Quay Video
-            <input 
-              type="file" 
-              accept="video/*" 
-              onChange={handleFileChange} 
-              style={{ display: 'none' }} 
-            />
-          </label>
-        </div>
-      ) : (
-        <div className="preview-section">
-          <div style={{ 
-            width: '240px', height: '240px', 
-            margin: '20px auto', 
-            border: '2px dashed var(--color-primary)',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            position: 'relative'
-          }}>
-            <video 
-              ref={videoRef}
-              src={previewUrl} 
-              autoPlay 
-              loop 
-              muted 
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-            />
-          </div>
-          
-          <div className="controls" style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-            <button className="glass-button secondary" onClick={() => setPreviewUrl(null)}>Chọn lại</button>
-            <button className="glass-button primary" onClick={handleConfirm}>Xác nhận</button>
-          </div>
-        </div>
-      )}
-      
-      <button className="glass-button cancel-btn" onClick={onCancel} style={{marginTop: '20px', background: 'transparent', color: '#666', boxShadow: 'none'}}>
-        Quay lại
-      </button>
-    </div>
+    <>
+      <div className="sl-card sl-card--center">
+        {!previewUrl ? (
+          <>
+            <span className="sl-chip"><Icon name="video" size={24} /></span>
+            <span className="sl-label-s">Chọn hoặc quay một đoạn video</span>
+            <span className="sl-caption">Tối đa 15 giây</span>
+            <label className="sl-btn sl-btn--pri" style={{ marginTop: 'var(--sp-1)' }}>
+              Chọn video
+              <input type="file" accept="video/*" onChange={handleFileChange} style={{ display: 'none' }} />
+            </label>
+          </>
+        ) : (
+          <>
+            {/* 240x240 = đúng kích thước màn hộp, xem trước 1:1 với thứ sẽ phát */}
+            <div className="sl-preview">
+              <video ref={videoRef} src={previewUrl} autoPlay loop muted playsInline />
+            </div>
+            <span className="sl-label-s">{selectedFile?.name}</span>
+            <span className="sl-caption">Khung vuông 240x240, 15 hình/giây</span>
+          </>
+        )}
+      </div>
+
+      <Tips>Chỉ 15 giây đầu được gửi, kèm âm thanh 8 kHz mono.</Tips>
+
+      <Actions>
+        {previewUrl ? (
+          <>
+            <Button kind="pri" onClick={handleConfirm}>Xác nhận</Button>
+            <Button kind="gho" onClick={reset}>Chọn lại</Button>
+          </>
+        ) : (
+          <Button kind="gho" onClick={onCancel}>Quay lại</Button>
+        )}
+      </Actions>
+    </>
   );
 };
 

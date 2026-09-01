@@ -241,11 +241,116 @@
 
 ---
 
-### Phase 4: Xử lý Âm thanh & Thông báo LED (Current - In Progress)
-- [ ] **Bổ sung I2S Audio Module (MAX98357A)**: Cấu hình I2S bus (BCLK, LRC, DOUT) để giải mã và phát âm thanh đồng bộ cùng video từ bộ nhớ NAND.
-- [ ] **Thông báo LED thông minh**: Xử lý logic chớp LED báo hiệu (Notification LED) cho các sự kiện của hệ thống (nhận tin nhắn mới, đang tải file, báo pin yếu, wakeup).
-- [ ] **Nâng cấp Cloud OTA**: Tải firmware `.bin` từ Firebase Storage thông qua `ota_tasks`.
-- [ ] (Hardware) Tháo/xả bỏ đèn LED đỏ báo nguồn phần cứng trên bo ESP32 DevKit và Module NAND Flash để tối ưu hóa 100% thời lượng pin.
+### Phase 3D: Khắc phục triệt để lỗi Timer Wakeup, Wi-Fi Reconnect & NTP Sync Drift (Completed)
+- [x] **Khắc phục lỗi trôi giờ (RTC Fast Drift) khi Sleep dài**:
+  - *Nguyên nhân cốt lõi*: `getLocalTime(&timeinfo, timeout)` trong Arduino ESP32 core kiểm tra `tm_year > 2016`. Do time đã được sync lúc boot, hàm này trả về `true` ngay lập tức (0ms) với giờ RTC đang bị trôi từ dao động RC nội bộ, không hề chờ gói tin NTP từ mạng. Đồng thời, `ntpTaskWorker` không khóa tiến trình sleep, khiến chip bị ép vào Light Sleep sau 2s trước khi socket SNTP kịp nhận phản hồi.
+  - *Giải pháp*: Đăng ký `sntp_set_time_sync_notification_cb()` (API chính thức ESP-IDF) để nhận callback khi SNTP daemon thực sự gọi `settimeofday()`. Trong `syncNtpTime()`, gọi `configTzTime()` (Arduino API đã chứng minh) để trigger SNTP request mới, rồi poll cờ `s_ntpSyncDone` từ callback thay vì dùng internal API `sntp_get_sync_status()` (đã được chứng minh unreliable trên hardware thật — NTP timeout 100%).
+  - *Lưu ý*: Phiên bản đầu tiên dùng `sntp_set_sync_status(RESET)` + `sntp_restart()` + poll `sntp_get_sync_status()` — build thành công nhưng NTP luôn timeout trên hardware thật do internal API không cập nhật status flag đáng tin cậy qua ranh giới LWIP thread / FreeRTOS task.
+- [x] **Khắc phục lỗi mất kết nối Wi-Fi sau 1 ngày Sleep**:
+  - *Nguyên nhân cốt lõi*: Khi thức dậy từ Light Sleep, `ensureConnected()` gọi `WiFi.reconnect()` bất đồng bộ. Tuy nhiên `triggerNtpSync()` và `triggerFirebaseSync()` kiểm tra ngay `WiFi.status() != WL_CONNECTED` nên lập tức abort. Sau 2 giây, chip lại bị ép đi ngủ, cắt ngang quá trình bắt tay 4 bước (4-way handshake) của Wi-Fi. Lặp lại qua hàng trăm chu kỳ khiến Wi-Fi stack bị kẹt (`AUTH_EXPIRE`/`ASSOC_EXPIRE`).
+  - *Giải pháp*: 
+    - Nâng cấp `ensureConnected(uint32_t timeoutMs)` 2 tầng: thử `WiFi.reconnect()` trước; nếu không thành công sẽ tự động thực hiện `WiFi.disconnect(false)` và `WiFi.begin(_wifiSsid, _wifiPassword)` để tái thiết lập kết nối sạch sẽ từ đầu.
+    - Lưu giữ credentials Wi-Fi trong `NetworkManager` và kích hoạt `WiFi.setAutoReconnect(true)`.
+- [x] **Hợp nhất tiến trình Đồng bộ ngầm (`triggerWakeupSync` & `isSyncing`)**:
+  - Hợp nhất chu trình: `ensureConnected(5000)` -> `syncNtpTime(5000)` -> `updateFirebaseStatus` -> `checkFirebaseFlags` -> `checkAndDownloadNewMessages` vào 1 FreeRTOS background task duy nhất (`WakeSync`).
+  - Cập nhật cờ `isSyncing()` bao quát toàn bộ tiến trình mạng (Wi-Fi, NTP, Firebase, Download). `Task_UIController` được khóa không cho phép chip đi ngủ trong lúc bất kỳ tác vụ mạng nào đang xử lý, triệt tiêu hoàn toàn tình trạng sập nguồn/ngắt giữa chừng.
+
+---
+
+### Phase 3E: Audio I2S, Chống rè/nháy & Captive Portal nâng cấp (2026-08 → 09-01)
+
+> **Đọc kỹ cột trạng thái.** Phần lớn mục dưới đây **chưa được kiểm chứng trên phần cứng**
+> và **chưa commit** — chỉ nằm trong working tree. Đừng coi là đã xong.
+
+#### Phần cứng bổ sung (thiếu ở §2 phía trên)
+- **Ampli I2S MAX98357A**: BCLK = GPIO 0, LRC = GPIO 1, DOUT = GPIO 2 (`include/config.h:123-125`).
+- **Module `AudioPlayer`** (`lib/MediaPlayer/AudioPlayer.cpp/.h`): phát PCM raw 16-bit mono qua
+  I2S DMA, thiết kế non-blocking tick-based — mỗi frame video gọi `tick()` một lần nạp thêm DMA.
+  Audio nằm nối đuôi video trong cùng một slot NAND, đánh dấu bằng header `AUDC`.
+- **Module `ScreenLogger`** (`lib/ScreenLogger/`) — cũng chưa có trong danh sách module ở §3.
+
+#### Nguyên nhân gốc của "rè tiếng + nháy đèn nền" (đã xác nhận bằng đo thực tế của user)
+Đèn nền LED và MAX98357A **dùng chung một rail nguồn**. Đỉnh dòng của CPU/SPI cộng dồn lên dòng
+ampli đang kéo → LED tối đi (thấy nháy) và ampli đói dòng (nghe rè) **cùng một nhịp**. Không phải
+lỗi chất lượng file WAV: user đã nghe file `.wav` sinh ra từ web, xác nhận "ấm áp, không rè".
+
+| Thay đổi | Ở đâu | Trạng thái |
+|---|---|---|
+| `extractAudioFromVideo` giải mã offline + `DynamicsCompressor` (-6dB) + trần đỉnh 0.7 | `sendlove_web/src/utils/mediaEncoder.js` | Trong working tree, **chưa commit**, đã chạy thật trên trình duyệt |
+| Pacer bỏ frame khi trễ (`FRAME_MIN_IDLE_MS=2`, `decodeOneFrame(bool skipRender)`, `_lastFrameSkipped`) | `lib/MediaPlayer/MediaPlayer.cpp/.h` | Đã build + nạp, **CHƯA kiểm chứng phần cứng** |
+| Timeout 10s khi tải không tiến triển + log tiến độ mỗi 16KB (video **và** audio) | `lib/NetworkManager/NetworkManager.cpp` | Đã build, **CHƯA kiểm chứng** |
+| Captive portal: `WIFI_AP_STA`, `setErrorReplyCode(NoError)`, 8 URL dò của OS trả 302, endpoint `/scan` quét bất đồng bộ, HTML có danh sách Wi-Fi bấm chọn | `NetworkManager.cpp/.h`, `captive_portal_html.h` | Build sạch (RAM 20.6% / Flash 73.3%), **CHƯA nạp** |
+
+#### Defect gốc đã tìm ra ở vòng lặp tải (nguyên nhân treo tại `[NET] writing slot`)
+`http.getSize()` trả `-1` với response chunked. Điều kiện `while (http.connected() && (len > 0 || len == -1))`
+khi đó **không bao giờ tự sai** — chỉ thoát khi server đóng socket. Stream nửa-mở treo vĩnh viễn.
+`http.setTimeout(30000)` chỉ chốt **một lần đọc**, không chốt được cả vòng lặp. Khi timeout mới bắn,
+phải set `writeError = true` để slot dở bị loại, nếu không file tải dở với `initialLen <= 0` vẫn lọt
+qua bước kiểm tra và thành slot rác.
+
+#### Quyết định đã CHỐT — không mở lại
+- **Giữ 8kHz** cho audio. User chốt: "tôi sẽ giữ nguyên 8khz".
+- **KHÔNG giảm độ sáng đèn nền.** User bác thẳng; `MediaPlayer.cpp` giữ `BACKLIGHT_DAY_PERCENT`.
+- **Decode video/audio phải chạy ở client**, không đẩy sang backend.
+- Lỗi "hình chậm hơn tiếng" đã xử lý xong, không đào lại.
+
+---
+
+## 7. TÌNH TRẠNG CODE & PHẦN ĐÃ MẤT (kiểm kê 2026-09-01)
+
+### Code cũ đã mất — TÌM LẠI ĐƯỢC trong git stash
+Bản backup mà user tưởng đã mất **vẫn còn**, nằm trong `stash@{1}` (tên "trrr"), ở đường dẫn
+`sendlove_firmware/.backup_audio_debug/20260816_004737/`. Thư mục này **không còn trên đĩa** —
+chỉ tồn tại trong stash. Gồm 6 file, mốc 2026-08-16 00:47:37:
+
+| File | Số dòng |
+|---|---|
+| `AudioPlayer.cpp` | 147 |
+| `AudioPlayer.h` | 60 |
+| `MediaPlayer.cpp` | 371 |
+| `NandStorage.cpp` | 350 |
+| `NandStorageProvider.cpp` | 293 |
+| `NetworkManager.cpp` | 853 |
+
+Đây nhiều khả năng chính là bản "phát âm thanh mượt, hình ra chậm nhưng không nháy" mà user nhắc
+đi nhắc lại — thứ đáng đối chiếu để hiểu vì sao bản cũ không bị sụt áp.
+
+Lấy ra **không phá working tree hiện tại** (stash này có 2 parent nên đọc thẳng, không cần `^3`):
+
+```
+git show "stash@{1}:sendlove_firmware/.backup_audio_debug/20260816_004737/MediaPlayer.cpp" > /nơi/nào/đó.cpp
+```
+
+`stash@{1}` còn chứa `STATUS.md` ghi lại một task sửa `writeChunk` **bị chặn giữa chừng** vì xung
+đột quyền khi gọi `agy` headless — kế hoạch sửa còn dang dở, chưa áp dụng.
+
+### `stash@{0}` ("big stash")
+28 file, ≈1015 thêm / 587 xóa. Danh sách file **trùng khớp với working tree bẩn hiện tại**
+(MEMORY.md, platformio.ini, 11 file web, `VoiceInput.css` bị xóa...). Gần như chắc chắn là ảnh
+chụp của chính trạng thái đang làm dở, **không phải** code mất. Đừng pop bừa — sẽ đụng độ.
+
+### Ba nhánh local `ff`, `phong-tuyet-vong`, `pjhonggg`
+Đều là **tổ tiên của `main`**, không chứa `AudioPlayer.cpp`. Không có gì để cứu ở đây.
+
+### Chỗ tài liệu này đang sai / thiếu so với code thật
+- §4 viết "`NandStorage` chỉ thực hiện Read-Only" — **sai từ Phase 3B**, module đã có
+  `eraseSector`, `writeRaw`, `writeSlotTable`.
+- §2 không nhắc gì tới ampli I2S / MAX98357A; §3 thiếu `AudioPlayer` và `ScreenLogger`.
+  (Đã bổ sung ở Phase 3E bên trên.)
+
+### Rác cần dọn
+- `sendlove_firmware/src/main.cpp.bak` — file thừa.
+- Working tree bẩn: 11 file web + `platformio.ini` + `MEMORY.md`, cùng các thư mục chưa track
+  (`DRAFT/`, `sendlove_web/src/components/ui/`, `src/styles/`, `sendlove-box-style-guide.md`,
+  `FE_DESIGN.md`, `HANDOFF.md`, `MULTI_PLATFORM_STRATEGY.md`, `firebase-debug.log`).
+  **Chưa quyết** giữ / commit / bỏ.
+
+### Ràng buộc bảo mật (không được vi phạm)
+Không push, không tạo PR — chỉ làm local. Ba file bí mật không bao giờ commit (đã có trong
+`.gitignore`): `sendlove_firmware/include/config_secrets.h`, `sendlove_web/.env`,
+`sendlove_backend/serviceAccountKey.json`.
+
+---
 
 
 

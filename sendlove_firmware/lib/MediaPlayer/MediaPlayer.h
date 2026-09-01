@@ -60,6 +60,10 @@ public:
 private:
     static constexpr size_t JPEG_BUFFER_SIZE = 48 * 1024;
 
+    // Khoảng nghỉ tối thiểu giữa hai lần giải mã. Chặn trường hợp hai frame
+    // dính liền nhau — đó là lúc dòng tiêu thụ vọt lên và làm sụt áp.
+    static constexpr uint32_t FRAME_MIN_IDLE_MS = 2;
+
     IStorageProvider* _storage = nullptr;
     DisplayDriver*    _display = nullptr;
     PlaybackState     _state   = PlaybackState::IDLE;
@@ -77,13 +81,16 @@ private:
     uint32_t _currentAudioSize = 0;   // Byte audio nối sau video (từ SlotEntry.audioSize)
     uint32_t _frameBaseOffset = 0;
     bool     _readFrameSizeHeader = true;
+    bool     _lastFrameSkipped = false;  // Không bỏ hai frame liên tiếp
 
     bool     _isSlbxRgb565  = false;
     uint16_t _slbxWidth     = 128;
     uint16_t _slbxHeight    = 160;
 
-    /// Decode and render single JPEG frame
-    bool decodeOneFrame();
+    /// Decode and render single JPEG frame.
+    /// skipRender = true: vẫn nuốt đúng số byte của frame để giữ vị trí file,
+    /// nhưng bỏ phần đắt nhất: giải mã JPEG và đẩy nguyên frame qua SPI.
+    bool decodeOneFrame(bool skipRender);
 
     /// Callback function for JPEGDEC pixel output
     static int jpegDrawCallback(JPEGDRAW* pDraw);

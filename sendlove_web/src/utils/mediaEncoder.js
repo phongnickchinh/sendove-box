@@ -215,90 +215,89 @@ function audioBufferToWavBlob(buffer) {
   return new Blob([view], { type: 'audio/wav' });
 }
 
-export const extractAudioFromVideo = (videoBlob, onProgress) => {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.src = URL.createObjectURL(videoBlob);
-    video.muted = false; // Phải bật tiếng để Web Audio API bắt được sóng âm
-    video.setAttribute('playsinline', '');
-    
-    video.onloadeddata = () => {
-      try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        const source = audioCtx.createMediaElementSource(video);
-        
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        
-        // Dùng GainNode để mute đầu ra loa ngoài, tránh làm ồn người dùng
-        const gainNode = audioCtx.createGain();
-        gainNode.gain.value = 0;
-        
-        source.connect(processor);
-        processor.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        
-        let audioChunks = [];
-        let totalLength = 0;
-        
-        processor.onaudioprocess = (e) => {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const chunk = new Float32Array(inputData);
-          audioChunks.push(chunk);
-          totalLength += chunk.length;
-          
-          if (onProgress && video.duration) {
-            onProgress(Math.round((video.currentTime / video.duration) * 100));
-          }
-        };
-        
-        video.onended = () => {
-          source.disconnect();
-          processor.disconnect();
-          gainNode.disconnect();
-          audioCtx.close();
-          URL.revokeObjectURL(video.src);
-          
-          if (totalLength === 0) {
-            console.warn('Không bắt được sóng âm nào từ video');
-            return resolve(null);
-          }
-          
-          // Gộp chunks
-          const mergedBuffer = new Float32Array(totalLength);
-          let offset = 0;
-          for (let chunk of audioChunks) {
-            mergedBuffer.set(chunk, offset);
-            offset += chunk.length;
-          }
-          
-          // Chuyển sang AudioBuffer để đưa vào hàm convert WAV
-          const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, totalLength, 16000);
-          const finalBuffer = offlineCtx.createBuffer(1, totalLength, 16000);
-          finalBuffer.copyToChannel(mergedBuffer, 0);
-          
-          resolve(audioBufferToWavBlob(finalBuffer));
-        };
-        
-        video.onerror = () => {
-          URL.revokeObjectURL(video.src);
-          reject(new Error('Lỗi khi play video để trích xuất âm thanh'));
-        };
-        
-        // Play để thu âm
-        video.play().catch((e) => {
-          URL.revokeObjectURL(video.src);
-          console.warn('Trình duyệt chặn autoplay có tiếng, không thể trích xuất âm thanh', e);
-          resolve(null); // Fallback: Bỏ qua âm thanh nếu bị chặn
-        });
-      } catch (err) {
-        console.warn('Lỗi setup trích xuất âm thanh', err);
-        resolve(null);
-      }
-    };
-    
-    video.onerror = () => {
-      URL.revokeObjectURL(video.src);
-      reject(new Error('Không thể tải file video'));
-    };
-  });
+// Loa MAX98357A trên box phát mono 16-bit. 8kHz đủ cho giọng nói và giữ file
+// nhỏ để vừa slot NAND (một slot chứa cả video lẫn audio).
+const AUDIO_SAMPLE_RATE = 8000;
+const AUDIO_MAX_SECONDS = 15; // Khớp với trần 15s của video ở encodeVideoToBin
+
+export const extractAudioFromVideo = async (videoBlob, onProgress) => {
+  // Giải mã offline thay vì play() realtime: không phụ thuộc autoplay policy,
+  // không mất mẫu khi tab bị throttle, và chạy nhanh hơn thời lượng thật.
+  const arrayBuffer = await videoBlob.arrayBuffer();
+
+  const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
+  let decoded;
+  try {
+    decoded = await decodeCtx.decodeAudioData(arrayBuffer);
+  } catch (err) {
+    // Trình duyệt không giải mã được audio track của container này.
+    // Video vẫn gửi được, chỉ là không có tiếng.
+    console.error('Không giải mã được audio track của video', err);
+    return null;
+  } finally {
+    decodeCtx.close();
+  }
+
+  if (onProgress) onProgress(40);
+
+  if (!decoded.length || !decoded.duration) {
+    console.error('Video không có audio track');
+    return null;
+  }
+
+  // Resample về 8kHz mono. OfflineAudioContext lo cả downmix (destination 1 kênh)
+  // lẫn nội suy tần số, chính xác hơn tự viết tay.
+  const duration = Math.min(decoded.duration, AUDIO_MAX_SECONDS);
+  const frames = Math.ceil(duration * AUDIO_SAMPLE_RATE);
+  const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const offlineCtx = new OfflineCtx(1, frames, AUDIO_SAMPLE_RATE);
+
+  const source = offlineCtx.createBufferSource();
+  source.buffer = decoded;
+
+  // Nén đỉnh trước khi ghi WAV. Ampli MAX98357A trên box dùng chung nguồn với
+  // đèn nền; mỗi đỉnh transient của giọng nói làm nó kéo dòng đột ngột → sụt áp
+  // → tiếng rè và màn hình nhấp nháy. Ngưỡng đặt ở -6dB nên file vốn nhỏ tiếng
+  // gần như không bị động tới — chỉ các đỉnh thật sự cao mới bị ghim lại.
+  const compressor = offlineCtx.createDynamicsCompressor();
+  compressor.threshold.value = -6;
+  compressor.knee.value = 6;
+  compressor.ratio.value = 4;
+  compressor.attack.value = 0.003;
+  compressor.release.value = 0.15;
+
+  source.connect(compressor);
+  compressor.connect(offlineCtx.destination);
+  source.start(0);
+
+  const rendered = await offlineCtx.startRendering();
+  logAndCapPeak(rendered);
+
+  if (onProgress) onProgress(100);
+
+  return audioBufferToWavBlob(rendered);
 };
+
+// Trần biên độ gửi xuống box. Chỉ hạ xuống, KHÔNG bao giờ nâng lên: nâng đỉnh
+// là nâng đúng dòng đỉnh đang gây sụt áp.
+const AUDIO_PEAK_CEILING = 0.7;
+
+function logAndCapPeak(buffer) {
+  const data = buffer.getChannelData(0);
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) {
+    const a = Math.abs(data[i]);
+    if (a > peak) peak = a;
+  }
+
+  if (peak === 0) {
+    console.warn('[VOICE] audio toàn số 0 sau khi render');
+    return;
+  }
+
+  const gain = Math.min(1, AUDIO_PEAK_CEILING / peak);
+  if (gain < 1) {
+    for (let i = 0; i < data.length; i++) data[i] *= gain;
+  }
+  console.log(`[VOICE] đỉnh sau nén ${peak.toFixed(3)} → ${(peak * gain).toFixed(3)} (gain ${gain.toFixed(2)})`);
+}

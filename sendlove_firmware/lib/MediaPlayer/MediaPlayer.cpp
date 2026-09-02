@@ -39,11 +39,8 @@ bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
     if (_playerMutex == nullptr) {
         _playerMutex = xSemaphoreCreateRecursiveMutex();
     }
-    // Cấp phát 1 lần ngay khi khởi động: heap còn nguyên vẹn, khối 48KB
-    // liên tục luôn thành công. Không free trong stop() để tránh phân mảnh heap.
-    if (_jpegBuffer == nullptr) {
-        _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
-    }
+    // _jpegBuffer (32KB) được cấp phát on-demand trong playItem() và giải phóng
+    // ngay trong stop() để trả lại toàn bộ heap cho MbedTLS SSL Handshake lúc Standby.
     _audio.init();
     return true;
 }
@@ -70,7 +67,15 @@ bool MediaPlayer::playItem(const char* identifier) {
     if (_jpegBuffer == nullptr) {
         _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
         if (_jpegBuffer == nullptr) {
-            DLOG("[PLAY] err: JPEG buf alloc");
+            // Lần 1 thất bại: nhường CPU 100ms cho IDLE task dọn dẹp task vừa xóa (WakeSync 12KB)
+            DLOG("[PLAY] JPEG buf retry (yield IDLE)...");
+            if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
+            _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
+        }
+        if (_jpegBuffer == nullptr) {
+            DLOG("[PLAY] err: JPEG buf alloc fail");
             _state = PlaybackState::ERROR;
             if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             return false;
@@ -201,12 +206,11 @@ bool MediaPlayer::playItem(const char* identifier) {
     if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
     return true;
 }
-
 void MediaPlayer::update() {
     if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
 
     if (_state == PlaybackState::PLAYING) {
-        // 1. Tick audio TRƯỚC decode JPEG — nạp DMA buffer nếu cần (non-blocking)
+        // 1. Tick audio trước decode (nạp đầy DMA 192ms)
         _audio.tick();
 
         uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
@@ -229,6 +233,9 @@ void MediaPlayer::update() {
             return;
         }
         _lastFrameSkipped = skipRender;
+
+        // 2. Tick audio ngay sau decode & render để bù lượng DMA vừa tiêu thụ
+        _audio.tick();
 
         _currentFrame++;
         if (_totalFrames > 0 && _currentFrame >= _totalFrames) {
@@ -277,12 +284,13 @@ void MediaPlayer::stop() {
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
         _storage->closeRead();
     }
-    // Dừng I2S audio (zero DMA buffer & reset cursor)
-    _audio.stop();
-    // Giữ _jpegBuffer — không free để tránh phân mảnh heap.
-    // Buffer này được cấp phát cố định 1 lần trong init() và chỉ giải phóng
-    // trong destructor khi toàn bộ đối tượng bị hủy.
     _state = PlaybackState::IDLE;
+    _audio.stop();
+    // Giải phóng _jpegBuffer để hoàn trả 32KB cho heap lúc Standby / TLS Handshake
+    if (_jpegBuffer != nullptr) {
+        free(_jpegBuffer);
+        _jpegBuffer = nullptr;
+    }
     _currentSlot = -1;
     _currentId[0] = '\0';
     _currentFrame = 0;

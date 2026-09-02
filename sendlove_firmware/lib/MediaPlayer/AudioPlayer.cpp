@@ -185,10 +185,13 @@ bool AudioPlayer::fillChunk() {
     if (remaining == 0) return false;
 
     uint32_t toRead = (remaining < AUDIO_PCM_CHUNK_SIZE) ? remaining : AUDIO_PCM_CHUNK_SIZE;
+    toRead &= ~1u;
+    if (toRead == 0) return false;
 
     // readAt(): offset tuyệt đối, không đụng con trỏ tuần tự của MediaPlayer
     int bytesRead = _storage->readAt(_audioPcmOffset + _audioCursor, _chunk, toRead);
     if (bytesRead <= 0) return false;
+    bytesRead &= ~1;
 
     // Expand Mono → Stereo + Linear Interpolation Oversample (x AUDIO_OVERSAMPLE):
     // Thay vì lặp mẫu thô (Zero-Order Hold) tạo sóng bậc thang vuông vức gây chói gắt,

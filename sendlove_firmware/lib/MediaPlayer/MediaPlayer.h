@@ -51,6 +51,7 @@ public:
     /// Test I2S speaker beep
     void testAudioBeep();
 
+
     /// Get current playback state
     PlaybackState getState() const;
 
@@ -58,7 +59,7 @@ public:
     int8_t getCurrentSlot() const;
 
 private:
-    static constexpr size_t JPEG_BUFFER_SIZE = 48 * 1024;
+    static constexpr size_t JPEG_BUFFER_SIZE = 32 * 1024;
 
     // Khoảng nghỉ tối thiểu giữa hai lần giải mã. Chặn trường hợp hai frame
     // dính liền nhau — đó là lúc dòng tiêu thụ vọt lên và làm sụt áp.
@@ -99,4 +100,3 @@ private:
 };
 
 #endif // MEDIA_PLAYER_H
-

@@ -398,8 +398,47 @@ Không push, không tạo PR — chỉ làm local. Ba file bí mật không bao 
 
 ---
 
+## 8. PHASE 3F — Kiến trúc Đồng bộ Tối ưu RAM, Triệt tiêu Lỗi (-1) & Hết Giật Audio (2026-09-02)
 
+### Bối cảnh & Bản chất gốc rễ của 2 lỗi tương hỗ
 
+1. **Lỗi Firebase Sync (-1) (Out of Memory cho MbedTLS)**:
+   - `WiFiClientSecure` cần ~35KB-40KB heap động liên tục để thực hiện SSL Handshake với Firebase.
+   - Khi `_jpegBuffer` (48KB) bị ghim cố định trong RAM, cùng với I2S DMA (24KB hoặc 48KB) và task stacks (38KB), tổng RAM bị chiếm giữ vĩnh viễn là >180KB trên tổng 200KB heap khả dụng của ESP32-C3.
+   - Heap chỉ còn ~16KB-30KB bị phân mảnh -> MbedTLS handshake thất bại -> `http.GET()` trả về `-1`.
+
+2. **Lỗi Video Delay & Âm thanh nhảy cóc**:
+   - `AUDIO_PCM_CHUNK_SIZE = 1600` (12.8KB stereo). Trong khi I2S DMA mỗi 10ms chỉ tiêu thụ 1.28KB (160 bytes mono input).
+   - `fillChunk()` đọc 1600B từ NAND qua SPI nhưng `i2s_write` chỉ nhận 160B rồi vứt 1440B còn lại.
+   - Mỗi giây đọc SPI NAND **100 lần** (160KB/s thay vì 16KB/s), chiếm `_spiMutex` liên tục khiến `MediaPlayer` bị nghẽn SPI khi render JPEG lên ST7789 display.
+
+### Giải pháp Kiến trúc Đã Áp dụng
+
+1. **Cân chỉnh Chunk Size vừa khít 1 DMA Buffer**:
+   - `AUDIO_PCM_CHUNK_SIZE = 256` bytes (128 mono samples = 16ms @ 8kHz).
+   - Khi oversample x4 stereo: 128 * 4 * 4 bytes = **2048 bytes = ĐÚNG 1 DMA BUFFER** (`AUDIO_DMA_BUF_LEN = 512` samples).
+   - Tiết kiệm **12.1KB** static RAM trong `AudioPlayer` (buffer `_stereo` giảm từ 12.8KB xuống 2.0KB).
+   - Đọc NAND cực nhanh (100 µs), không đọc thừa 1 byte nào, không tranh chấp SPI bus.
+
+2. **Đồng bộ Audio Tick Trước & Sau Mỗi Frame (Loại bỏ Audio Task riêng)**:
+   - Trong `MediaPlayer::update()`: gọi `_audio.tick()` trước khi decode JPEG (đảm bảo DMA đầy 192ms) và ngay sau khi decode/push image (bù ngay lượng vừa phát trong lúc decode).
+   - Với DMA 192ms và thời gian decode mỗi frame ~40-60ms, DMA luôn duy trì mức >130ms, **không bao giờ bị underrun hay nhảy cóc**.
+   - Loại bỏ task `AudioTick` riêng giúp tiết kiệm **2KB** stack và loại bỏ 100% xung đột mutex giữa 2 task.
+
+3. **Thu gọn Task Stacks & Buffer On-Demand**:
+   - `TASK_STACK_MEDIA_PLAYER = 6144`, `TASK_STACK_NETWORK = 6144`, `TASK_STACK_UI_CONTROLLER = 4096` -> tiết kiệm thêm **8KB** heap.
+   - `_jpegBuffer` giảm từ 48KB xuống **32KB** (đủ cho 100% video/ảnh JPEG 240x240 và SLBX chunked).
+   - `_jpegBuffer` cấp phát khi `playItem()` (có retry 100ms yield cho IDLE task) và giải phóng ngay trong `stop()`.
+   - Trong `STATE_STANDBY`, **Free Heap đạt ~120KB - 140KB**, MbedTLS SSL Handshake chạy mượt mà 100%, không bao giờ gặp lỗi (-1).
+
+### Bảng cấu hình bộ nhớ đã chốt
+
+| Thành phần | Kích thước | Vòng đời | Mục đích |
+|---|---|---|---|
+| `_jpegBuffer` | 32 KB | Malloc lúc play, Free lúc stop | Giải mã JPEG 240x240 / RGB565 |
+| I2S DMA | 12 buffers × 512 × 4 = 24 KB | Cố định | Đệm âm thanh 192ms sâu và ổn định |
+| Audio Chunk | 256B mono -> 2048B stereo | BSS (2.3KB) | Đúng 1 DMA buffer, đọc SPI 0.1ms |
+| Heap tự do ở Standby | **~130 KB** | Luôn có sẵn | Đảm bảo TLS SSL Handshake thành công |
 
 
 

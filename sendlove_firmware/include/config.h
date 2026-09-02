@@ -97,9 +97,9 @@ static constexpr UBaseType_t TASK_PRIORITY_NETWORK = 2;
 static constexpr UBaseType_t TASK_PRIORITY_UI_CONTROLLER = 5;
 
 static constexpr uint32_t TASK_STACK_POWER_MANAGER = 4096;
-static constexpr uint32_t TASK_STACK_MEDIA_PLAYER = 8192;
-static constexpr uint32_t TASK_STACK_NETWORK = 8192;
-static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 8192;
+static constexpr uint32_t TASK_STACK_MEDIA_PLAYER = 6144;
+static constexpr uint32_t TASK_STACK_NETWORK = 6144;
+static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
 
 // NVS Namespace
 static constexpr const char *NVS_NAMESPACE = "sendlove";
@@ -127,8 +127,11 @@ static constexpr uint32_t AUDIO_SAMPLE_RATE    = 8000;  // Hz — mặc định 
 // Trần an toàn cho pcmSize đọc từ header AUDC: 16kHz mono 16-bit × 18s.
 // Video bị web cắt ở 15s, audio cũng phải bị cắt theo — đây chỉ là chốt chặn cuối.
 static constexpr uint32_t AUDIO_MAX_PCM_BYTES  = 600000;
-static constexpr uint32_t AUDIO_PCM_CHUNK_SIZE = 1600;  // bytes = 100ms @ 8000Hz Mono
-static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 24;   // 24 buffers x 512 = 12288 samples (384ms buffer depth @ 32kHz)
+// 256 bytes mono = 128 samples = 16ms @ 8000Hz.
+// Oversample x4 Stereo = 512 samples = 2048 bytes = ĐÚNG 1 DMA BUFFER.
+// Tiết kiệm 12KB static RAM trong AudioPlayer, giúp DMA fit chuẩn 100% không dư rác.
+static constexpr uint32_t AUDIO_PCM_CHUNK_SIZE = 256;
+static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 12;   // 12 × 512 samples = 192ms @ 32kHz (24KB DMA RAM)
 static constexpr uint16_t AUDIO_DMA_BUF_LEN    = 512;   // samples per DMA buffer
 // BCLK ở 8kHz mono (~256kHz) quá thấp cho MAX98357A -> rè liên tục. Test tay
 // (2026-09-01): cùng tone phát sạch ở 44.1kHz, rè ở 8kHz -> không phải do

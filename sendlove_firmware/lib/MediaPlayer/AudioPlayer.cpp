@@ -190,16 +190,22 @@ bool AudioPlayer::fillChunk() {
     int bytesRead = _storage->readAt(_audioPcmOffset + _audioCursor, _chunk, toRead);
     if (bytesRead <= 0) return false;
 
-    // Expand Mono → Stereo + Oversample: mỗi mẫu mono 16-bit lặp lại
-    // AUDIO_OVERSAMPLE lần thành frame stereo (L+R) để I2S ở tốc độ
-    // sampleRate * AUDIO_OVERSAMPLE giữ đúng cao độ gốc.
+    // Expand Mono → Stereo + Linear Interpolation Oversample (x AUDIO_OVERSAMPLE):
+    // Thay vì lặp mẫu thô (Zero-Order Hold) tạo sóng bậc thang vuông vức gây chói gắt,
+    // nội suy tuyến tính nối mượt giữa mẫu hiện tại và mẫu tiếp theo:
+    // S[i] -> S[i+1], chia đều khoảng cách làm AUDIO_OVERSAMPLE nấc liên tục.
     const int16_t* pcm     = (const int16_t*)_chunk;
     int            samples = bytesRead / 2;
     for (int i = 0; i < samples; i++) {
+        int16_t currSample = pcm[i];
+        int16_t nextSample = (i + 1 < samples) ? pcm[i + 1] : currSample;
+        int32_t diff       = (int32_t)nextSample - (int32_t)currSample;
+
         for (int r = 0; r < AUDIO_OVERSAMPLE; r++) {
+            int16_t interpolated = (int16_t)(currSample + ((diff * r) / (int32_t)AUDIO_OVERSAMPLE));
             int idx = (i * AUDIO_OVERSAMPLE + r) * 2;
-            _stereo[idx]     = pcm[i]; // Left
-            _stereo[idx + 1] = pcm[i]; // Right
+            _stereo[idx]     = interpolated; // Left
+            _stereo[idx + 1] = interpolated; // Right
         }
     }
 

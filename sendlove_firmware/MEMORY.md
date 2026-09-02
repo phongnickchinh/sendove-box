@@ -283,7 +283,8 @@ lỗi chất lượng file WAV: user đã nghe file `.wav` sinh ra từ web, xá
 | Fix `fillChunk()` thiếu oversample x4: I2S init 32kHz nhưng data chỉ expand Mono→Stereo (không lặp mẫu) → audio phát nhanh gấp 4 + DMA underrun → tiếng rẹt rời rạc | `lib/MediaPlayer/AudioPlayer.cpp:192-219` | ✅ **ĐÃ KIỂM CHỨNG MÁY THẬT 2026-09-02: audio hết rẹt, đúng tốc độ** |
 | Fix giật chậm / âm thanh nhảy ngắt quãng khi phát message: Tắt `ScreenLogger` overlay khi play video, hoãn `WakeSync` mạng trong `STATE_VIDEO`, tăng DMA buffer lên 24 (384ms), bỏ delay thừa và sửa deadline Frame 0 | `MediaPlayer.cpp`, `ScreenLogger.cpp/.h`, `NetworkManager.cpp/.h`, `main.cpp`, `config.h` | ✅ **Đã cập nhật 2026-09-02** |
 | Fix Reboot khi Long Press -> Short Press ngay: Giữ I2S driver thường trực (chỉ `i2s_zero_dma_buffer` khi stop, không uninstall/install) + Cấp phát `_jpegBuffer` 48KB cố định 1 lần lúc `init()` (không malloc/free liên tục) | `AudioPlayer.cpp/.h`, `MediaPlayer.cpp/.h` | ✅ **Đã cập nhật 2026-09-02** |
-| Fix Chậm/Giật khi bấm ngay lúc vừa thức dậy có tin cục bộ: Hoãn `WakeSync` khi Touch Wakeup hoặc Standby đang có tin chưa đọc sẵn trong Flash (không để Wi-Fi TLS ngốn CPU lúc người dùng chuẩn bị xem) | `main.cpp`, `NetworkManager.cpp` | ✅ **Đã cập nhật 2026-09-02** |
+| Nâng cấp chất âm: Triển khai Nội suy tuyến tính (Linear Interpolation) trong `fillChunk()` thay vì lặp mẫu bậc thang (ZOH) → triệt tiêu sóng hài chói gắt, làm mềm và ấm giọng nói | `lib/MediaPlayer/AudioPlayer.cpp:190-210` | ✅ **Đã cập nhật 2026-09-02** |
+| Fix Firebase sync lỗi (-1): Giảm MbedTLS buffer từ 33KB xuống 3KB (`setBufferSizes(2048, 1024)`) + giảm I2S DMA buffer từ 24 xuống 12 (giải phóng 54KB RAM cho SSL Handshake) | `NetworkManager.cpp`, `config.h` | ✅ **Đã cập nhật 2026-09-02** |
 
 #### Defect gốc đã tìm ra ở vòng lặp tải (nguyên nhân treo tại `[NET] writing slot`)
 `http.getSize()` trả `-1` với response chunked. Điều kiện `while (http.connected() && (len > 0 || len == -1))`

@@ -39,6 +39,8 @@ bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
     if (_playerMutex == nullptr) {
         _playerMutex = xSemaphoreCreateRecursiveMutex();
     }
+    // Cấp phát 1 lần ngay khi khởi động: heap còn nguyên vẹn, khối 48KB
+    // liên tục luôn thành công. Không free trong stop() để tránh phân mảnh heap.
     if (_jpegBuffer == nullptr) {
         _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
     }
@@ -277,11 +279,14 @@ void MediaPlayer::stop() {
     }
     // Dừng I2S audio (zero DMA buffer & reset cursor)
     _audio.stop();
+    // Giữ _jpegBuffer — không free để tránh phân mảnh heap.
+    // Buffer này được cấp phát cố định 1 lần trong init() và chỉ giải phóng
+    // trong destructor khi toàn bộ đối tượng bị hủy.
     _state = PlaybackState::IDLE;
     _currentSlot = -1;
     _currentId[0] = '\0';
     _currentFrame = 0;
-    ScreenLogger::setOverlayEnabled(true); // Bật lại overlay log khi dừng video
+    ScreenLogger::setOverlayEnabled(true);
 
     if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
 }

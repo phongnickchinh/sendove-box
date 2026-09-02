@@ -284,7 +284,7 @@ lỗi chất lượng file WAV: user đã nghe file `.wav` sinh ra từ web, xá
 | Fix giật chậm / âm thanh nhảy ngắt quãng khi phát message: Tắt `ScreenLogger` overlay khi play video, hoãn `WakeSync` mạng trong `STATE_VIDEO`, tăng DMA buffer lên 24 (384ms), bỏ delay thừa và sửa deadline Frame 0 | `MediaPlayer.cpp`, `ScreenLogger.cpp/.h`, `NetworkManager.cpp/.h`, `main.cpp`, `config.h` | ✅ **Đã cập nhật 2026-09-02** |
 | Fix Reboot khi Long Press -> Short Press ngay: Giữ I2S driver thường trực (chỉ `i2s_zero_dma_buffer` khi stop, không uninstall/install) + Cấp phát `_jpegBuffer` 48KB cố định 1 lần lúc `init()` (không malloc/free liên tục) | `AudioPlayer.cpp/.h`, `MediaPlayer.cpp/.h` | ✅ **Đã cập nhật 2026-09-02** |
 | Nâng cấp chất âm: Triển khai Nội suy tuyến tính (Linear Interpolation) trong `fillChunk()` thay vì lặp mẫu bậc thang (ZOH) → triệt tiêu sóng hài chói gắt, làm mềm và ấm giọng nói | `lib/MediaPlayer/AudioPlayer.cpp:190-210` | ✅ **Đã cập nhật 2026-09-02** |
-| Fix Firebase sync lỗi (-1): Giảm MbedTLS buffer từ 33KB xuống 3KB (`setBufferSizes(2048, 1024)`) + giảm I2S DMA buffer từ 24 xuống 12 (giải phóng 54KB RAM cho SSL Handshake) | `NetworkManager.cpp`, `config.h` | ✅ **Đã cập nhật 2026-09-02** |
+| Fix Firebase sync lỗi (-1): Giảm MbedTLS buffer từ 33KB xuống 3KB (`setBufferSizes(2048, 1024)`) + giảm I2S DMA buffer từ 24 xuống 12 (giải phóng 54KB RAM cho SSL Handshake) | `NetworkManager.cpp`, `config.h` | ⚠️ **SAI — kiểm tra lại 2026-09-02 (review rủi ro)**: I2S DMA buffer 12 đã có trong `config.h` (`AUDIO_DMA_BUF_COUNT = 12`), nhưng grep `NetworkManager.cpp` **không thấy** lệnh `setBufferSizes()` ở đâu cả (chỉ có 5 chỗ `client.setInsecure()`). Phần giảm mbedTLS buffer coi như **chưa được áp dụng vào code**, dù dòng này ghi ✅. Giữ nguyên dòng gốc bên trái để không xoá lịch sử — chỉ đánh dấu sai ở đây. |
 
 #### Defect gốc đã tìm ra ở vòng lặp tải (nguyên nhân treo tại `[NET] writing slot`)
 `http.getSize()` trả `-1` với response chunked. Điều kiện `while (http.connected() && (len > 0 || len == -1))`
@@ -439,6 +439,149 @@ Không push, không tạo PR — chỉ làm local. Ba file bí mật không bao 
 | I2S DMA | 12 buffers × 512 × 4 = 24 KB | Cố định | Đệm âm thanh 192ms sâu và ổn định |
 | Audio Chunk | 256B mono -> 2048B stereo | BSS (2.3KB) | Đúng 1 DMA buffer, đọc SPI 0.1ms |
 | Heap tự do ở Standby | **~130 KB** | Luôn có sẵn | Đảm bảo TLS SSL Handshake thành công |
+
+---
+
+## 9. RISK REVIEW 2026-09-02 (Memory leak / Race condition / Resource leak / Bảo mật)
+
+Đánh giá đọc toàn bộ firmware, không sửa code. Đối chiếu với `codebase_review.md` (báo cáo cũ
+đã có sẵn trong repo) — mục nào đã fix thì ghi rõ, mục nào còn nguyên thì giữ nguyên độ ưu tiên.
+
+### Mới phát hiện, chưa có trong `codebase_review.md`
+
+1. **🔴 Regression tiềm ẩn: `_jpegBuffer` quay lại malloc/free theo từng lần playItem/stop**
+   (`MediaPlayer.cpp` staged diff hiện tại, `init()`/`playItem()`/`stop()`). Đây CHÍNH LÀ pattern
+   mà §8 Phase 3E ghi nhận từng gây **reboot khi Long Press → Short Press liên tiếp** (đã fix bằng
+   cách cấp phát 1 lần lúc `init()`, không free trong `stop()`). Phase 3F (vì lý do RAM cho TLS)
+   đã đảo ngược lại đúng pattern đó. Long Press (3s) rồi Short Press ngay sau (theo
+   `UIController::getTouchEvent()`) gọi `stop()` rồi `playItem()` liên tiếp trong cùng 1 tick —
+   free() rồi malloc() lại 32KB ngay lập tức, đúng kịch bản đã từng gây crash. **Chưa kiểm chứng
+   lại trên máy thật sau Phase 3F** — cần test kỹ đúng thao tác Long→Short trước khi tin tưởng.
+2. **🔴 `client.setInsecure()` ở cả 5 chỗ gọi Firebase REST** (`NetworkManager.cpp:521,547,584,603,664`).
+   Không xác thực chứng chỉ TLS → MITM có thể giả mạo `FIREBASE_HOST`, đọc/giả `FIREBASE_AUTH_SECRET`
+   (gửi dạng query param `?auth=...`) và tin nhắn media. Vì auth secret là static bearer token nhúng
+   cứng trong firmware, lộ 1 lần là lộ vĩnh viễn cho tới khi đổi secret.
+3. **⚠️ MEMORY.md ghi sai** (đã đánh dấu ở §8): `setBufferSizes(2048, 1024)` được ghi là ✅ đã áp
+   dụng nhưng **không tồn tại trong `NetworkManager.cpp`**. Nếu lỗi Firebase (-1) tái xuất hiện, đây
+   là nghi phạm đầu tiên cần xét lại, không phải NAND/audio.
+4. **⚠️ Dùng chung 1 `WiFiClientSecure client` cho 2 phiên `HTTPClient` lồng nhau** (video `http` +
+   audio `httpAudio` trong `checkAndDownloadNewMessages`, `NetworkManager.cpp:881-1057`): `http.end()`
+   của phiên video chỉ gọi SAU khi tải audio xong, trong khi `httpAudio.begin(client, ...)` đã mở một
+   phiên GET khác trên cùng object `client` khi `http` còn "sống". Chưa quan sát được crash nhưng đây
+   là chia sẻ resource không rõ ràng, dễ vỡ nếu WiFiClientSecure không tolerant việc này.
+5. **⚠️ Tái sử dụng `String` trong toàn bộ luồng Firebase** (`NetworkManager.cpp`: `String payload`,
+   `String rawMediaUrl`, `fullUrl.replace(...)`, `jsonEscape()`...) — mâu thuẫn trực tiếp với quyết
+   định Phase 2.5 "loại bỏ hoàn toàn String... triệt tiêu rò rỉ RAM/phân mảnh heap". Đây đúng là
+   luồng chạy trên background task ngay trước lúc cần heap sạch cho TLS handshake (lý do Phase 3F
+   tồn tại). Nhiều `String` concatenation nhỏ mỗi chu kỳ sync là nguồn phân mảnh heap hợp lý nhất
+   để nghi ngờ nếu OOM còn tái diễn.
+6. **⚠️ Data race đọc-sửa-ghi `_numOfNewMsg`**: `checkAndDownloadNewMessages()` (task nền `WakeSync`)
+   ghi đè `_numOfNewMsg = unreadInMem + newCloudMsg` trong khi `Task_MediaPlayer` gọi
+   `decrementNewMsgCount()` (`_numOfNewMsg--`) khi người dùng bấm chuyển tin. Biến có `volatile`
+   nên không bị compiler cache, nhưng phép `--` không atomic — nếu 2 task chạm cùng lúc có thể mất
+   1 lượt đếm. Rủi ro thấp (cửa sổ trùng thời điểm hiếm) nhưng vẫn là race thật.
+7. **⚠️ Task stack vừa giảm (staged diff `config.h`)**: `TASK_STACK_UI_CONTROLLER` 8192→4096,
+   `TASK_STACK_MEDIA_PLAYER` 8192→6144. Chưa thấy bằng chứng đã test stack watermark thực tế
+   (`uxTaskGetStackHighWaterMark`) sau khi giảm — JPEGDEC decode và WebServer callback trong
+   `Task_UIController`/`Task_NetworkController` đều có thể ăn stack sâu hơn ước tính. Theo Session
+   Rule §8, Agent không tự build — nên đây là việc cần User verify trên máy thật, không phải
+   assumption an toàn.
+8. **⚠️ `DEFAULT_WIFI_SSID`/`DEFAULT_WIFI_PASSWORD` (`include/config.h:83-84`) là Wi-Fi nhà thật, đã
+   nằm trong git log từ commit `a5970fc` (rất lâu trước 6 commit local hiện tại) — nhiều khả năng
+   **đã nằm trên origin** (repo ahead 6 commits, nghĩa là các commit cũ hơn đã push). Cân nhắc đổi
+   mật khẩu Wi-Fi thật hoặc dọn khỏi lịch sử git nếu origin là remote chia sẻ.
+
+### Từ `codebase_review.md` — đối chiếu lại, vẫn còn nguyên (chưa fix)
+
+- **3.1 Nguy cơ tự-deadlock `_spiMutex` non-recursive**: vẫn còn — `main.cpp` tạo
+  `xSemaphoreCreateMutex()` (không đệ quy), và `MediaPlayer::decodeOneFrame()` vẫn gọi
+  `DLOG("[PLAY] ERR: openRAM")` (`MediaPlayer.cpp:421`) ngay TRONG khối đã `acquireSPI()`
+  (dòng 408-424). `ScreenLogger::render()` timeout 50ms nên không treo vĩnh viễn, nhưng vẫn
+  gây đúng 50ms nghẽn Task_MediaPlayer mỗi lần rơi vào nhánh lỗi này.
+- **4.5 `NandStorage::formatAll()` poll `waitBusyInternal()` không yield**: vẫn còn nguyên,
+  Chip Erase 16MB (20-80s) có thể đụng Task Watchdog.
+- **4.1 `FirebaseClient.*` dead code**: vẫn còn, chưa xoá (không sao vì không ảnh hưởng runtime).
+- **5.1 OTA `/api/ota/*` không xác thực**: vẫn còn nguyên, port 80 mở công khai khi có Wi-Fi.
+- **5.2 Wi-Fi mặc định hardcode**: vẫn còn (xem mục 8 ở trên, đã bổ sung thêm ý git history).
+- **5.3 Bucket Firebase Storage hardcode**: vẫn còn (`NetworkManager.cpp` các đoạn build
+  `firebasestorage.googleapis.com/v0/b/iot-app-839a2...`).
+
+### Đã tự fix từ khi viết `codebase_review.md` (không cần làm lại)
+
+- **3.4 Audio `fillChunk()` drop sample không theo dõi `written`**: ĐÃ FIX — bản hiện tại ghi cả
+  chunk 1 lần bằng `i2s_write(..., &written, 0)` và cộng dồn `_audioCursor` đúng theo `written`
+  thực tế (`AudioPlayer.cpp:216-227`).
+- **2.2 `_isNtpSyncing` treo vĩnh viễn nếu `xTaskCreate` fail**: bug logic vẫn còn trong
+  `triggerNtpSync()` (`NetworkManager.cpp:172-176`, không kiểm tra `pdPASS`), NHƯNG hàm này
+  giờ là **dead code** — chỉ còn gọi từ `src/main.cpp.bak`, `main.cpp` thật đã chuyển hết sang
+  `triggerWakeupSync()` (có kiểm tra `pdPASS` đầy đủ, `NetworkManager.cpp:459-464`). Hạ độ ưu
+  tiên xuống thấp, chỉ là bom nổ chậm nếu sau này có ai gọi lại `triggerNtpSync()`.
+- **4.4 lỗi chính tả "Sar"**: ĐÃ FIX, code hiện tại đúng `"Sat"` (`NetworkManager.cpp:217`).
+- **3.2 SDCardManager thiếu NOP Hack**: không ảnh hưởng hiện tại vì `ACTIVE_STORAGE_TYPE` đang
+  set NAND (`config.h:110`), nhưng nếu tương lai chuyển sang SD thì bug này vẫn còn nguyên, chưa
+  verify lại.
+
+### Quyết định đã CHỐT sau review (2026-09-02, bổ sung)
+
+- **Bỏ hẳn "có tin local thì hoãn sync"**: User xác nhận logic này *không hợp lý* — 2 chỗ trong
+  `Task_UIController` (`main.cpp`) từng skip trigger sync ngầm khi `storage->hasUnreadMessage()`
+  đã true (1 lần ở post-wakeup sync, 1 lần ở periodic 10s check), với lý do cũ là nhường CPU/SPI
+  cho Short Press phát ngay. Đã xoá cả 2 nhánh — giờ chỉ còn điều kiện `isFull()` mới skip sync.
+  Quay lại nguyên tắc: luôn check tin mới trên Cloud + tải đầy đủ vào slot, không có tin local nào
+  được coi là "đủ mới" để hoãn việc kiểm tra Cloud. **Chưa test lại trên máy thật.**
+
+### Bug thật đã tìm ra và fix (2026-09-02): slot dở do download stall bị công nhận nhầm là "tin hợp lệ"
+
+**Triệu chứng user báo**: 1 message video 2.21MB (15s, 225 frame @15fps) + voice 240KB luôn tải
+dừng ở ~20% rồi timeout. Mở slot vẫn phát được vài giây đầu (không tiếng) rồi lỗi `Bad jpegSize`.
+Tin nhắn không được đánh dấu đã tải (`ts fail`). Một message khác nhỏ hơn (1.68MB/10s, 151 frame,
+voice 161KB) tải/đọc bình thường.
+
+**Đối chiếu 2 file .bin gốc bằng hex dump** (`SLBX` header offset 0-19 trong file gốc, tương ứng
+offset 4-23 sau khi firmware chèn 4 byte size ở đầu slot): cấu trúc header, `mediaType`, `w/h=240`,
+`fps=15`, `totalFrames` (225 vs 151) đều đúng chuẩn và giống hệt về layout giữa 2 file — **web
+convert/encode KHÔNG có lỗi**, chỉ khác nhau về độ dài (message lỗi dài đúng 15s = trần cắt của
+web, nên file lớn hơn, tải lâu hơn).
+
+**Root cause thật (bug ở box, không phải ở web)**: `checkAndDownloadNewMessages()`
+(`NetworkManager.cpp`) gọi `storage->closeWrite(maxDisplayTime)` **VÔ ĐIỀU KIỆN** sau vòng lặp tải,
+kể cả khi `writeError = true` (do `DOWNLOAD_STALL_TIMEOUT_MS = 10000` bắn lên giữa chừng ở file
+lớn). `NandStorageProvider::closeWrite()` luôn ghi bảng slot + set bit `unread` bất kể dữ liệu có
+đủ hay không — vì 20 byte đầu (SLBX header + `totalFrames=225`) đã tới nơi trước lúc stall, header
+check nhận diện đúng "VJPG", box tưởng slot hợp lệ và cho phát. Phát tới đúng điểm dữ liệu bị cụt
+(~20%) thì đọc trúng vùng NAND đã erase nhưng chưa từng ghi (toàn `0xFF`) → `jpegSize` đọc ra rác
+→ `Bad jpegSize`. Audio không có tiếng vì nhánh tải voice nằm TRONG khối `if (!writeError...)` nên
+bị bỏ qua hoàn toàn khi video đã lỗi. Vì `messageSuccess = false`, code `break` vòng lặp tin nhắn
+và không cập nhật `last_download_ts` (đúng như log "ts fail" user thấy) — nhưng slot vật lý **đã bị
+đánh dấu unread với dữ liệu rác**, ngồi chình ình chiếm 1 trong 5 slot.
+
+**Fix đã áp dụng**:
+1. Thêm `IStorageProvider::discardWrite()` (mặc định no-op) — huỷ phiên ghi dở dang, KHÔNG commit
+   bảng slot, KHÔNG set bit unread (`lib/Storage/IStorageProvider.h`).
+2. `NandStorageProvider::discardWrite()`: xoá magic slot vừa erase-dở (để `isSlotValid()` không
+   nhận nhầm), ghi lại slot table, **không đụng `_writeSlotIndex`** — lần sync sau sẽ retry đúng
+   slot này thay vì đốt thêm 1 slot mới mỗi lần fail (`lib/Storage/NandStorageProvider.cpp`).
+3. `NetworkManager::checkAndDownloadNewMessages()`: tính `downloadComplete` TRƯỚC, gọi
+   `closeWrite()` khi thành công / `discardWrite()` khi lỗi, thay vì `closeWrite()` vô điều kiện
+   (`NetworkManager.cpp` ~dòng 940-957).
+
+**Chưa fix, ghi lại để không quên**: nhánh tải audio lồng bên trong (dòng ~1014-1017,
+`while (!aWriteError && httpAudio.connected() ...)`) khi stall chỉ `break` mà KHÔNG set
+`aWriteError = true`, log vẫn in "Audio DL OK". Ít nghiêm trọng hơn (video đã hợp lệ, `closeAppend()`
+vẫn tính đúng `audioSize` theo số byte thực ghi nên không lộ dữ liệu rác — chỉ là tiếng bị cắt cụt
+mà log báo nhầm "OK") — chưa sửa vì không phải nguyên nhân bug user báo lần này.
+
+**Nghi vấn còn treo (nguyên nhân TẠI SAO stall xảy ra ở file lớn)**: có thể liên quan tới việc
+`setBufferSizes(2048,1024)` cho mbedTLS **chưa thực sự có trong code** dù MEMORY.md từng ghi ✅
+(xem mục sai đã đánh dấu ở Phase 3F, bảng cấu hình bộ nhớ). File càng lớn thì thời gian giữ kết nối
+TLS càng lâu, càng dễ va phải heap fragmentation/RSSI kém. Nếu áp `setBufferSizes` thật vào code mà
+vẫn stall thì mới nên nghi ngờ tầng khác (Firebase Storage CDN, router).
+
+**✅ ĐÃ KIỂM CHỨNG MÁY THẬT 2026-09-02**: User xác nhận tải lại được bình thường (đúng message
+2.21MB/240KB từng bị stall) sau fix `discardWrite()`. Tạm chốt là ĐÃ FIX. Chưa rõ do fix
+`discardWrite()` (giải phóng đúng slot để retry sạch thay vì kẹt slot rác) hay do stall gốc chỉ là
+nhất thời (Wi-Fi/CDN) — không set lại `setBufferSizes()` lần này, chỉ ghi lại làm nghi vấn dự phòng
+nếu hiện tượng stall tái diễn với file lớn khác.
 
 
 

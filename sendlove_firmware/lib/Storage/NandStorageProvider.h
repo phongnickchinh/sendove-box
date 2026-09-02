@@ -25,6 +25,7 @@ public:
     bool openForWrite(const char* identifier) override;
     size_t writeChunk(const uint8_t* data, size_t len) override;
     void closeWrite(uint32_t maxDisplayTime = 60) override;
+    void discardWrite() override;
 
     /// Ghi tiếp dữ liệu vào slot vừa đóng (dùng để append audio sau video)
     bool openForAppend(const char* identifier = nullptr) override;

@@ -937,10 +937,23 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             }
                             delay(1);
                         }
-                        storage->closeWrite(maxDisplayTime);
+                        // Chốt kết quả TRƯỚC khi quyết định commit hay huỷ. closeWrite() ghi
+                        // slot table + set unread bit; gọi vô điều kiện như code cũ khiến 1 lần
+                        // stall/timeout giữa chừng cũng biến slot dở (dữ liệu cụt) thành "tin
+                        // hợp lệ chưa đọc" -> phát được vài giây đầu (đủ 20-byte header) rồi lỗi
+                        // Bad jpegSize khi chạm vùng chưa ghi (bug xác nhận 2026-09-02, video
+                        // 15s/2.2MB bị NAND/mạng stall ~20%). Lỗi thật -> discardWrite(): không
+                        // đụng slot table/unread bitmask, giữ nguyên _writeSlotIndex để lần sync
+                        // sau retry đúng slot này thay vì đốt thêm 1 slot mới cho mỗi lần fail.
+                        bool downloadComplete = !writeError && (initialLen <= 0 || totalRead >= initialLen);
+                        if (downloadComplete) {
+                            storage->closeWrite(maxDisplayTime);
+                        } else {
+                            storage->discardWrite();
+                        }
 
                         // Kiểm tra dữ liệu đã tải trọn vẹn 100% chưa
-                        if (!writeError && (initialLen <= 0 || totalRead >= initialLen)) {
+                        if (downloadComplete) {
                             DLOG("[NET] DL OK slot %s", writeSlotId);
 
                             // --- Download audio nếu có voice_url ---
@@ -1046,7 +1059,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                 _onDownloadComplete();
                             }
                         } else {
-                            DLOG("[NET] DL err: %d/%d", totalRead, initialLen);
+                            DLOG("[NET] DL err: %d/%d (discarded)", totalRead, initialLen);
                         }
                     } else {
                         DLOG("[NET] DL err: open slot %s", writeSlotId);

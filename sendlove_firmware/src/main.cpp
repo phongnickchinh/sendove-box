@@ -232,8 +232,7 @@ void Task_UIController(void *pvParameters) {
 
     // Periodic check if device is kept awake in Standby UI (every 10s)
     bool isStorageFull = (appCtx.storage && appCtx.storage->isFull());
-    bool hasUnread = (appCtx.storage && appCtx.storage->hasUnreadMessage());
-    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !hasUnread && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
+    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
         bool isCharging = appCtx.powerManager.isCharging();
@@ -302,15 +301,11 @@ void Task_UIController(void *pvParameters) {
       // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm
       vTaskDelay(pdMS_TO_TICKS(200));
 
-      // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy
+      // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy.
+      // Luôn check tin mới + tải đầy đủ vào slot trước khi cho phát — không còn
+      // nhánh "có tin local sẵn thì hoãn sync" (dễ bỏ sót tin mới trên Cloud).
       if (appCtx.storage && appCtx.storage->isFull()) {
           DLOG("[SLP] post-wakeup sync skip: FULL");
-      } else if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER && appCtx.storage && appCtx.storage->hasUnreadMessage()) {
-          // Touch Wakeup khi ĐÃ CÓ tin nhắn chưa đọc trong bộ nhớ:
-          // Người dùng chạm vào box để XEM TIN NHẮN ĐÃ CÓ.
-          // KHÔNG kích hoạt đồng bộ mạng ngầm ngay lập tức để nhường trọn vẹn 100% CPU và SPI,
-          // giúp bấm Short Press phát ngay lập tức siêu mượt, không bị nghẽn bởi Wi-Fi TLS.
-          DLOG("[SLP] post-wakeup sync deferred: unread local msg ready");
       } else {
           // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
           uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();

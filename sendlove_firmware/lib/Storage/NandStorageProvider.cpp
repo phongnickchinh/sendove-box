@@ -209,6 +209,22 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     DLOG("[NANDP] written slot %d next %d", writtenSlot, _writeSlotIndex);
 }
 
+void NandStorageProvider::discardWrite() {
+    if (_activeSlot >= 0 && _activeSlot < NAND_SLOT_COUNT) {
+        DLOG("[NANDP] discardWrite slot %d (bo %lu byte do)", _activeSlot, (unsigned long)_writeOffset);
+        // Vung vat ly da bi erase do dang luc openForWrite(); phai xoa magic trong
+        // bang slot de isSlotValid()/findFirstValidSlot() khong nhat nham du lieu
+        // rac nay la mot item hop le. KHONG dung _unreadBitmask (chua bao gio set)
+        // va KHONG dung _writeSlotIndex (van tro dung slot nay de lan sync sau retry
+        // lai chinh no thay vi dot them 1 slot moi cho moi lan fail).
+        const char emptyMagic[4] = {0, 0, 0, 0};
+        _nand.setSlotInfo(_activeSlot, emptyMagic, 0, 0, 0, 0);
+        _nand.writeSlotTable();
+    }
+    _writeOffset = 0;
+    _slotCapacity = 0;
+}
+
 bool NandStorageProvider::openForAppend(const char* identifier) {
     int8_t slot = parseSlotId(identifier);
     if (slot < 0 || slot >= NAND_SLOT_COUNT) {

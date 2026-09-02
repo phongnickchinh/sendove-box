@@ -66,6 +66,10 @@ public:
     /// Đóng item đang ghi
     virtual void closeWrite(uint32_t maxDisplayTime = 60) = 0;
 
+    /// Huỷ bỏ phiên ghi dở dang (download lỗi / stall giữa chừng): KHÔNG commit
+    /// slot table, KHÔNG đánh dấu unread — khác với closeWrite(). Mặc định no-op.
+    virtual void discardWrite() { }
+
     /// Ghi tiếp dữ liệu vào slot vừa đóng mà không erase (dùng để append audio sau video)
     /// Mặc định: no-op (chỉ NAND storage hỗ trợ)
     virtual bool openForAppend(const char* identifier = nullptr) { (void)identifier; return false; }

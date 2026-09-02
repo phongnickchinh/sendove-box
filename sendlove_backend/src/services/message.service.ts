@@ -29,7 +29,7 @@ export class MessageService {
       original_video: { path: `${basePath}/original.mp4`, contentType: 'video/mp4',              maxSize: 50 * 1024 * 1024 }, // 50MB
       original_image: { path: `${basePath}/original.jpg`, contentType: 'image/jpeg',             maxSize: 10 * 1024 * 1024 }, // 10MB
       original_gif:   { path: `${basePath}/original.gif`, contentType: 'image/gif',              maxSize: 20 * 1024 * 1024 }, // 20MB
-      bg_music:       { path: `${basePath}/bgmusic.mp3`, contentType: 'audio/mpeg',              maxSize: 5 * 1024 * 1024 },  // 5MB
+      bg_music:       { path: `${basePath}/bgmusic.wav`, contentType: 'audio/wav',               maxSize: 5 * 1024 * 1024 },  // 5MB
       thumbnail:      { path: `${basePath}/thumb.jpg`,  contentType: 'image/jpeg',               maxSize: 1 * 1024 * 1024 },  // 1MB
     };
 
@@ -82,7 +82,7 @@ export class MessageService {
       ...(uploaded.includes('bin') && { bin_url: `${basePath}/video.bin` }),
       ...(uploaded.includes('voice') && { voice_url: `${basePath}/voice.wav` }),
       ...(uploaded.includes('thumbnail') && { thumbnail_url: `${basePath}/thumb.jpg` }),
-      ...(uploaded.includes('bg_music') && { bg_music_url: `${basePath}/bgmusic.mp3` }),
+      ...(uploaded.includes('bg_music') && { bg_music_url: `${basePath}/bgmusic.wav` }),
       ...(uploaded.includes('original_video') && { video_url: `${basePath}/original.mp4` }),
       ...(uploaded.includes('original_image') && { image_url: `${basePath}/original.jpg` }),
       ...(uploaded.includes('original_gif') && { gif_url: `${basePath}/original.gif` }),
@@ -96,7 +96,7 @@ export class MessageService {
         bin: 'video.bin',
         voice: 'voice.wav',
         thumbnail: 'thumb.jpg',
-        bg_music: 'bgmusic.mp3',
+        bg_music: 'bgmusic.wav',
         original_video: 'original.mp4',
         original_image: 'original.jpg',
         original_gif: 'original.gif',

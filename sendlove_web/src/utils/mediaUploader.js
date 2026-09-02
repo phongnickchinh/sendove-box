@@ -55,6 +55,7 @@ export const uploadMessage = async (boxId, data, onProgress) => {
   
   if (data.binBlob) blobsToUpload.push({ type: 'bin', blob: data.binBlob, contentType: 'application/octet-stream' });
   if (data.voiceBlob) blobsToUpload.push({ type: 'voice', blob: data.voiceBlob, contentType: 'audio/wav' });
+  if (data.bgMusicBlob) blobsToUpload.push({ type: 'bg_music', blob: data.bgMusicBlob, contentType: 'audio/wav' });
   if (data.thumbBlob) blobsToUpload.push({ type: 'thumbnail', blob: data.thumbBlob, contentType: 'image/jpeg' });
   
   if (data.originalBlob) {

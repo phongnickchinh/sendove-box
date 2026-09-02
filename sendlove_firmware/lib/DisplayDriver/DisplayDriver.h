@@ -77,6 +77,13 @@ public:
   /// Display a centered message on screen
   void showMessage(const char *message);
 
+  /// Word-wrap và vẽ caption ASCII (đã bỏ dấu tiếng Việt từ trước bởi caller)
+  /// trong 1 vùng chữ nhật (x,y,w,h). Tự ngắt dòng theo bề rộng pixel thực tế
+  /// bằng font ChakraPetch_SemiBold_16, giới hạn số dòng vừa chiều cao vùng,
+  /// dòng cuối thêm "..." nếu văn bản dài hơn chỗ hiển thị.
+  void showWrappedText(const char *asciiText, int32_t x, int32_t y, int32_t w, int32_t h,
+                        uint16_t color = 0xFFFF);
+
   /// Set backlight brightness percentage (0-100)
   void setBacklight(uint8_t percent);
 

@@ -2,6 +2,7 @@
 #include "config.h"
 #include "driver/gpio.h"
 #include <esp_arduino_version.h>
+#include "ChakraPetch_SemiBold_16.h"
 
 #if defined(ESP_ARDUINO_VERSION) && ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
 // ESP32 Core 3.0+
@@ -74,6 +75,72 @@ void DisplayDriver::showMessage(const char *message) {
   _tft.setTextSize(2);
   _tft.drawString(message, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
   _tft.setTextSize(1);
+  releaseSPI();
+}
+
+void DisplayDriver::showWrappedText(const char *asciiText, int32_t x, int32_t y, int32_t w, int32_t h,
+                                     uint16_t color) {
+  if (asciiText == nullptr || asciiText[0] == '\0' || w <= 0 || h <= 0) return;
+  if (!acquireSPI()) return;
+
+  _tft.setFont(&ChakraPetch_SemiBold_16);
+  _tft.setTextColor(color);
+  _tft.setTextDatum(lgfx::top_center);
+
+  // yAdvance font = 29 (xem ChakraPetch_SemiBold_16.h); dùng nguyên làm line height.
+  const int32_t lineHeight = 29;
+  int32_t maxLines = h / lineHeight;
+  if (maxLines < 1) maxLines = 1;
+  if (maxLines > 16) maxLines = 16;
+
+  // Bản copy cục bộ vì strtok() sửa thẳng vào buffer.
+  char buf[300];
+  strncpy(buf, asciiText, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  char lines[16][48];
+  int lineCount = 0;
+  char currentLine[64] = "";
+
+  char *word = strtok(buf, " ");
+  while (word != nullptr && lineCount < maxLines) {
+    char trial[64];
+    if (currentLine[0] == '\0') {
+      snprintf(trial, sizeof(trial), "%s", word);
+    } else {
+      snprintf(trial, sizeof(trial), "%s %s", currentLine, word);
+    }
+    if (_tft.textWidth(trial) <= w || currentLine[0] == '\0') {
+      strncpy(currentLine, trial, sizeof(currentLine) - 1);
+      currentLine[sizeof(currentLine) - 1] = '\0';
+    } else {
+      strncpy(lines[lineCount], currentLine, sizeof(lines[0]) - 1);
+      lines[lineCount][sizeof(lines[0]) - 1] = '\0';
+      lineCount++;
+      strncpy(currentLine, word, sizeof(currentLine) - 1);
+      currentLine[sizeof(currentLine) - 1] = '\0';
+    }
+    word = strtok(nullptr, " ");
+  }
+  if (lineCount < maxLines && currentLine[0] != '\0') {
+    strncpy(lines[lineCount], currentLine, sizeof(lines[0]) - 1);
+    lines[lineCount][sizeof(lines[0]) - 1] = '\0';
+    lineCount++;
+  }
+  // Còn từ chưa xếp hết -> bị cắt do quá dài, đánh dấu bằng "..." ở dòng cuối.
+  if (word != nullptr && lineCount > 0) {
+    size_t len = strlen(lines[lineCount - 1]);
+    if (len > sizeof(lines[0]) - 4) len = sizeof(lines[0]) - 4;
+    lines[lineCount - 1][len] = '\0';
+    strncat(lines[lineCount - 1], "...", sizeof(lines[0]) - len - 1);
+  }
+
+  int32_t startY = y + (h - lineCount * lineHeight) / 2;
+  if (startY < y) startY = y;
+  for (int i = 0; i < lineCount; i++) {
+    _tft.drawString(lines[i], x + w / 2, startY + i * lineHeight);
+  }
+
   releaseSPI();
 }
 

@@ -31,7 +31,7 @@ bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     uint8_t header[4 + NAND_SLOT_COUNT * sizeof(SlotEntry)];
     readRaw(0, header, sizeof(header));
 
-    if (memcmp(header, "NSL2", 4) != 0) {
+    if (memcmp(header, "NSL3", 4) != 0) {
         DLOG("[NAND] no table -> init clean");
         memset(_slots, 0, sizeof(_slots));
         writeSlotTable();
@@ -59,6 +59,37 @@ void NandStorage::setSlotInfo(uint8_t slot, const char* magic, uint32_t dataSize
 void NandStorage::setSlotAudioSize(uint8_t slot, uint32_t audioSize) {
     if (slot >= NAND_SLOT_COUNT) return;
     _slots[slot].audioSize = audioSize;
+}
+
+void NandStorage::setSlotText(uint8_t slot, const char* text, uint16_t len) {
+    if (slot >= NAND_SLOT_COUNT) return;
+    if (!text || len == 0) {
+        _slots[slot].textLen = 0;
+        _slots[slot].text[0] = '\0';
+        return;
+    }
+    // Cắt bớt an toàn nếu vượt buffer — không cắt giữa 1 ký tự UTF-8 nhiều byte
+    // (byte tiếp theo là continuation byte nếu (b & 0xC0) == 0x80).
+    uint16_t copyLen = (len < SLOT_TEXT_MAX_LEN - 1) ? len : (SLOT_TEXT_MAX_LEN - 1);
+    while (copyLen > 0 && (((uint8_t)text[copyLen]) & 0xC0) == 0x80) {
+        copyLen--;
+    }
+    memcpy(_slots[slot].text, text, copyLen);
+    _slots[slot].text[copyLen] = '\0';
+    _slots[slot].textLen = copyLen;
+}
+
+uint16_t NandStorage::getSlotText(uint8_t slot, char* outBuf, size_t maxLen) const {
+    if (slot >= NAND_SLOT_COUNT || !outBuf || maxLen == 0) return 0;
+    uint16_t len = _slots[slot].textLen;
+    if (len == 0) {
+        outBuf[0] = '\0';
+        return 0;
+    }
+    uint16_t copyLen = (len < maxLen - 1) ? len : (uint16_t)(maxLen - 1);
+    memcpy(outBuf, _slots[slot].text, copyLen);
+    outBuf[copyLen] = '\0';
+    return copyLen;
 }
 
 int NandStorage::readAtSlot(uint32_t offset, uint8_t* buf, uint32_t len) {
@@ -337,7 +368,7 @@ void NandStorage::releaseSPI() {
 
 void NandStorage::writeSlotTable() {
     uint8_t header[4 + NAND_SLOT_COUNT * sizeof(SlotEntry)];
-    memcpy(header, "NSL2", 4);
+    memcpy(header, "NSL3", 4);
     for (uint8_t i = 0; i < NAND_SLOT_COUNT; i++) {
         memcpy(header + 4 + i * sizeof(SlotEntry), &_slots[i], sizeof(SlotEntry));
     }

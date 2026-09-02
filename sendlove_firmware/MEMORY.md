@@ -583,6 +583,87 @@ vẫn stall thì mới nên nghi ngờ tầng khác (Firebase Storage CDN, route
 nhất thời (Wi-Fi/CDN) — không set lại `setBufferSizes()` lần này, chỉ ghi lại làm nghi vấn dự phòng
 nếu hiện tượng stall tái diễn với file lớn khác.
 
+### Text đi kèm message — ĐÃ LÀM (2026-09-02, đảo ngược quyết định "hoãn" ở trên)
+
+User quay lại yêu cầu làm ngay (không hoãn nữa), với điều kiện: **tạm thời bỏ dấu tiếng Việt**
+(ASCII-fold) vì font `ChakraPetch_*.h` xác nhận chỉ có glyph ASCII 32-126 (đọc trực tiếp struct
+`GFXfont` trong file, `first=32,last=126`) — không đủ cho tiếng Việt có dấu, và chưa có word-wrap ở
+đâu trong codebase. Đồng thời user yêu cầu gộp luôn ảnh + text + "nhạc nền" (voice đổi vai trò) thành
+1 loại "tin nhắn tĩnh", và thêm 1 card mới trên web sender — **không tạo `type` enum mới ở backend**,
+tái dùng `type: "image"` có sẵn (message schema đã phẳng, field nào cũng optional trên mọi `type`).
+
+**Đã code xong cả 3 tầng, CHƯA build/test trên máy thật** (theo Session Rule, Agent không tự chạy
+`pio run`; web/backend cũng chưa tự build/deploy — chỉ sửa source).
+
+#### Tầng Backend (`sendlove_backend`)
+- Phát hiện quan trọng: `bg_music_url`/upload config `bg_music` **đã có sẵn từ trước** (scaffold cũ,
+  không phải do phiên này thêm) — nhưng cấu hình sai định dạng `bgmusic.mp3`/`audio/mpeg` trong khi
+  firmware chỉ decode được WAV/PCM (không có decoder MP3, không khả thi nhét vào ESP32-C3). Đã sửa
+  `message.service.ts` (+ bản compiled `.js`) đổi 3 chỗ: `typeMap.bg_music`, URL construction, fileMap
+  — tất cả từ `bgmusic.mp3`/`audio/mpeg` sang `bgmusic.wav`/`audio/wav`. Không đổi `type` enum.
+
+#### Tầng Web (`sendlove_web`)
+- `SenderUI.jsx`: thêm card `static` vào `TYPES`/`STEP2_TITLE` (UI-key nội bộ, KHÔNG phải giá trị gửi
+  backend). Bước 2 mới: `ImageInput` (tuỳ chọn, giữ tạm blob qua state `staticImageBlob` thay vì upload
+  ngay) + textarea dùng chung state `text` sẵn có + `VoiceInput` (tuỳ chọn, giữ tạm qua
+  `staticAudioData`, đóng vai "nhạc nền"). `processAndUpload()` nhánh `static` mới: ép cứng
+  `payload.type = 'image'`, bồi `binBlob`/`thumbBlob` (nếu có ảnh, tái dùng `encodeImageToBin` y hệt
+  card ảnh) + `bgMusicBlob` (field MỚI, khác `voiceBlob`). `handleCancel()` giờ cũng clear `text` +
+  2 state mới — tiện thể fix luôn bug nhỏ đã phát hiện trước đó ("text không bị xoá khi đổi mode").
+- `EncodingProgress.jsx`: thêm `static` vào `TYPE_ICON`/`TYPE_LABEL`.
+- `mediaUploader.js`: thêm 1 dòng `if (data.bgMusicBlob) blobsToUpload.push({type:'bg_music',...})`
+  song song dòng `voiceBlob` có sẵn — không sửa gì khác (logic build request đã trung lập với `type`).
+
+#### Tầng Firmware (`sendlove_firmware`)
+- **`lib/NandStorage/NandStorage.h/.cpp`**: bump magic bảng slot `NSL2 → NSL3` (tiền lệ NSLT→NSL2).
+  **Side effect đã biết trước**: lần boot đầu sau khi nạp, tin nhắn unread cũ trên máy bị xoá 1 lần.
+  `SlotEntry` +`uint16_t textLen +char text[256]` (hằng số `SLOT_TEXT_MAX_LEN=256`, đủ ~7-8 dòng).
+  Thêm `setSlotText()`/`getSlotText()` — set field-only (không `memset()` cả struct, giống pattern
+  `setSlotAudioSize()`), cắt bớt an toàn tại ranh giới UTF-8 nếu text > 256 byte.
+- **`lib/Storage/IStorageProvider.h`**: thêm `setItemText()`/`getItemText()` (mặc định no-op, SD Card
+  chưa hỗ trợ). **`NandStorageProvider`**: implement 2 hàm trên; mở rộng `discardWrite()` (đã có từ
+  lần fix video-stall trước) để **cũng xoá bit `_unreadBitmask` + lùi `_writeSlotIndex`** — cần vì
+  đường ghi audio/text-only phải `closeWrite()` commit placeholder TRƯỚC (để `openForAppend()` tính
+  đúng offset), rồi mới biết audio có tải được không; nếu lỗi phải undo được cả sau khi đã commit.
+- **`lib/NetworkManager/NetworkManager.cpp`**:
+  - Thêm `bg_music_url`/`bgMusicUrl` vào `voiceKeys[]` — tái dùng 100% cơ chế audio append có sẵn.
+  - Parse `msg["text"]` lần đầu tiên (trước đây không đọc field này ở đâu cả).
+  - Tách khối tải audio (từng inline trong nhánh ảnh/video) thành method riêng
+    `downloadVoiceSegment()`, dùng chung cho nhánh ảnh/video (audio là phụ, lỗi không huỷ message) và
+    nhánh mới "static không ảnh" (audio là nội dung chính, lỗi → `discardWrite()` huỷ cả message).
+    Nhân tiện fix 1 bug có sẵn: audio bị stall trước đây không set `aWriteError=true` → log báo nhầm
+    "OK" dù cụt tiếng.
+  - Thêm nhánh `else if (rawVoiceUrl.length() > 0 || rawText.length() > 0)` xử lý message không có
+    ảnh/video: mở slot rỗng (dataSize=4 sentinel) → tải audio (nếu có) → ghi text (nếu có).
+- **`lib/MediaPlayer/MediaPlayer.cpp`**:
+  - **Bug có sẵn phát hiện qua trace, đã fix**: `update()` trước đây chỉ tick audio khi
+    `_state==PLAYING`; ảnh tĩnh dùng `_state=SHOWING` nên **combo ảnh+voice ĐANG câm tiếng** dù
+    NetworkManager tải đúng. Thêm nhánh tick audio khi `SHOWING` — fix chung cho cả bug cũ lẫn
+    voice-only/tin nhắn tĩnh mới.
+  - `playItem()`: phát hiện sentinel "không ảnh thật" (`type==IMAGE && dataSize<=4`) → bỏ qua hoàn
+    toàn dò header SLBX + `decodeOneFrame()` (tránh lỗi "Bad jpegSize: 0" + `delay(2000)` chặn màn
+    hình), chỉ giữ màn đen (bản NAND; bản SD card để phase sau theo đúng ý user). Sau ảnh/màn đen: nếu
+    có caption, gọi `asciiFoldVietnamese()` (bảng map Unicode tiếng Việt U+1EA0-1EF9 + Latin-1/Extended-A
+    → ASCII gần nhất, hàm static mới trong file) rồi `_display->showWrappedText()`.
+- **`lib/DisplayDriver/DisplayDriver.h/.cpp`**: thêm `showWrappedText()` — greedy word-wrap đo
+  `textWidth()` từng từ bằng font `ChakraPetch_SemiBold_16` có sẵn, giới hạn số dòng vừa vùng hiển thị
+  (dải dưới màn nếu có ảnh, gần trọn màn nếu không ảnh), dòng cuối thêm "..." nếu bị cắt.
+
+#### Chưa làm / để phase sau (theo đúng phạm vi đã chốt)
+- Font Unicode thật cho tiếng Việt có dấu (đang ASCII-fold tạm thời).
+- Background mặc định cho bản SD card khi không có ảnh (bản NAND dùng màn đen).
+- Audio-stall-not-marking-error trong nhánh audio lồng ảnh/video: đã fix (dùng chung
+  `downloadVoiceSegment()` nên fix 1 chỗ áp dụng cho cả 2 đường).
+
+#### Cần user xác nhận trên máy thật (chưa build/flash/deploy)
+1. Card cũ (video/ảnh/voice/text riêng lẻ) không bị regression.
+2. Card "Tin nhắn tĩnh" — từng tổ hợp riêng lẻ (chỉ ảnh/chỉ text/chỉ nhạc nền) và tổ hợp 2-3 thành phần.
+3. Combo ảnh+voice (kể cả từ card cũ) giờ có tiếng — trước đây câm.
+4. Tải lỗi/stall với audio/text-only: slot phải bị `discardWrite()` sạch, không để lại slot rác.
+5. Sau khi nạp firmware NSL3 lần đầu: tin nhắn cũ (nếu còn) bị xoá 1 lần — xác nhận đúng dự kiến.
+6. Message tạo từ card mới xuất hiện trên Firebase với `type:"image"` (không phải `"static"`) và có
+   `bg_music_url` khi có đính kèm audio.
+
 
 
 

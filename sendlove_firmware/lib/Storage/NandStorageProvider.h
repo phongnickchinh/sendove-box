@@ -26,6 +26,8 @@ public:
     size_t writeChunk(const uint8_t* data, size_t len) override;
     void closeWrite(uint32_t maxDisplayTime = 60) override;
     void discardWrite() override;
+    void setItemText(const char* identifier, const char* text) override;
+    bool getItemText(const char* identifier, char* outBuf, size_t maxLen) const override;
 
     /// Ghi tiếp dữ liệu vào slot vừa đóng (dùng để append audio sau video)
     bool openForAppend(const char* identifier = nullptr) override;

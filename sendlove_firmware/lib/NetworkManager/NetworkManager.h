@@ -132,6 +132,8 @@ private:
     bool checkFirebaseFlags();
     bool syncFirebaseAlarms();
     bool checkAndDownloadNewMessages(class IStorageProvider* storage);
+    bool downloadVoiceSegment(const String& rawVoiceUrl, class WiFiClientSecure& client,
+                               class IStorageProvider* storage, const char* writeSlotId);
 
     static void wakeupSyncTaskWorker(void* param);
     static void ntpTaskWorker(void* param);

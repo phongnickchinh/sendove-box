@@ -10,8 +10,8 @@ import { Screen, AppBar, Body, Actions, Button, Chip, CircleIcon, Modal } from '
  * Popup là chỗ duy nhất trong luồng được phép có đổ bóng.
  */
 
-const TYPE_ICON = { video: 'video', image: 'image', voice: 'mic', text: 'text' };
-const TYPE_LABEL = { video: 'Video', image: 'Ảnh', voice: 'Ghi âm', text: 'Văn bản' };
+const TYPE_ICON = { video: 'video', image: 'image', voice: 'mic', text: 'text', static: 'image' };
+const TYPE_LABEL = { video: 'Video', image: 'Ảnh', voice: 'Ghi âm', text: 'Văn bản', static: 'Tin nhắn tĩnh' };
 
 function summaryLine(type, duration) {
   const label = TYPE_LABEL[type] || 'Nội dung';

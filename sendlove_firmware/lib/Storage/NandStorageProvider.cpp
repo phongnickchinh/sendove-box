@@ -214,15 +214,40 @@ void NandStorageProvider::discardWrite() {
         DLOG("[NANDP] discardWrite slot %d (bo %lu byte do)", _activeSlot, (unsigned long)_writeOffset);
         // Vung vat ly da bi erase do dang luc openForWrite(); phai xoa magic trong
         // bang slot de isSlotValid()/findFirstValidSlot() khong nhat nham du lieu
-        // rac nay la mot item hop le. KHONG dung _unreadBitmask (chua bao gio set)
-        // va KHONG dung _writeSlotIndex (van tro dung slot nay de lan sync sau retry
-        // lai chinh no thay vi dot them 1 slot moi cho moi lan fail).
+        // rac nay la mot item hop le.
         const char emptyMagic[4] = {0, 0, 0, 0};
         _nand.setSlotInfo(_activeSlot, emptyMagic, 0, 0, 0, 0);
         _nand.writeSlotTable();
+
+        // Doi voi duong ghi "khong anh" (chi audio/text), closeWrite() da chay
+        // TRUOC de commit placeholder (can cho openForAppend() tinh offset dung)
+        // roi moi biet tai audio/text co thanh cong khong -> unread bit va
+        // _writeSlotIndex co the DA bi set/dich truoc khi discardWrite() duoc goi.
+        // Xoa bit + lui _writeSlotIndex ve dung slot nay de lan sync sau retry
+        // dung slot vua fail, khong dot them 1 slot moi. Vo hai neu bit chua tung set.
+        if (_unreadBitmask & (1 << _activeSlot)) {
+            _unreadBitmask &= ~(1 << _activeSlot);
+            _writeSlotIndex = _activeSlot;
+            saveNvsState();
+        }
     }
     _writeOffset = 0;
     _slotCapacity = 0;
+}
+
+void NandStorageProvider::setItemText(const char* identifier, const char* text) {
+    int8_t slot = parseSlotId(identifier);
+    if (slot < 0 || slot >= NAND_SLOT_COUNT || !text) return;
+    _nand.setSlotText(slot, text, (uint16_t)strlen(text));
+    _nand.writeSlotTable();
+    DLOG("[NANDP] setItemText slot %d (%u bytes)", slot, (unsigned)strlen(text));
+}
+
+bool NandStorageProvider::getItemText(const char* identifier, char* outBuf, size_t maxLen) const {
+    int8_t slot = parseSlotId(identifier);
+    if (slot < 0) slot = _nand.getCurrentSlot();
+    if (slot < 0 || slot >= NAND_SLOT_COUNT || !outBuf || maxLen == 0) return false;
+    return _nand.getSlotText(slot, outBuf, maxLen) > 0;
 }
 
 bool NandStorageProvider::openForAppend(const char* identifier) {

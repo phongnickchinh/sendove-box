@@ -70,6 +70,15 @@ public:
     /// slot table, KHÔNG đánh dấu unread — khác với closeWrite(). Mặc định no-op.
     virtual void discardWrite() { }
 
+    /// Ghi caption text (đã cắt bớt theo độ dài buffer nội bộ) vào item đã ghi
+    /// xong (sau closeWrite()/closeAppend()). Mặc định no-op (SD Card chưa hỗ trợ).
+    virtual void setItemText(const char* identifier, const char* text) { (void)identifier; (void)text; }
+
+    /// Đọc caption text của item. Trả về true nếu có text, false nếu không (mặc định).
+    virtual bool getItemText(const char* identifier, char* outBuf, size_t maxLen) const {
+        (void)identifier; (void)outBuf; (void)maxLen; return false;
+    }
+
     /// Ghi tiếp dữ liệu vào slot vừa đóng mà không erase (dùng để append audio sau video)
     /// Mặc định: no-op (chỉ NAND storage hỗ trợ)
     virtual bool openForAppend(const char* identifier = nullptr) { (void)identifier; return false; }

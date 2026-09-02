@@ -12,14 +12,19 @@
 // Sử dụng Hardware SPI2 (chia sẻ bus với DisplayDriver ST7789).
 //
 // Slot Table nằm ở sector đầu tiên (0x000000):
-//   Magic "NSL2" + NAND_SLOT_COUNT × SlotEntry (20 bytes mỗi entry)
-//   Magic đổi NSLT -> NSL2 vì SlotEntry dài thêm 4 byte (audioSize): bảng cũ
-//   phải bị từ chối chứ không được đọc lệch trường.
+//   Magic "NSL3" + NAND_SLOT_COUNT × SlotEntry (278 bytes mỗi entry)
+//   Magic đổi NSL2 -> NSL3 vì SlotEntry dài thêm textLen+text[256] (caption tin
+//   nhắn tĩnh): bảng cũ phải bị từ chối chứ không được đọc lệch trường. Giống
+//   tiền lệ NSLT -> NSL2 khi thêm audioSize — nâng cấp firmware này xoá sạch
+//   tin nhắn unread cũ trên máy 1 lần duy nhất, không phải bug.
 //
 // Phase 1: Chế độ READ-ONLY — không erase/write để bảo toàn dữ liệu.
 // ============================================================================
 
-/// Thông tin 1 slot (20 bytes)
+/// Giới hạn caption text lưu trong bảng slot (đủ ~7-8 dòng trên màn 240x240).
+static constexpr uint16_t SLOT_TEXT_MAX_LEN = 256;
+
+/// Thông tin 1 slot (278 bytes)
 struct SlotEntry {
     char     magic[4];       // "VJPG" for video, "VIMG" for static image, "\0" for empty
     uint32_t dataSize;       // Video data size in bytes (KHÔNG gồm audio nối phía sau)
@@ -27,6 +32,8 @@ struct SlotEntry {
     uint16_t totalFrames;    // Total frame count
     uint32_t maxDisplayTime; // Max display time in seconds
     uint32_t audioSize;      // Byte audio nối sau video (gồm header AUDC 10 byte); 0 = không có
+    uint16_t textLen;        // Độ dài caption thực tế trong text[] (0 = không có text)
+    char     text[SLOT_TEXT_MAX_LEN]; // Caption UTF-8 thô (chưa bỏ dấu) — bỏ dấu lúc render
 };
 
 /// Hardware SPI driver for W25Q128 NAND Flash storage
@@ -55,6 +62,14 @@ public:
 
     /// Ghi kích thước phần audio nối sau video vào bảng slot (không đụng trường khác)
     void setSlotAudioSize(uint8_t slot, uint32_t audioSize);
+
+    /// Ghi caption text vào bảng slot (không memset() cả struct, chỉ set field
+    /// text/textLen — theo đúng pattern setSlotAudioSize(), không được xoá mất
+    /// magic/dataSize/audioSize đã ghi trước đó). Cắt bớt an toàn nếu len > SLOT_TEXT_MAX_LEN.
+    void setSlotText(uint8_t slot, const char* text, uint16_t len);
+
+    /// Đọc caption text từ RAM (không cần SPI). Trả về độ dài đã copy (0 nếu không có).
+    uint16_t getSlotText(uint8_t slot, char* outBuf, size_t maxLen) const;
 
     /// Đọc tại offset tuyệt đối trong slot đang mở, KHÔNG bị chặn bởi dataSize và
     /// KHÔNG đụng con trỏ đọc tuần tự của readData(). Dùng cho vùng audio.

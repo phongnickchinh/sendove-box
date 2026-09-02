@@ -14,6 +14,82 @@ static void dumpHexBytes(const char* tag, const uint8_t* data, size_t len) {
     if (tag == nullptr || data == nullptr || len == 0) return;
 }
 
+// ============================================================================
+// ASCII-fold tiếng Việt (tạm thời, chờ phase font Unicode thật) — bỏ dấu để
+// hiển thị được bằng font ChakraPetch_* hiện chỉ có glyph ASCII 32-126.
+// ============================================================================
+
+// Khối Vietnamese Unicode U+1EA0-1EF9 (và 4 cặp Latin Extended-A Ă/Đ/Ơ/Ư) đều
+// xen kẽ chẵn=hoa/lẻ=thường trong từng khối liên tục -> chỉ cần base letter.
+struct AsciiFoldAltRange { uint16_t start; uint16_t end; char base; };
+static const AsciiFoldAltRange ASCII_FOLD_ALT_RANGES[] = {
+    {0x1EA0, 0x1EB7, 'A'}, {0x1EB8, 0x1EC7, 'E'}, {0x1EC8, 0x1ECB, 'I'},
+    {0x1ECC, 0x1EE3, 'O'}, {0x1EE4, 0x1EF1, 'U'}, {0x1EF2, 0x1EF9, 'Y'},
+    {0x0102, 0x0103, 'A'}, {0x0110, 0x0111, 'D'}, {0x01A0, 0x01A1, 'O'}, {0x01AF, 0x01B0, 'U'},
+};
+
+// Latin-1 Supplement: mỗi khối cùng 1 case (hoa/thường tách khối riêng), map
+// thẳng ra 1 ký tự cố định, không cần tính chẵn/lẻ.
+struct AsciiFoldFlatRange { uint16_t start; uint16_t end; char out; };
+static const AsciiFoldFlatRange ASCII_FOLD_FLAT_RANGES[] = {
+    {0x00C0, 0x00C3, 'A'}, {0x00E0, 0x00E3, 'a'},
+    {0x00C8, 0x00CA, 'E'}, {0x00E8, 0x00EA, 'e'},
+    {0x00CC, 0x00CD, 'I'}, {0x00EC, 0x00ED, 'i'},
+    {0x00D2, 0x00D5, 'O'}, {0x00F2, 0x00F5, 'o'},
+    {0x00D9, 0x00DA, 'U'}, {0x00F9, 0x00FA, 'u'},
+    {0x00DD, 0x00DD, 'Y'}, {0x00FD, 0x00FD, 'y'},
+};
+
+// Decode 1 ký tự UTF-8 (1-3 byte, đủ cho toàn bộ range tiếng Việt) thành codepoint.
+static uint16_t decodeUtf8Char(const char* s, size_t remaining, uint8_t* outBytesConsumed) {
+    uint8_t b0 = (uint8_t)s[0];
+    if (b0 < 0x80) { *outBytesConsumed = 1; return b0; }
+    if ((b0 & 0xE0) == 0xC0 && remaining >= 2) {
+        *outBytesConsumed = 2;
+        return (uint16_t)(((b0 & 0x1F) << 6) | ((uint8_t)s[1] & 0x3F));
+    }
+    if ((b0 & 0xF0) == 0xE0 && remaining >= 3) {
+        *outBytesConsumed = 3;
+        return (uint16_t)(((b0 & 0x0F) << 12) | (((uint8_t)s[1] & 0x3F) << 6) | ((uint8_t)s[2] & 0x3F));
+    }
+    // Chuỗi UTF-8 lỗi hoặc 4-byte (ngoài phạm vi tiếng Việt) -> bỏ qua an toàn.
+    *outBytesConsumed = 1;
+    return 0xFFFF;
+}
+
+// Trả về 0 nếu không map được (ký tự bị bỏ qua khi ghép chuỗi kết quả).
+static char asciiFoldCodepoint(uint16_t cp) {
+    if (cp < 0x80) return (char)cp;
+    for (const auto& r : ASCII_FOLD_ALT_RANGES) {
+        if (cp >= r.start && cp <= r.end) {
+            bool isUpper = (((cp - r.start) % 2) == 0);
+            return isUpper ? r.base : (char)(r.base + 32);
+        }
+    }
+    for (const auto& r : ASCII_FOLD_FLAT_RANGES) {
+        if (cp >= r.start && cp <= r.end) return r.out;
+    }
+    return 0;
+}
+
+/// Bỏ dấu tiếng Việt (UTF-8 -> ASCII gần đúng nhất). Ký tự không map được bị
+/// bỏ qua hoàn toàn (không chèn '?' rác vào caption).
+static void asciiFoldVietnamese(const char* utf8In, char* asciiOut, size_t maxOut) {
+    if (asciiOut == nullptr || maxOut == 0) return;
+    if (utf8In == nullptr) { asciiOut[0] = '\0'; return; }
+
+    size_t inLen = strlen(utf8In);
+    size_t i = 0, o = 0;
+    while (i < inLen && o < maxOut - 1) {
+        uint8_t bytesConsumed = 1;
+        uint16_t cp = decodeUtf8Char(utf8In + i, inLen - i, &bytesConsumed);
+        char c = asciiFoldCodepoint(cp);
+        if (c != 0) asciiOut[o++] = c;
+        i += bytesConsumed;
+    }
+    asciiOut[o] = '\0';
+}
+
 MediaPlayer::~MediaPlayer() {
     stop();
     if (_jpegBuffer != nullptr) {
@@ -114,12 +190,23 @@ bool MediaPlayer::playItem(const char* identifier) {
     strncpy(_currentId, identifier, sizeof(_currentId) - 1);
     _currentSlot = (identifier[0] >= '0' && identifier[0] <= '9') ? atoi(identifier) : -1;
 
+    // Tin nhắn tĩnh KHÔNG có ảnh thật (chỉ audio/text): NetworkManager ghi slot
+    // rỗng với dataSize=4 sentinel (xem checkAndDownloadNewMessages()). Bỏ qua
+    // hoàn toàn bước dò header SLBX + decodeOneFrame() bên dưới — nếu cứ chạy sẽ
+    // đọc trúng vùng NAND chưa từng ghi (0xFF) và báo lỗi "Bad jpegSize" +
+    // delay(2000) chặn màn hình vô ích.
+    bool isStaticNoImage = (info.type == StorageItemType::IMAGE && _currentDataSize <= 4);
+
     _display->turnOn();
     _display->clear();
     _display->setBacklight(BACKLIGHT_DAY_PERCENT);
 
     _isSlbxRgb565 = false;
 
+    if (isStaticNoImage) {
+        _frameBaseOffset = 0;
+        _readFrameSizeHeader = true;
+    } else {
     // Tự động kiểm tra header tại offset 4 (SLBX / SLOT / VJPG / VIMG)
     uint8_t hdrCheck[20] = {0};
     _storage->readData(hdrCheck, 20);
@@ -173,6 +260,7 @@ bool MediaPlayer::playItem(const char* identifier) {
         _readFrameSizeHeader = true;
         _storage->seek(0);
     }
+    } // end else (!isStaticNoImage) — đóng nhánh dò header SLBX/SLOT/VJPG/VIMG
 
     DLOG("[PLAY] setup OK: frames=%d", _totalFrames);
 
@@ -194,7 +282,27 @@ bool MediaPlayer::playItem(const char* identifier) {
 
     if (info.type == StorageItemType::IMAGE) {
         _state = PlaybackState::SHOWING;
-        decodeOneFrame(false);
+        if (isStaticNoImage) {
+            // Đã _display->clear() ở trên -> giữ nguyên màn đen (bản NAND).
+            // Bản SD card sẽ có background mặc định riêng ở phase sau.
+        } else {
+            decodeOneFrame(false);
+        }
+
+        // Caption text (nếu có) — bỏ dấu tiếng Việt tạm thời rồi word-wrap vẽ đè.
+        char rawCaption[300] = "";
+        if (_storage->getItemText(identifier, rawCaption, sizeof(rawCaption))) {
+            char asciiCaption[300];
+            asciiFoldVietnamese(rawCaption, asciiCaption, sizeof(asciiCaption));
+            if (isStaticNoImage) {
+                // Không có ảnh: caption chiếm gần trọn màn hình.
+                _display->showWrappedText(asciiCaption, 8, 8, SCREEN_WIDTH - 16, SCREEN_HEIGHT - 16);
+            } else {
+                // Có ảnh: dải chữ ở 1/3 dưới màn hình, không đè lên phần trên.
+                int32_t bandY = (SCREEN_HEIGHT * 2) / 3;
+                _display->showWrappedText(asciiCaption, 8, bandY, SCREEN_WIDTH - 16, SCREEN_HEIGHT - bandY - 8);
+            }
+        }
     } else {
         _state = PlaybackState::PLAYING;
         ScreenLogger::setOverlayEnabled(false); // Tắt render log overlay lên LCD để giải phóng 100% SPI cho video
@@ -272,6 +380,15 @@ void MediaPlayer::update() {
 
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS((uint32_t)remain));
+    } else if (_state == PlaybackState::SHOWING) {
+        // Ảnh tĩnh / tin nhắn tĩnh không có frame nào để decode, nhưng vẫn có
+        // thể có audio (voice/nhạc nền) đi kèm. Trước đây nhánh này không bao
+        // giờ tick audio (chỉ PLAYING mới tick) -> combo ảnh+voice bị câm tiếng
+        // dù NetworkManager đã tải đúng. Tick định kỳ ở đây đủ nhanh so với độ
+        // sâu DMA (~192ms) để không bao giờ bị underrun.
+        if (_audio.hasAudio()) _audio.tick();
+        if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
+        vTaskDelay(pdMS_TO_TICKS(50));
     } else {
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS(50));

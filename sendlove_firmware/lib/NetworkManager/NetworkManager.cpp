@@ -650,6 +650,108 @@ bool NetworkManager::syncFirebaseAlarms() {
     return true;
 }
 
+// Tải voice_url/bg_music_url và append vào slot vừa ghi (offset ngay sau phần
+// ảnh/video, hoặc offset 4 nếu slot rỗng — xem checkAndDownloadNewMessages()).
+// Dùng chung cho cả đường ảnh/video (audio là phụ, tải lỗi không huỷ message)
+// và đường "tin nhắn tĩnh không ảnh" (audio có thể là nội dung chính).
+// Trả về true nếu KHÔNG có voice URL (không có gì để tải, không phải lỗi) hoặc
+// tải thành công trọn vẹn; false nếu có URL nhưng tải thất bại/thiếu/stall.
+bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientSecure& client,
+                                           IStorageProvider* storage, const char* writeSlotId) {
+    if (rawVoiceUrl.length() == 0) return true;
+
+    String voiceUrl = rawVoiceUrl;
+    if (!voiceUrl.startsWith("http")) {
+        if (voiceUrl.startsWith("gs://")) {
+            int si = voiceUrl.indexOf('/', 5);
+            if (si > 0) voiceUrl = voiceUrl.substring(si + 1);
+        }
+        if (voiceUrl.startsWith("/")) voiceUrl.remove(0, 1);
+        voiceUrl.replace("/", "%2F");
+        voiceUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + voiceUrl + "?alt=media";
+    }
+
+    DLOG("[NET] voice/bg_music found, downloading...");
+    HTTPClient httpAudio;
+    bool ok = false;
+    if (httpAudio.begin(client, voiceUrl.c_str())) {
+        httpAudio.setTimeout(30000);
+        int aCode = httpAudio.GET();
+        if (aCode == HTTP_CODE_OK) {
+            int aLen = httpAudio.getSize();
+            WiFiClient* aStream = httpAudio.getStreamPtr();
+
+            // Dùng openForAppend (virtual method trên IStorageProvider)
+            // để ghi nối tiếp mà không xóa sector đã có video
+            if (storage->openForAppend(writeSlotId)) {
+                // Ghi AUDC header (10 bytes)
+                uint8_t audcHeader[10];
+                memcpy(audcHeader, "AUDC", 4);
+                uint16_t sr      = (uint16_t)AUDIO_SAMPLE_RATE;
+                uint32_t pcmSize = (aLen > 0) ? (uint32_t)aLen : 0;
+                memcpy(audcHeader + 4, &sr,      2);
+                memcpy(audcHeader + 6, &pcmSize, 4);
+                // Ghi hut header thi AudioPlayer khong khop magic
+                // "AUDC" -> phat video im lang. Van phai bao ra log,
+                // neu khong loi NAND o nhanh audio hoan toan vo hinh.
+                bool aWriteError =
+                    storage->writeChunk(audcHeader, sizeof(audcHeader)) < sizeof(audcHeader);
+                if (aWriteError) {
+                    DLOG("[NET] Audio hdr write SHORT");
+                }
+
+                // Stream PCM data vào slot (không gọi closeWrite vì không đổi metadata)
+                uint8_t abuf[256];
+                int     aTotalRead = 0;
+                uint32_t aLastProgressMs = millis();
+                while (!aWriteError && httpAudio.connected() && (aLen > 0 || aLen == -1)) {
+                    size_t av = aStream->available();
+                    if (av) {
+                        size_t tr = (av < sizeof(abuf)) ? av : sizeof(abuf);
+                        int c = aStream->readBytes(abuf, tr);
+                        if (c > 0) {
+                            size_t aw = storage->writeChunk(abuf, c);
+                            if (aw < (size_t)c) {
+                                DLOG("[NET] audio write SHORT %u/%d @ %d",
+                                     (unsigned)aw, c, aTotalRead);
+                                aWriteError = true;
+                                break;
+                            }
+                            aTotalRead += c;
+                            if (aLen > 0) aLen -= c;
+                            aLastProgressMs = millis();
+                        }
+                    }
+                    // Cung dang treo vo han nhu vong lap video.
+                    if (millis() - aLastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
+                        DLOG("[NET] audio dl STALL %d bytes", aTotalRead);
+                        // Fix: truoc day KHONG set aWriteError=true o day -> log bao
+                        // nham "OK" du tai cut. Voi tin nhan tinh khong anh, audio co
+                        // the la noi dung DUY NHAT nen phai bao chinh xac tai day.
+                        aWriteError = true;
+                        break;
+                    }
+                    delay(1);
+                }
+                // Chốt phiên append: ghi audioSize vào bảng
+                // slot. Không có bước này thì phần audio nằm
+                // trên flash nhưng AudioPlayer không biết nó
+                // ở đâu và dài bao nhiêu -> hộp câm.
+                storage->closeAppend();
+                DLOG("[NET] Audio DL %s: %d bytes",
+                     aWriteError ? "SHORT" : "OK", aTotalRead);
+                ok = !aWriteError;
+            } else {
+                DLOG("[NET] Audio append FAIL (openForAppend)");
+            }
+        } else {
+            DLOG("[NET] Audio DL fail: %d", aCode);
+        }
+        httpAudio.end();
+    }
+    return ok;
+}
+
 bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     if (!storage) return false;
 
@@ -844,9 +946,10 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
-        // Tìm voice URL (audio đính kèm)
+        // Tìm voice URL (audio đính kèm) — bg_music_url dùng chung 1 cơ chế tải/append
+        // với voice_url (cùng là PCM/WAV, chỉ khác vai trò UX: lời thoại vs nhạc nền).
         String rawVoiceUrl = "";
-        const char* voiceKeys[] = { "voice_url", "voiceUrl", "audio_url", "audioUrl" };
+        const char* voiceKeys[] = { "voice_url", "voiceUrl", "audio_url", "audioUrl", "bg_music_url", "bgMusicUrl" };
         for (const char* k : voiceKeys) {
             JsonVariantConst v = msg[k];
             if (!v.isNull()) {
@@ -856,6 +959,19 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                     rawVoiceUrl = val;
                     break;
                 }
+            }
+        }
+
+        // Tìm caption text — kiểm tra SỰ TỒN TẠI của field, không dựa vào "type"
+        // (web có bug nhỏ đã biết: field text không bị xoá khi đổi chế độ, nên
+        // 1 message type khác vẫn có thể mang text cũ; đọc field thật là đúng nhất).
+        String rawText = "";
+        {
+            JsonVariantConst v = msg["text"];
+            if (!v.isNull()) {
+                String val = v.as<String>();
+                val.trim();
+                if (val.length() > 0 && val != "null") rawText = val;
             }
         }
 
@@ -956,101 +1072,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         if (downloadComplete) {
                             DLOG("[NET] DL OK slot %s", writeSlotId);
 
-                            // --- Download audio nếu có voice_url ---
-                            if (rawVoiceUrl.length() > 0) {
-                                String voiceUrl = rawVoiceUrl;
-                                if (!voiceUrl.startsWith("http")) {
-                                    if (voiceUrl.startsWith("gs://")) {
-                                        int si = voiceUrl.indexOf('/', 5);
-                                        if (si > 0) voiceUrl = voiceUrl.substring(si + 1);
-                                    }
-                                    if (voiceUrl.startsWith("/")) voiceUrl.remove(0, 1);
-                                    voiceUrl.replace("/", "%2F");
-                                    voiceUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + voiceUrl + "?alt=media";
-                                }
-
-                                DLOG("[NET] voice_url found, downloading...");
-                                HTTPClient httpAudio;
-                                if (httpAudio.begin(client, voiceUrl.c_str())) {
-                                    httpAudio.setTimeout(30000);
-                                    int aCode = httpAudio.GET();
-                                    if (aCode == HTTP_CODE_OK) {
-                                        int aLen = httpAudio.getSize();
-                                        WiFiClient* aStream = httpAudio.getStreamPtr();
-
-                                        // Dùng openForAppend (virtual method trên IStorageProvider)
-                                        // để ghi nối tiếp mà không xóa sector đã có video
-                                        if (storage->openForAppend(writeSlotId)) {
-                                            // Ghi AUDC header (10 bytes)
-                                            uint8_t audcHeader[10];
-                                            memcpy(audcHeader, "AUDC", 4);
-                                            uint16_t sr      = (uint16_t)AUDIO_SAMPLE_RATE;
-                                            uint32_t pcmSize = (aLen > 0) ? (uint32_t)aLen : 0;
-                                            memcpy(audcHeader + 4, &sr,      2);
-                                            memcpy(audcHeader + 6, &pcmSize, 4);
-                                            // Ghi hut header thi AudioPlayer khong khop magic
-                                            // "AUDC" -> phat video im lang. Van phai bao ra log,
-                                            // neu khong loi NAND o nhanh audio hoan toan vo hinh.
-                                            bool aWriteError =
-                                                storage->writeChunk(audcHeader, sizeof(audcHeader)) < sizeof(audcHeader);
-                                            if (aWriteError) {
-                                                DLOG("[NET] Audio hdr write SHORT");
-                                            }
-
-                                            // Stream PCM data vào slot (không gọi closeWrite vì không đổi metadata)
-                                            uint8_t abuf[256];
-                                            int     aTotalRead = 0;
-                                            uint32_t aLastProgressMs = millis();
-                                            while (!aWriteError && httpAudio.connected() && (aLen > 0 || aLen == -1)) {
-                                                size_t av = aStream->available();
-                                                if (av) {
-                                                    size_t tr = (av < sizeof(abuf)) ? av : sizeof(abuf);
-                                                    int c = aStream->readBytes(abuf, tr);
-                                                    if (c > 0) {
-                                                        size_t aw = storage->writeChunk(abuf, c);
-                                                        if (aw < (size_t)c) {
-                                                            // Y het nhanh video dong 892. closeAppend()
-                                                            // ben duoi tinh audioSize theo _writeOffset
-                                                            // that, nen phan da ghi van khop; chi la
-                                                            // tieng bi cut o day.
-                                                            DLOG("[NET] audio write SHORT %u/%d @ %d",
-                                                                 (unsigned)aw, c, aTotalRead);
-                                                            aWriteError = true;
-                                                            break;
-                                                        }
-                                                        aTotalRead += c;
-                                                        if (aLen > 0) aLen -= c;
-                                                        aLastProgressMs = millis();
-                                                    }
-                                                }
-                                                // Cung dang treo vo han nhu vong lap video.
-                                                if (millis() - aLastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
-                                                    DLOG("[NET] audio dl STALL %d bytes", aTotalRead);
-                                                    break;
-                                                }
-                                                delay(1);
-                                            }
-                                            // Chốt phiên append: ghi audioSize vào bảng
-                                            // slot. Không có bước này thì phần audio nằm
-                                            // trên flash nhưng AudioPlayer không biết nó
-                                            // ở đâu và dài bao nhiêu -> hộp câm.
-                                            storage->closeAppend();
-                                            DLOG("[NET] Audio DL %s: %d bytes",
-                                                 aWriteError ? "SHORT" : "OK", aTotalRead);
-                                        } else {
-                                            DLOG("[NET] Audio append FAIL (openForAppend)");
-                                        }
-                                    } else {
-                                        DLOG("[NET] Audio DL fail: %d", aCode);
-                                    }
-                                    httpAudio.end();
-                                }
-                            }
-                            // ----------------------------------------
-
-                            // Log: voice_url có được tìm thấy không
+                            // Voice/bg_music là phụ với ảnh/video: tải lỗi chỉ log, không
+                            // huỷ cả message (hành vi giữ nguyên như code cũ).
+                            downloadVoiceSegment(rawVoiceUrl, client, storage, writeSlotId);
                             if (rawVoiceUrl.length() == 0) {
                                 DLOG("[NET] No voice_url in msg");
+                            }
+                            if (rawText.length() > 0) {
+                                storage->setItemText(writeSlotId, rawText.c_str());
                             }
 
                             messageSuccess = true;
@@ -1068,6 +1097,44 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                     DLOG("[NET] DL HTTP err: %d", code);
                 }
                 http.end();
+            }
+            _isDownloadingMedia = false;
+        } else if (rawVoiceUrl.length() > 0 || rawText.length() > 0) {
+            // Tin nhắn tĩnh KHÔNG có ảnh/video: chỉ audio (voice/nhạc nền) và/hoặc text.
+            // Vẫn phải openForWrite()/closeWrite() để tạo slot "rỗng" hợp lệ
+            // (dataSize=4 sentinel — đã trace/kiểm chứng khớp với cách
+            // NandStorageProvider::openForAppend() tính offset audio kế tiếp).
+            // MediaPlayer nhận sentinel này để hiện màn đen thay vì cố decode
+            // JPEG không tồn tại.
+            char writeSlotId[16] = "";
+            if (!storage->getNextWriteSlotIdentifier(writeSlotId, sizeof(writeSlotId))) {
+                DLOG("[NET] skip dl: FULL");
+                _hasPendingMessages = true;
+                break;
+            }
+
+            _isDownloadingMedia = true;
+            if (storage->openForWrite(writeSlotId)) {
+                storage->closeWrite(maxDisplayTime);
+                bool audioOk = downloadVoiceSegment(rawVoiceUrl, client, storage, writeSlotId);
+                if (audioOk) {
+                    if (rawText.length() > 0) {
+                        storage->setItemText(writeSlotId, rawText.c_str());
+                    }
+                    DLOG("[NET] DL OK slot %s (static, no image)", writeSlotId);
+                    messageSuccess = true;
+                    downloadedAnyMedia = true;
+                    if (_onDownloadComplete) {
+                        _onDownloadComplete();
+                    }
+                } else {
+                    // Ở đây audio là NỘI DUNG CHÍNH (không có ảnh) — tải lỗi phải huỷ
+                    // cả message, khác với nhánh ảnh/video ở trên (audio chỉ là phụ).
+                    DLOG("[NET] DL err: voice/bg_music failed (discarded)");
+                    storage->discardWrite();
+                }
+            } else {
+                DLOG("[NET] DL err: open slot %s (static)", writeSlotId);
             }
             _isDownloadingMedia = false;
         } else {

@@ -14,6 +14,7 @@ const TYPES = [
   { key: 'image', icon: 'image', label: 'Ảnh', hint: 'Khung vuông' },
   { key: 'voice', icon: 'mic', label: 'Ghi âm', hint: 'Tối đa 15 giây' },
   { key: 'text', icon: 'text', label: 'Văn bản', hint: 'Gửi được ngay' },
+  { key: 'static', icon: 'image', label: 'Tin nhắn tĩnh', hint: 'Ảnh, chữ, nhạc nền' },
 ];
 
 const STEP2_TITLE = {
@@ -21,6 +22,7 @@ const STEP2_TITLE = {
   image: 'Gửi một bức ảnh',
   voice: 'Ghi một lời nhắn',
   text: 'Gửi một dòng chữ',
+  static: 'Ảnh, chữ, nhạc nền — tuỳ bạn chọn',
 };
 
 export default function SenderUI() {
@@ -28,8 +30,13 @@ export default function SenderUI() {
   const navigate = useNavigate();
 
   const [step, setStep] = useState(1); // 1: Chọn loại, 2: Nhập nội dung, 3: Mã hoá & gửi
-  const [type, setType] = useState(null); // 'video' | 'image' | 'voice' | 'text'
+  const [type, setType] = useState(null); // 'video' | 'image' | 'voice' | 'text' | 'static'
   const [text, setText] = useState('');
+
+  // Card "Tin nhắn tĩnh": giữ tạm ảnh/nhạc nền đã chọn cho tới khi bấm Gửi
+  // chung — khác với các card cũ (ảnh/voice riêng lẻ) tự upload ngay khi xong.
+  const [staticImageBlob, setStaticImageBlob] = useState(null);
+  const [staticAudioData, setStaticAudioData] = useState(null); // { wavBlob, duration }
 
   // Encoding & Uploading states
   const [phase, setPhase] = useState('encoding'); // 'encoding' | 'uploading' | 'done' | 'error'
@@ -53,6 +60,9 @@ export default function SenderUI() {
   const handleCancel = () => {
     setStep(1);
     setType(null);
+    setText('');
+    setStaticImageBlob(null);
+    setStaticAudioData(null);
   };
 
   const processAndUpload = async (mediaData) => {
@@ -112,6 +122,31 @@ export default function SenderUI() {
           ...payload,
           voiceBlob: wavBlob,
           metadata: { duration }
+        };
+      } else if (type === 'static') {
+        // Tin nhắn tĩnh: tuỳ tổ hợp ảnh / text / nhạc nền — tái dùng type "image"
+        // có sẵn ở backend (không thêm enum mới). mediaData = { imageBlob, audioData }.
+        const { imageBlob, audioData } = mediaData || {};
+        let extra = {};
+
+        if (imageBlob) {
+          const encodeRes = await encodeImageToBin(imageBlob);
+          extra = {
+            ...extra,
+            binBlob: encodeRes.binBlob,
+            thumbBlob: encodeRes.thumbBlob,
+            metadata: { frameCount: 1, width: 240, height: 240 }
+          };
+        }
+        if (audioData?.wavBlob) {
+          extra = { ...extra, bgMusicBlob: audioData.wavBlob };
+          setSummary({ fileName: null, duration: audioData.duration });
+        }
+
+        payload = {
+          ...payload,
+          type: 'image',
+          ...extra,
         };
       }
 
@@ -233,6 +268,49 @@ export default function SenderUI() {
 
             <Actions>
               <Button kind="pri" disabled={!text.trim()} onClick={() => processAndUpload(null)}>
+                Gửi
+              </Button>
+              <Button kind="gho" onClick={handleCancel}>Huỷ</Button>
+            </Actions>
+          </>
+        )}
+
+        {type === 'static' && (
+          <>
+            {/* Ảnh (tuỳ chọn) */}
+            {!staticImageBlob ? (
+              <ImageInput onImageSelect={setStaticImageBlob} onCancel={handleCancel} />
+            ) : (
+              <div className="sl-card sl-card--center">
+                <span className="sl-chip"><Icon name="image" size={24} /></span>
+                <span className="sl-caption">Đã chọn ảnh</span>
+                <Actions>
+                  <Button kind="gho" onClick={() => setStaticImageBlob(null)}>Đổi ảnh</Button>
+                </Actions>
+              </div>
+            )}
+
+            {/* Nhạc nền (tuỳ chọn) */}
+            {!staticAudioData ? (
+              <VoiceInput onRecordComplete={setStaticAudioData} onCancel={handleCancel} />
+            ) : (
+              <div className="sl-card sl-card--center">
+                <span className="sl-chip"><Icon name="mic" size={24} /></span>
+                <span className="sl-caption">Đã ghi nhạc nền {staticAudioData.duration}s</span>
+                <Actions>
+                  <Button kind="gho" onClick={() => setStaticAudioData(null)}>Ghi lại</Button>
+                </Actions>
+              </div>
+            )}
+
+            <Tips>Chọn ít nhất 1 trong 3: ảnh, chữ, hoặc nhạc nền — không bắt buộc đủ cả 3.</Tips>
+
+            <Actions>
+              <Button
+                kind="pri"
+                disabled={!staticImageBlob && !staticAudioData && !text.trim()}
+                onClick={() => processAndUpload({ imageBlob: staticImageBlob, audioData: staticAudioData })}
+              >
                 Gửi
               </Button>
               <Button kind="gho" onClick={handleCancel}>Huỷ</Button>

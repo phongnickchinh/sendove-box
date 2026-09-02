@@ -93,32 +93,37 @@ void Task_MediaPlayer(void *pvParameters) {
       
       if (event == SystemEvent::TOUCH_SHORT) {
         if (currentAppState == AppState::STATE_STANDBY) {
-           char unreadId[32] = "";
-           if (appCtx.network.getNumOfNewMsg() > 0) {
-              if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
-                  currentAppState = AppState::STATE_VIDEO;
-                  appCtx.display.clear();
-                  strncpy(currentId, unreadId, sizeof(currentId) - 1);
-                  if (appCtx.player.playItem(currentId)) {
-                      playStartTime = millis();
-                  } else {
-                      DLOG("[PLAY] FAIL -> STANDBY");
-                      currentAppState = AppState::STATE_STANDBY;
-                      forceStandbyRedraw = true;
-                  }
-              } else {
-                  DLOG("[PLAY] no local unread, downloading...");
-                  appCtx.player.stop();
-                  drawToast("Downloading...");
-                  uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-                  bool isCharging = appCtx.powerManager.isCharging();
-                  appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
-              }
+           if (appCtx.network.isDownloadingMedia()) {
+               appCtx.player.stop();
+               drawToast("Downloading...");
            } else {
-              appCtx.display.turnOn();
-              drawToast("No new messages");
-              vTaskDelay(1000);
-              forceStandbyRedraw = true;
+               char unreadId[32] = "";
+               if (appCtx.network.getNumOfNewMsg() > 0) {
+                  if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+                      currentAppState = AppState::STATE_VIDEO;
+                      appCtx.display.clear();
+                      strncpy(currentId, unreadId, sizeof(currentId) - 1);
+                      if (appCtx.player.playItem(currentId)) {
+                          playStartTime = millis();
+                      } else {
+                          DLOG("[PLAY] FAIL -> STANDBY");
+                          currentAppState = AppState::STATE_STANDBY;
+                          forceStandbyRedraw = true;
+                      }
+                  } else {
+                      DLOG("[PLAY] no local unread, downloading...");
+                      appCtx.player.stop();
+                      drawToast("Downloading...");
+                      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+                      bool isCharging = appCtx.powerManager.isCharging();
+                      appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+                  }
+               } else {
+                  appCtx.display.turnOn();
+                  drawToast("No new messages");
+                  vTaskDelay(1000);
+                  forceStandbyRedraw = true;
+               }
            }
         } else if (currentAppState == AppState::STATE_VIDEO) {
            if (event == SystemEvent::TOUCH_SHORT) {
@@ -194,9 +199,8 @@ void Task_MediaPlayer(void *pvParameters) {
         lastClockRender = now;
         forceStandbyRedraw = false;
       }
+      vTaskDelay(pdMS_TO_TICKS(10));
     }
-
-    vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
 
@@ -228,11 +232,9 @@ void Task_UIController(void *pvParameters) {
 
     // Periodic check if device is kept awake in Standby UI (every 10s)
     bool isStorageFull = (appCtx.storage && appCtx.storage->isFull());
-    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
+    bool hasUnread = (appCtx.storage && appCtx.storage->hasUnreadMessage());
+    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !hasUnread && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
-        // triggerFirebaseSync -> syncWakeup da tu goi ensureConnected() va
-        // syncNtpTime(). Goi them o day chi lam task uu tien 5 dung toi 5s va
-        // tao them mot task NtpSync chay dua voi WakeSync tren cung s_ntpSyncDone.
         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
         bool isCharging = appCtx.powerManager.isCharging();
         appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
@@ -300,9 +302,15 @@ void Task_UIController(void *pvParameters) {
       // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm
       vTaskDelay(pdMS_TO_TICKS(200));
 
-      // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy (cả Touch và Timer)
+      // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy
       if (appCtx.storage && appCtx.storage->isFull()) {
           DLOG("[SLP] post-wakeup sync skip: FULL");
+      } else if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER && appCtx.storage && appCtx.storage->hasUnreadMessage()) {
+          // Touch Wakeup khi ĐÃ CÓ tin nhắn chưa đọc trong bộ nhớ:
+          // Người dùng chạm vào box để XEM TIN NHẮN ĐÃ CÓ.
+          // KHÔNG kích hoạt đồng bộ mạng ngầm ngay lập tức để nhường trọn vẹn 100% CPU và SPI,
+          // giúp bấm Short Press phát ngay lập tức siêu mượt, không bị nghẽn bởi Wi-Fi TLS.
+          DLOG("[SLP] post-wakeup sync deferred: unread local msg ready");
       } else {
           // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
           uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
@@ -409,6 +417,10 @@ void setup() {
 
     appCtx.network.setOnDownloadComplete([]() {
       forceStandbyRedraw = true;
+    });
+
+    appCtx.network.setPlaybackActiveCallback([]() {
+      return (currentAppState == AppState::STATE_VIDEO);
     });
 
     // Kích hoạt Firebase Sync ngầm ngay khi vừa nạp code/khởi động xong

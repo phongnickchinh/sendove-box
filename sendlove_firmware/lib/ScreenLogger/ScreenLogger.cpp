@@ -8,9 +8,11 @@ DisplayDriver* ScreenLogger::_display = nullptr;
 portMUX_TYPE   ScreenLogger::_mux     = portMUX_INITIALIZER_UNLOCKED;
 char           ScreenLogger::_buf[SCREEN_LOG_LINES][SCREEN_LOG_COL_MAX + 1] = {};
 uint8_t        ScreenLogger::_head    = 0;
+volatile bool  ScreenLogger::_overlayEnabled = true;
 
 void ScreenLogger::init(DisplayDriver* display) {
     _display = display;
+    _overlayEnabled = true;
 }
 
 void ScreenLogger::log(const char* fmt, ...) {
@@ -34,7 +36,7 @@ void ScreenLogger::pushLine(const char* line) {
 }
 
 void ScreenLogger::render() {
-    if (_display == nullptr) return;
+    if (_display == nullptr || !_overlayEnabled) return;
 
     // Timeout ngắn 50ms: nếu SPI đang bận render video frame, bỏ qua lần này.
     // Buffer vẫn được cập nhật và sẽ hiện ở lần log kế tiếp.

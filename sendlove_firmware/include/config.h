@@ -128,7 +128,7 @@ static constexpr uint32_t AUDIO_SAMPLE_RATE    = 8000;  // Hz — mặc định 
 // Video bị web cắt ở 15s, audio cũng phải bị cắt theo — đây chỉ là chốt chặn cuối.
 static constexpr uint32_t AUDIO_MAX_PCM_BYTES  = 600000;
 static constexpr uint32_t AUDIO_PCM_CHUNK_SIZE = 1600;  // bytes = 100ms @ 8000Hz Mono
-static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 16;
+static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 24;   // 24 buffers x 512 = 12288 samples (384ms buffer depth @ 32kHz)
 static constexpr uint16_t AUDIO_DMA_BUF_LEN    = 512;   // samples per DMA buffer
 // BCLK ở 8kHz mono (~256kHz) quá thấp cho MAX98357A -> rè liên tục. Test tay
 // (2026-09-01): cùng tone phát sạch ở 44.1kHz, rè ở 8kHz -> không phải do

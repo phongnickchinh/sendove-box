@@ -6,6 +6,8 @@
 // ============================================================================
 
 bool AudioPlayer::init() {
+    if (_initialized) return true;
+
     i2s_config_t cfg = {
         .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
         // x AUDIO_OVERSAMPLE: BCLK ở đúng tốc độ file (8kHz) quá thấp cho
@@ -42,8 +44,7 @@ bool AudioPlayer::init() {
 
 void AudioPlayer::stop() {
     if (_initialized) {
-        i2s_driver_uninstall(I2S_NUM_0);
-        _initialized = false;
+        i2s_zero_dma_buffer(I2S_NUM_0);
     }
     _hasAudio    = false;
     _storage     = nullptr;
@@ -147,7 +148,7 @@ bool AudioPlayer::loadFromStorage(IStorageProvider* storage, uint32_t videoDataS
     // Tốc độ lấy mẫu do file quyết định, không phải hằng số biên dịch: web đổi
     // 8k <-> 16k thì hộp phát đúng cao độ mà không phải nạp lại firmware.
     if (_initialized && sampleRate != _sampleRate) {
-wao        i2s_set_sample_rates(I2S_NUM_0, sampleRate * AUDIO_OVERSAMPLE);
+        i2s_set_sample_rates(I2S_NUM_0, sampleRate * AUDIO_OVERSAMPLE);
     }
     _sampleRate     = sampleRate;
     _audioPcmOffset = pcmStart;

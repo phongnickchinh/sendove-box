@@ -119,9 +119,14 @@ public:
     /// Set callback khi tải media hoàn tất
     void setOnDownloadComplete(std::function<void()> cb) { _onDownloadComplete = cb; }
 
+    /// Set callback để kiểm tra trạng thái đang phát video (để hoãn sync ngầm tránh nghẽn CPU/SPI)
+    void setPlaybackActiveCallback(std::function<bool()> cb) { _isPlaybackActiveCb = cb; }
+    bool isPlaybackActive() const { return _isPlaybackActiveCb ? _isPlaybackActiveCb() : false; }
+
 private:
     char _wifiSsid[WIFI_SSID_MAX_LEN] = "";
     char _wifiPassword[WIFI_PASS_MAX_LEN] = "";
+    std::function<bool()> _isPlaybackActiveCb = nullptr;
 
     bool updateFirebaseStatus(uint8_t batteryPercent, bool isCharging);
     bool checkFirebaseFlags();

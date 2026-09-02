@@ -16,6 +16,10 @@ static void dumpHexBytes(const char* tag, const uint8_t* data, size_t len) {
 
 MediaPlayer::~MediaPlayer() {
     stop();
+    if (_jpegBuffer != nullptr) {
+        free(_jpegBuffer);
+        _jpegBuffer = nullptr;
+    }
     if (_playerMutex != nullptr) {
         vSemaphoreDelete(_playerMutex);
         _playerMutex = nullptr;
@@ -35,6 +39,10 @@ bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
     if (_playerMutex == nullptr) {
         _playerMutex = xSemaphoreCreateRecursiveMutex();
     }
+    if (_jpegBuffer == nullptr) {
+        _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
+    }
+    _audio.init();
     return true;
 }
 
@@ -182,7 +190,10 @@ bool MediaPlayer::playItem(const char* identifier) {
         decodeOneFrame(false);
     } else {
         _state = PlaybackState::PLAYING;
-        _nextFrameDeadline = millis();
+        ScreenLogger::setOverlayEnabled(false); // Tắt render log overlay lên LCD để giải phóng 100% SPI cho video
+        uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
+        _nextFrameDeadline = millis() + targetMs;
+        _lastFrameSkipped = false;
     }
 
     if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
@@ -211,7 +222,7 @@ void MediaPlayer::update() {
             _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
             _lastFrameSkipped = false;
-            _nextFrameDeadline = millis();
+            _nextFrameDeadline = millis() + targetMs;
             if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             return;
         }
@@ -228,7 +239,7 @@ void MediaPlayer::update() {
                 _audio.prefill();
                 _storage->seek(_frameBaseOffset);
             }
-            _nextFrameDeadline = millis();
+            _nextFrameDeadline = millis() + targetMs;
         }
 
         // Pacer cộng dồn mốc thay vì "ngủ nếu còn dư": I2S chạy bằng clock phần
@@ -241,12 +252,8 @@ void MediaPlayer::update() {
 
         // Trễ quá 4 frame nghĩa là phần cứng không theo kịp thật sự; bám lại mốc
         // hiện tại để khỏi chạy đuổi vô hạn (chỉ ăn CPU mà không đuổi kịp).
-        // Mỗi lần bám lại là một khoảng trôi bị xoá đi -> video tụt sau audio
-        // đúng bằng chừng ấy. Ghi log để biết ngay: không dòng nào = throughput
-        // đủ, còn in ra đều đều nghĩa là đọc frame vẫn chậm hơn ngân sách.
         if (remain < -(int32_t)(targetMs * 4)) {
-            DLOG("[PLAY] late resync: -%ldms", (long)(-remain));
-            _nextFrameDeadline = now;
+            _nextFrameDeadline = now + targetMs;
             remain = 0;
         }
 
@@ -268,16 +275,13 @@ void MediaPlayer::stop() {
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
         _storage->closeRead();
     }
-    // Dừng I2S audio
+    // Dừng I2S audio (zero DMA buffer & reset cursor)
     _audio.stop();
-    if (_jpegBuffer != nullptr) {
-        free(_jpegBuffer);
-        _jpegBuffer = nullptr;
-    }
     _state = PlaybackState::IDLE;
     _currentSlot = -1;
     _currentId[0] = '\0';
     _currentFrame = 0;
+    ScreenLogger::setOverlayEnabled(true); // Bật lại overlay log khi dừng video
 
     if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
 }

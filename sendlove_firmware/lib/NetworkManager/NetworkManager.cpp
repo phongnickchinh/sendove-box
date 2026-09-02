@@ -438,6 +438,11 @@ struct FirebaseTaskParams {
 };
 
 void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
+    if (isPlaybackActive()) {
+        DLOG("[NET] sync skip: video playing");
+        return;
+    }
+
     // Hai task khac do uu tien (UIController=5, MediaPlayer=3) cung goi ham nay.
     // Doc roi ghi _isSyncing thanh hai lenh rieng thi ca hai deu co the lot qua
     // va tao 2 task WakeSync ghi de len cung mot slot flash.
@@ -471,6 +476,11 @@ void NetworkManager::wakeupSyncTaskWorker(void* param) {
 bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
     _isSyncing = true;
 
+    if (isPlaybackActive()) {
+        _isSyncing = false;
+        return false;
+    }
+
     // 1. Tái kết nối Wi-Fi (chờ tối đa 5s với fallback)
     if (!ensureConnected(5000)) {
         DLOG("[NET] sync skip: no wifi");
@@ -478,16 +488,24 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
+    if (isPlaybackActive()) { _isSyncing = false; return false; }
+
     // 2. Đồng bộ thời gian NTP trước để các mốc timestamp phía sau luôn chính xác
     syncNtpTime(5000);
+
+    if (isPlaybackActive()) { _isSyncing = false; return false; }
 
     // 3. Update Status (Heartbeat)
     updateFirebaseStatus(batteryPercent, isCharging);
     vTaskDelay(pdMS_TO_TICKS(100));
 
+    if (isPlaybackActive()) { _isSyncing = false; return false; }
+
     // 4. Check Flags (Alarms, OTA, Pairing)
     checkFirebaseFlags();
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    if (isPlaybackActive()) { _isSyncing = false; return false; }
 
     // 5. Check and download new messages
     if (storage != nullptr) {
@@ -757,9 +775,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     _numOfNewMsg = unreadInMem + newCloudMsg;
     DLOG("[NET] msg: cloud=%d mem=%d new=%d", newCloudMsg, unreadInMem, _numOfNewMsg);
 
+    if (newCloudMsg > 0) {
+        _isDownloadingMedia = true;
+    }
+
     if (msgList.empty()) {
         DLOG("[NET] no msgs in payload");
         _hasPendingMessages = false;
+        _isDownloadingMedia = false;
         return true;
     }
 

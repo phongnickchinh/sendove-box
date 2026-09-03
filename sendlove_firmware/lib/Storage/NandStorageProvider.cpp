@@ -122,7 +122,18 @@ bool NandStorageProvider::openForWrite(const char* identifier) {
     _writeOffset = 4;
     _slotCapacity = slotSpan(slot);
 
-    _nand.eraseRange(NAND_SLOT_ADDRS[_activeSlot], _slotCapacity);
+    // Erase-as-you-write: chỉ erase 1 block 64KB đầu (~150-2000ms) thay vì nguyên
+    // slot ~5.3MB (15-25s block đồng bộ). Erase nguyên slot khiến socket HTTP đã
+    // mở đứng im quá lâu -> TCP Zero-Window -> CDN backoff -> download timeout
+    // giữa chừng (xác nhận qua log thực tế + review độc lập, không phải suy đoán).
+    uint32_t slotStartAddr = NAND_SLOT_ADDRS[_activeSlot];
+    uint32_t initialEraseLen = (_slotCapacity < 65536U) ? _slotCapacity : 65536U;
+    if (!_nand.eraseRange(slotStartAddr, initialEraseLen)) {
+        DLOG("[NANDP] ERR: initial erase FAILED slot %d", _activeSlot);
+        _slotCapacity = 0;
+        return false;
+    }
+    _erasedUpToAddr = slotStartAddr + initialEraseLen;
 
     DLOG("[NANDP] open write slot %d", _activeSlot);
     return true;
@@ -133,17 +144,38 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
 
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_activeSlot];
     uint32_t startAddr = slotStartAddr + _writeOffset;
+    uint32_t endAddr = startAddr + (uint32_t)len;
 
     if (_slotCapacity == 0 || (uint64_t)_writeOffset + (uint64_t)len > _slotCapacity) {
         DLOG("[NANDP] ERR: write exceed cap");
         return 0;
     }
 
-    _nand.writeRaw(startAddr, data, len);
-    uint32_t prevOffset = _writeOffset;
-    _writeOffset += len;
+    // Erase thêm block 64KB kế tiếp khi con trỏ ghi sắp chạm vùng chưa erase. BẤT
+    // BIẾN bắt buộc: luôn erase bắt đầu từ _erasedUpToAddr, KHÔNG BAO GIỜ từ
+    // startAddr — eraseRange() với địa chỉ không align 4096 sẽ tự lùi về đầu
+    // sector chứa nó, dùng sai mốc có thể xoá đè lên dữ liệu vừa ghi trước đó.
+    uint32_t slotEndAddr = slotStartAddr + _slotCapacity;
+    while (_erasedUpToAddr < endAddr && _erasedUpToAddr < slotEndAddr) {
+        uint32_t toErase = 65536U;
+        if (_erasedUpToAddr + toErase > slotEndAddr) {
+            toErase = slotEndAddr - _erasedUpToAddr;
+        }
+        if (!_nand.eraseRange(_erasedUpToAddr, toErase)) {
+            DLOG("[NANDP] ERR: erase-ahead FAILED @ %lu", (unsigned long)_erasedUpToAddr);
+            return 0;   // NetworkManager thay written < len -> writeError -> discardWrite()
+        }
+        _erasedUpToAddr += toErase;
+    }
 
-    // Dropped periodic monitor writeChunk
+    // Truoc day goi writeRaw() roi `return len` VO DIEU KIEN: mot lan lay SPI mutex
+    // that bai (timeout 1000ms khi Task_MediaPlayer priority 3 dang render standby)
+    // se tao ra file tai "thanh cong" nhung thung lo du lieu. Gio bao loi that.
+    if (!_nand.writeRaw(startAddr, data, len)) {
+        DLOG("[NANDP] ERR: write failed @ %lu", (unsigned long)startAddr);
+        return 0;
+    }
+    _writeOffset += len;
 
     return len;
 }
@@ -155,7 +187,9 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
 
     // Ghi kích thước dữ liệu (4 bytes) vào offset 0
     uint32_t rawJpegSize = (_writeOffset >= 4) ? (_writeOffset - 4) : 0;
-    _nand.writeRaw(slotStartAddr, (const uint8_t*)&rawJpegSize, 4);
+    if (!_nand.writeRaw(slotStartAddr, (const uint8_t*)&rawJpegSize, 4)) {
+        DLOG("[NANDP] ERR: size header write FAILED slot %d", _activeSlot);
+    }
 
     // Kiểm tra 16 byte header container ở offset 4 (SLBX / SLOT / VJPG / VIMG)
     uint8_t header[16];
@@ -233,6 +267,7 @@ void NandStorageProvider::discardWrite() {
     }
     _writeOffset = 0;
     _slotCapacity = 0;
+    _erasedUpToAddr = 0;
 }
 
 void NandStorageProvider::setItemText(const char* identifier, const char* text) {
@@ -264,6 +299,17 @@ bool NandStorageProvider::openForAppend(const char* identifier) {
     _activeSlot   = slot;
     _writeOffset  = _lastWrittenOffset;
     _slotCapacity = slotSpan(slot);
+
+    // Tự tính lại _erasedUpToAddr từ _writeOffset (làm tròn lên block 64KB kế
+    // tiếp) thay vì dựa vào giá trị còn sống sót từ phiên openForWrite() trước
+    // đó — tự chữa lành, đúng bất kể thứ tự gọi thực tế trong call-chain.
+    uint32_t slotStartAddr = NAND_SLOT_ADDRS[_activeSlot];
+    uint32_t currentPos = slotStartAddr + _writeOffset;
+    _erasedUpToAddr = ((currentPos + 65535U) / 65536U) * 65536U;
+    if (_erasedUpToAddr > slotStartAddr + _slotCapacity) {
+        _erasedUpToAddr = slotStartAddr + _slotCapacity;
+    }
+
     DLOG("[NANDP] openForAppend slot %d @ offset %lu", slot, (unsigned long)_writeOffset);
     return true;
 }
@@ -364,6 +410,7 @@ bool NandStorageProvider::formatStorage() {
     _lastWrittenOffset = 0;
     _writeOffset = 0;
     _slotCapacity = 0;
+    _erasedUpToAddr = 0;
     saveNvsState();
 
     // Reset mốc last_download_ts trong NVS về 0 để sẵn sàng tải tin nhắn mới từ đầu

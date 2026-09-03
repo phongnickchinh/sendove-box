@@ -284,7 +284,7 @@ lỗi chất lượng file WAV: user đã nghe file `.wav` sinh ra từ web, xá
 | Fix giật chậm / âm thanh nhảy ngắt quãng khi phát message: Tắt `ScreenLogger` overlay khi play video, hoãn `WakeSync` mạng trong `STATE_VIDEO`, tăng DMA buffer lên 24 (384ms), bỏ delay thừa và sửa deadline Frame 0 | `MediaPlayer.cpp`, `ScreenLogger.cpp/.h`, `NetworkManager.cpp/.h`, `main.cpp`, `config.h` | ✅ **Đã cập nhật 2026-09-02** |
 | Fix Reboot khi Long Press -> Short Press ngay: Giữ I2S driver thường trực (chỉ `i2s_zero_dma_buffer` khi stop, không uninstall/install) + Cấp phát `_jpegBuffer` 48KB cố định 1 lần lúc `init()` (không malloc/free liên tục) | `AudioPlayer.cpp/.h`, `MediaPlayer.cpp/.h` | ✅ **Đã cập nhật 2026-09-02** |
 | Nâng cấp chất âm: Triển khai Nội suy tuyến tính (Linear Interpolation) trong `fillChunk()` thay vì lặp mẫu bậc thang (ZOH) → triệt tiêu sóng hài chói gắt, làm mềm và ấm giọng nói | `lib/MediaPlayer/AudioPlayer.cpp:190-210` | ✅ **Đã cập nhật 2026-09-02** |
-| Fix Firebase sync lỗi (-1): Giảm MbedTLS buffer từ 33KB xuống 3KB (`setBufferSizes(2048, 1024)`) + giảm I2S DMA buffer từ 24 xuống 12 (giải phóng 54KB RAM cho SSL Handshake) | `NetworkManager.cpp`, `config.h` | ⚠️ **SAI — kiểm tra lại 2026-09-02 (review rủi ro)**: I2S DMA buffer 12 đã có trong `config.h` (`AUDIO_DMA_BUF_COUNT = 12`), nhưng grep `NetworkManager.cpp` **không thấy** lệnh `setBufferSizes()` ở đâu cả (chỉ có 5 chỗ `client.setInsecure()`). Phần giảm mbedTLS buffer coi như **chưa được áp dụng vào code**, dù dòng này ghi ✅. Giữ nguyên dòng gốc bên trái để không xoá lịch sử — chỉ đánh dấu sai ở đây. |
+| Fix Firebase sync lỗi (-1): Giảm MbedTLS buffer từ 33KB xuống 3KB (`setBufferSizes(2048, 1024)`) + giảm I2S DMA buffer từ 24 xuống 12 (giải phóng 54KB RAM cho SSL Handshake) | `NetworkManager.cpp`, `config.h` | ❌ **SAI HẲN — đã chốt 2026-09-03**: I2S DMA buffer 12 thì đúng (`config.h: AUDIO_DMA_BUF_COUNT = 12`), nhưng phần `setBufferSizes(2048,1024)` **KHÔNG THỂ đúng**: grep source Arduino core 2.0.17 (`~/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src/`) cho thấy **`setBufferSizes()` KHÔNG TỒN TẠI trong `WiFiClientSecure` của ESP32** — đó là API của **ESP8266**. Nghĩa là không phải "quên áp dụng" mà là **bất khả thi trên nền tảng này**; nếu từng viết vào code thì đã không compile được. → mbedTLS trên ESP32 luôn dùng in/out content buffer mặc định 16KB mỗi chiều, không chỉnh được từ tầng Arduino. **Đừng đào lại hướng này.** Giữ nguyên dòng gốc bên trái để không xoá lịch sử. |
 
 #### Defect gốc đã tìm ra ở vòng lặp tải (nguyên nhân treo tại `[NET] writing slot`)
 `http.getSize()` trả `-1` với response chunked. Điều kiện `while (http.connected() && (len > 0 || len == -1))`
@@ -654,6 +654,233 @@ tái dùng `type: "image"` có sẵn (message schema đã phẳng, field nào c�
 - Background mặc định cho bản SD card khi không có ảnh (bản NAND dùng màn đen).
 - Audio-stall-not-marking-error trong nhánh audio lồng ảnh/video: đã fix (dùng chung
   `downloadVoiceSegment()` nên fix 1 chỗ áp dụng cho cả 2 đường).
+
+### Fix: download liên tục fail/timeout ở ~10% — erase toàn slot NAND + nghẽn TCP (2026-09-02, phiên sau)
+
+Sau khi nạp firmware có tính năng tin nhắn tĩnh ở trên, user báo download liên tục fail, đứng ở ~10%
+rồi timeout. Điều tra bằng 2 nguồn độc lập (tự rà soát + Plan agent kiểm chứng thiết kế, và 1 agent
+khác cung cấp `fix_download_timeout_plan.md` phân tích sâu cơ chế TCP) — đã tự verify mọi claim quan
+trọng bằng grep trực tiếp trước khi tin dùng.
+
+**Root cause A (chính, gây STALL)**: `NandStorageProvider::openForWrite()` erase NGUYÊN slot ~5.3MB
+(`NAND_SLOT_ADDRS = {0x010000, 0x560000, 0xAB0000}`) — 15-25s block đồng bộ SAU khi `http.GET()` đã mở
+socket nhưng TRƯỚC khi đọc byte nào. Cơ chế cụ thể: trong lúc đó buffer TCP/mbedTLS đầy → lwIP gửi TCP
+Window=0 → CDN backoff (Persist Probe) → khi erase xong, đọc nốt phần buffer cũ (~10-20%, khớp đúng
+triệu chứng) → hết buffer, CDN đang backoff → 10s sau chạm `DOWNLOAD_STALL_TIMEOUT_MS` → huỷ. Bug có
+sẵn từ khi `NAND_SLOT_COUNT` đổi 5→3 (commit `a5970fc`, 31/08, trước phiên tính năng text/voice), làm
+slot to lên; đường ghi "tin nhắn tĩnh" mới thêm khiến bug này bị chạm ở MỌI message (kể cả vài chục KB).
+
+**Root cause B (cộng hưởng, đã verify bằng grep)**: `uint8_t buffer[256]` + `stream->readBytes()` +
+`delay(1)` gọi VÔ ĐIỀU KIỆN mỗi vòng lặp tải (cả video lẫn audio) — ở `CONFIG_FREERTOS_HZ=100`
+(tick 10ms), trần tốc độ tải chỉ còn ~20-25KB/s. Cộng thêm: không có `WiFi.setSleep(false)` nào trong
+toàn bộ firmware (modem sleep mặc định bật suốt lúc tải); `http.end()` của phiên video chạy SAU
+`downloadVoiceSegment()` thay vì trước — 2 `HTTPClient` dùng chung 1 `WiFiClientSecure` khi phiên cũ
+chưa đóng.
+
+**Fix đã áp dụng**:
+1. `lib/Storage/NandStorageProvider.h/.cpp` — Erase-as-you-write: thêm `_erasedUpToAddr` (địa chỉ
+   tuyệt đối). `openForWrite()` chỉ erase 1 block 64KB đầu thay vì nguyên slot. `writeChunk()` erase
+   thêm block khi con trỏ ghi sắp chạm vùng chưa erase — **bất biến bắt buộc**: luôn erase từ
+   `_erasedUpToAddr`, không bao giờ từ `_writeOffset` (tránh `eraseRange()` tự lùi sector đè dữ liệu
+   đã ghi). `openForAppend()` tự tính lại `_erasedUpToAddr` từ `_writeOffset` (làm tròn lên bội 65536)
+   thay vì dựa vào state cũ — tự chữa lành. `discardWrite()`/`formatStorage()` reset về 0.
+2. `lib/NetworkManager/NetworkManager.cpp`:
+   - Buffer đọc `256B → 2048B` ở cả 2 vòng lặp (video + `downloadVoiceSegment()`).
+   - `delay(1)` giờ CÓ ĐIỀU KIỆN — chỉ khi `sizeAvail/av == 0` (không có data), không delay mỗi vòng.
+   - `WiFi.setSleep(false)` quanh vòng lặp per-message download (bật lại `true` ngay sau vòng lặp —
+     mọi lối thoát khỏi vòng lặp là `break`, không `return`, nên luôn chạy tới điểm bật lại).
+   - `http.end()` cho phiên video gọi NGAY sau khi tải xong, TRƯỚC `downloadVoiceSegment()` (dòng cũ ở
+     cuối khối vẫn giữ, gọi lần 2 vô hại).
+   - `DOWNLOAD_STALL_TIMEOUT_MS`: `10000 → 30000` (lưới an toàn bổ sung, không phải fix chính).
+
+**Chưa làm (out of scope, có lý do)**: `waitBusyInternal()` (`lib/NandStorage/NandStorage.cpp`) không
+có `vTaskDelay()` — với erase block 64KB (~150-2000ms/lần) đã đủ ngắn, sửa thêm sẽ ảnh hưởng
+`writeRaw()` page-program (hot path), rủi ro cao hơn lợi ích. Các mục bảo mật khác trong
+`code_review_2_9_gemini_38.md` (setInsecure/TLS, OTA không xác thực, GPIO8/NAND-CS, sector 0 wear) —
+không liên quan triệu chứng lần này, để riêng nếu user muốn xử lý.
+
+**Chưa build/flash/test trên máy thật.** Cần user xác nhận: (1) `[NET] writing slot` xuất hiện dưới
+0.5s sau `[NET] GET OK` thay vì 15-25s; (2) tiến độ tải chạy đều không khựng ~10%; (3) tin nhắn chỉ
+voice/text (trước đây gần như luôn fail) giờ tải nhanh; (4) video+audio nối tiếp không mất/lệch dữ
+liệu, không lỗi `Bad jpegSize`; (5) `uxTaskGetStackHighWaterMark()` của `WakeSync` sau vài lần tải để
+xác nhận margin thực tế với buffer 2048B (lý thuyết tính đủ nhưng nên đo thật).
+
+> **KẾT QUẢ THỰC TẾ (2026-09-03)**: vòng fix này **CHƯA đủ**. Triệu chứng ĐỔI chứ không hết — từ
+> "luôn dừng ~10%" thành "dừng ở vị trí NGẪU NHIÊN (đôi khi 3000B, đôi khi nửa file)". Nguyên nhân
+> thật nằm ở chỗ khác, xem mục kế tiếp. Các fix ở vòng này (erase-as-you-write, delay có điều kiện)
+> **vẫn đúng và cần giữ** — chính chúng đã loại bỏ cú block 15-25s nên triệu chứng mới đổi dạng.
+
+---
+
+### Fix vòng 3 (2026-09-03): `Stream::readBytes()` trên WiFiClientSecure đọc TỪNG BYTE qua mbedTLS
+
+**Dữ kiện quyết định từ user** (loại trừ gần hết giả thuyết cũ):
+- **Cả 2 dòng log đều xuất hiện tuỳ lần**: `dl STALL` (kết nối còn sống, server ngừng gửi) VÀ
+  `DL err (discarded)` (`http.connected()` thành false — kết nối đứt hẳn).
+- **Cấp nguồn USB** → loại bỏ giả thuyết sụt áp/pin.
+- **Box KHÔNG reboot** → loại bỏ brownout và Task-Watchdog panic.
+
+**Root cause (verify trực tiếp trong source Arduino core 2.0.17 tại `~/.platformio/packages/`)**:
+`stream->readBytes(buffer, 2048)` trên `WiFiClientSecure` đọc **từng byte một**:
+1. `WiFiClientSecure`/`WiFiClient` **không override `readBytes()`** → rơi về `Stream::readBytes()`
+   (`cores/esp32/Stream.cpp:41-53`) — vòng lặp `timedRead()` **1 byte/vòng**.
+2. `Stream::timedRead()` (`Stream.cpp:31`) **busy-spin không nhường CPU**, `_timeout` = **30 giây**
+   (`HTTPClient.cpp:1168` đặt `_client->setTimeout((_tcpTimeout+500)/1000)`).
+3. `WiFiClientSecure::read()` 1 byte (`:187`) → `read(&data,1)` → **gọi `available()` MỖI LẦN**
+   (`:213`) → `data_to_read()` (`ssl_client.cpp:353`) → `mbedtls_ssl_read(ctx,NULL,0)` +
+   `mbedtls_ssl_get_bytes_avail()`, rồi mới `get_ssl_receive()` → `mbedtls_ssl_read(ctx,buf,1)`.
+
+→ 1 chunk 2048B = **~4096 lời gọi mbedTLS**; file 2.2MB = **hơn 4 TRIỆU** trên CPU đơn nhân 160MHz.
+Đúng bằng trần ~20-25KB/s → 2.2MB mất 100+ giây, phơi kết nối quá lâu.
+
+**Giải thích được ĐÚNG CẢ HAI kiểu lỗi ở vị trí ngẫu nhiên** (điều mà mọi giả thuyết trước không làm được):
+- `available()` gọi **`stop()`** ngay khi `data_to_read()` trả âm (`WiFiClientSecure.cpp:247-250`);
+  `read(buf,size)` cũng `stop()` khi `get_ssl_receive()` âm (`:233-236`). Gọi 4 triệu lần thì chỉ cần
+  **một** lỗi mbedTLS thoáng qua là kết nối bị giết → `DL err (discarded)` ở vị trí ngẫu nhiên.
+- Khi buffer mbedTLS cạn giữa chunk, `read()` trả -1 → `timedRead()` **busy-spin tới 30 giây** đốt
+  100% CPU, không rút socket, không cập nhật `lastProgressMs` → `dl STALL`.
+
+**Sai lầm của vòng fix 2 (ghi lại để không lặp)**: tài liệu `fix_download_timeout_plan.md` (Giải pháp 2)
+nêu **2 việc** — (a) nâng buffer 256→2048B, (b) **đổi `readBytes()` → `read()`**. Vòng 2 chỉ làm (a),
+bỏ sót (b) — mà (b) mới là phần quan trọng. Nâng buffer mà vẫn `readBytes()` chỉ khiến mỗi chunk tốn
+2048 vòng byte-by-byte thay vì 256, **không giải quyết gì**. Bài học: khi áp dụng khuyến nghị từ tài
+liệu ngoài, phải làm ĐỦ các phần của khuyến nghị đó hoặc ghi rõ vì sao bỏ.
+
+**Fix đã áp dụng vòng 3:**
+1. `NetworkManager.cpp` — **`stream->readBytes()` → `stream->read()`** ở CẢ 2 vòng lặp tải (video
+   ~dòng 1056 và `downloadVoiceSegment()` ~dòng 715). Đây là fix chính. Thêm log
+   `[NET] conn DROPPED @ X/Y` khi thoát vòng lặp do `!http.connected()` (trước đây im lặng, phải suy
+   ra từ `DL err` nên không phân biệt được "đứt kết nối" với "tải thiếu byte").
+2. `NandStorage.cpp` — `writeRaw()` dùng **`SPI.writeBytes()` bulk** thay vòng `SPI.transfer()` từng
+   byte, + hằng số mới **`NAND_WRITE_SPI_SETTINGS` 20MHz** riêng cho đường ghi (đường đọc đã chạy
+   20MHz ổn định trên đúng bộ dây này; opcode `0x02` của W25Q128JV chịu tới 133MHz). Ghi 1 page 256B:
+   ~900µs → ~120µs. **Tách hằng số riêng để revert 1 dòng** nếu breadboard không chịu nổi — dấu hiệu
+   là dữ liệu tải về hỏng (ảnh nhiễu / `Bad jpegSize` / audio rè bất thường).
+3. **Chặn "ghi thất bại nhưng báo thành công"** (bug thật, phát hiện khi rà soát): `writeRaw()`/
+   `eraseRange()`/`eraseSector()` đổi `void` → `bool` (false khi `acquireSPI()` timeout 1000ms —
+   trước đây return im lặng, KHÔNG ghi gì mà caller vẫn tưởng xong). `writeChunk()` giờ trả `0` khi
+   thất bại thay vì luôn trả `len` → `NetworkManager` thấy `written < c` → `discardWrite()`.
+   `writeSlotTable()` và `closeWrite()` cũng log lỗi thay vì nuốt. Nguy hiểm nhất là erase bị skip im
+   lặng: NAND chỉ clear bit 1→0, ghi đè lên vùng chưa erase cho ra dữ liệu rác mà chip không báo lỗi.
+
+**Ghi chú**: `lib/NetworkManager/FirebaseClient.cpp:89` cũng dùng `stream->readBytes()` với cùng bug,
+nhưng module này là **dead code** (không được gọi ở đâu — đã xác nhận từ `codebase_review.md` §4.1),
+nên không sửa. Nếu sau này hồi sinh module đó thì phải sửa cùng cách.
+
+**Chưa build/flash/test trên máy thật.** Cần user xác nhận:
+1. **Tốc độ tải** — dòng `[NET] dl X/Y` (in mỗi 16KB) phải chạy dồn dập, 2.2MB xong trong vài giây tới
+   ~15s thay vì >100s. Đây là chỉ dấu trực tiếp nhất cho biết fix có trúng hay không.
+2. Không còn `dl STALL` / `DL err (discarded)` giữa chừng. Nếu VẪN còn, dòng log mới
+   `[NET] conn DROPPED @ X/Y` sẽ cho biết chính xác là kết nối đứt (→ bước tiếp: resume bằng HTTP
+   `Range`) hay là ngừng nhận data (→ hướng khác).
+3. Toàn vẹn dữ liệu sau khi nâng clock ghi 20MHz (xem dấu hiệu ở mục 2 phần fix).
+4. Nếu xuất hiện `[NANDP] ERR: write failed` / `erase-ahead FAILED` → tranh chấp SPI mutex là có thật
+   (trước đây bị nuốt im lặng nên chưa từng thấy), cần xử lý riêng.
+
+**Chưa làm, để dành nếu vòng 3 vẫn chưa đủ**: resume/retry bằng HTTP `Range` header (phải phân biệt
+206 vs 200, xử lý server không hỗ trợ Range) — chỉ nên làm khi đã có bằng chứng từ log
+`conn DROPPED` rằng vấn đề là mạng chứ không phải firmware.
+
+---
+
+### Fix vòng 4 (2026-09-03): vấn đề THẬT nằm ở TẦNG KẾT NỐI, không phải luồng download
+
+**User reframe (rất quan trọng, đổi hẳn hướng điều tra)** — 4 quan sát thực tế:
+1. Wi-Fi kết nối chập chờn; ngủ rồi thức dậy có thể **mất luôn kết nối**.
+2. Dùng Wi-Fi mặc định không được **dù SSID đúng**, phải nhập lại đúng Wi-Fi đó qua AP mode mới chạy.
+3. **Wi-Fi đang báo đã connect nhưng `http.GET()` vẫn trả `-1`.**
+4. **Những lúc tải được hẳn thì tải RẤT NHANH.**
+
+Quan sát #4 xác nhận **fix vòng 3 (`readBytes`→`read`) ĐÃ có tác dụng** — đường download không còn là
+nút thắt. Nút thắt còn lại là việc thiết lập/duy trì kết nối.
+
+**Root cause (verify trực tiếp trong code, không suy đoán)**:
+
+`NetworkManager::ensureConnected()` có fast-path `if (WiFi.status() == WL_CONNECTED) return true;`.
+Sau Light Sleep **`WiFi.status()` RẤT HAY vẫn báo `WL_CONNECTED` dù association đã chết ở phía AP**:
+CPU ngủ suốt 5 phút nên driver Wi-Fi không hề xử lý được beacon-loss / deauth event, biến trạng thái
+giữ nguyên giá trị cũ. Tin vào nó → bỏ qua reconnect → mọi `http.GET()` sau đó trả `-1`
+(**đúng y quan sát #3 của user**).
+
+Tệ hơn — đây là vòng luẩn quẩn khiến box **không bao giờ tự thoát ra được**: sau timer wake box chỉ
+thức **2 giây** (`activeSleepTimeoutMs = 2000` trong `main.cpp`), trong khi driver Wi-Fi cần ~6s+ mới
+tự phát hiện mất beacon rồi `setAutoReconnect(true)` mới kích hoạt. Box ngủ lại **trước khi** stack kịp
+nhận ra mình đã mất kết nối → lặp lại hàng trăm chu kỳ 5 phút → giải thích luôn quan sát #1.
+
+Xác nhận thêm: `esp_light_sleep_start()` (`PowerManager::enterLightSleep`) được gọi khi Wi-Fi vẫn đang
+active — **không** `esp_wifi_stop()`, **không** `esp_pm_configure()`, **không** cấu hình PS nào (grep
+toàn repo: 0 kết quả). Đây là kiểu dùng light sleep mà ESP-IDF không đảm bảo giữ được association.
+
+**Fix đã áp dụng:**
+1. **`ensureConnected()` không còn tin `WiFi.status()`** (`NetworkManager.cpp`):
+   - Fast-path giờ đòi **cả** `WL_CONNECTED` **lẫn** IP hợp lệ (`(uint32_t)WiFi.localIP() != 0`) —
+     `WL_CONNECTED` chỉ nghĩa là associate+auth xong, chưa chắc đã xin được IP từ DHCP; gửi HTTP khi
+     chưa có IP cũng ra `-1`.
+   - Thêm cờ `_forceReassociate` + `notifyWakeFromSleep()`: **vừa ngủ dậy thì LUÔN tái lập
+     association**, bỏ qua fast-path hoàn toàn. `main.cpp` gọi `notifyWakeFromSleep()` ngay sau
+     `enterLightSleep()`.
+   - Bỏ `WiFi.reconnect()` (dựa trên chính trạng thái driver đang sai) → luôn `WiFi.disconnect(false)`
+     + `WiFi.begin()` sạch, và **chờ cả status lẫn IP** mới coi là thành công.
+2. **Timeout `ensureConnected` trong `syncWakeup()`: 5s → 12s** — sau light sleep đây là associate +
+   4-way handshake + DHCP hoàn toàn mới, thực tế tốn 3-8s; cắt ở 5s là bỏ dở đúng lúc sắp xong.
+   Không tốn pin oan vì `Task_UIController` bị khoá không cho ngủ khi `isSyncing()`.
+3. **Retry `-1` giờ có tái kết nối** (`checkAndDownloadNewMessages`): cách cũ chỉ `delay(500)` rồi
+   `http.GET()` lại trên cùng client — vô ích khi nguyên nhân là link chết hoặc DNS cũ. Giờ ép
+   `_forceReassociate` + `ensureConnected(12000)` trước khi thử lại (việc này cũng xin lại DNS server
+   mới từ DHCP).
+4. **Fallback creds mặc định** (quan sát #2, `main.cpp`): trước đây hễ NVS có **bất kỳ** SSID nào thì
+   `DEFAULT_WIFI_SSID/PASSWORD` trong `config.h` **không bao giờ được thử tới** → box đi thẳng vào AP
+   mode dù creds mặc định vẫn dùng được. Giờ NVS creds fail sẽ thử tiếp creds mặc định. Log cũng ghi
+   rõ nguồn: `[BOOT] WiFi: <ssid> (NVS|default)` — trước chỉ in SSID nên không phân biệt được "đang
+   dùng creds mặc định" với "đang dùng creds cũ còn sót trong NVS".
+5. **Log chẩn đoán heap**: `[NET] sync start heap=N` đầu mỗi chu trình sync + heap in kèm khi GET fail
+   — để lần sau phân biệt được OOM với lỗi đường truyền (xem mục `setBufferSizes` bất khả thi ở trên).
+
+**Giả thuyết còn lại cho quan sát #2 mà code không sửa được**: có thể **mật khẩu router đã đổi** trong
+khi `DEFAULT_WIFI_PASSWORD` trong `config.h` vẫn là giá trị cũ (`config.h:83-84`). User nói "SSID đúng"
+chứ không khẳng định mật khẩu. Log mới `[BOOT] WiFi: ... (NVS|default)` sẽ giúp xác định.
+
+**Chưa làm, cân nhắc nếu vòng 4 vẫn chưa đủ**: tắt hẳn Wi-Fi trước khi ngủ
+(`esp_wifi_stop()` / `WiFi.mode(WIFI_OFF)`) rồi bật lại sau khi thức, thay vì dựa vào modem sleep giữ
+association. §6.B.3 từng tính modem sleep tiết kiệm hơn 28% ở chu kỳ 5 phút — **nhưng phép tính đó giả
+định association SỐNG SÓT qua giấc ngủ, mà thực tế cho thấy giả định này sai**. Nếu vòng 4 cho thấy
+association chết ở gần như mọi lần wake (xem log `[NET] re-assoc`), thì tắt hẳn Wi-Fi khi ngủ sẽ vừa
+đúng hơn vừa tiết kiệm hơn (không tốn 0.4mA rò trong 5 phút cho một association đằng nào cũng chết).
+
+**Chưa build/flash/test.** Cần user xác nhận qua log:
+- `[NET] re-assoc (wake=1 st=3)` — `st=3` (WL_CONNECTED) mà vẫn phải re-assoc ⇒ **xác nhận đúng chẩn
+  đoán**: status đã nói dối. Đây là dòng log đáng chú ý nhất.
+- `[NET] WiFi OK (Nms)` — thời gian tái lập thật sự là bao nhiêu (để chỉnh timeout 12s cho hợp lý).
+- Sau wake, sync có chạy trọn (`updateFirebaseStatus` → flags → messages) mà không còn `-1` không.
+- `[BOOT] WiFi: <ssid> (NVS|default)` — SSID đang dùng có đúng là mạng nhà không.
+
+---
+
+### Gotcha treo: I2S sample rate không được reset khi đổi bài (2026-09-03, CHƯA sửa)
+
+User báo audio phát nhanh hơn hình, **reset box thì tự hết** nên đã dừng truy cứu. Ghi lại vì "reset
+là hết" khớp đúng với một bug tiềm ẩn tìm được dọc đường, và nó sẽ tái xuất hiện:
+
+`AudioPlayer::stop()` đặt lại biến theo dõi `_sampleRate = AUDIO_SAMPLE_RATE` (8000) **nhưng không đặt
+lại tốc độ I2S phần cứng**. Trong khi `loadFromStorage()` chỉ gọi `i2s_set_sample_rates()` khi
+`sampleRate != _sampleRate`. Hậu quả:
+- Phát bài 16kHz → HW = 16000×4 = 64000, `_sampleRate` = 16000
+- `stop()` → `_sampleRate` = 8000, **HW vẫn 64000**
+- Phát bài 8kHz → `8000 == 8000` → **bỏ qua set rate** → HW giữ 64000 trong khi cần 32000 → phát nhanh 2x
+
+Reset box làm `init()` mở lại I2S ở rate mặc định nên triệu chứng biến mất — đúng như quan sát.
+
+**Dữ liệu thật đã đo** (file user gửi, đọc header RIFF): các message cũ là **16000 Hz**, các message
+mới là **8000 Hz** → đúng kịch bản trên. Lưu ý trung thực: cơ chế này cho ra sai lệch **2x**, user mô
+tả "4x" — nên có thể chưa phải toàn bộ câu chuyện, hoặc "4x" là ước lượng cảm quan.
+
+**Không phải do các thay đổi trong phiên 2026-09-02/03**: `git show bc0f80a --stat` xác nhận chỉ
+`MediaPlayer.cpp` bị đụng (118 thêm / 1 xoá, dòng xoá là `decodeOneFrame(false)` ở nhánh ảnh tĩnh);
+`AudioPlayer.cpp`, `AudioPlayer.h`, `config.h` **không hề bị sửa**. Đây là bug có sẵn từ trước.
+
+**Cách sửa khi nào quay lại**: bỏ điều kiện `sampleRate != _sampleRate`, luôn gọi
+`i2s_set_sample_rates(I2S_NUM_0, sampleRate * AUDIO_OVERSAMPLE)` trong `loadFromStorage()`; hoặc cho
+`stop()` reset luôn HW về `AUDIO_SAMPLE_RATE * AUDIO_OVERSAMPLE` cho khớp với biến theo dõi.
 
 #### Cần user xác nhận trên máy thật (chưa build/flash/deploy)
 1. Card cũ (video/ảnh/voice/text riêng lẻ) không bị regression.

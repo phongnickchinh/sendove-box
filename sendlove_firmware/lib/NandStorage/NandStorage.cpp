@@ -22,6 +22,14 @@ static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 // Đường GHI/XOÁ vẫn giữ nguyên 4MHz vì không nằm trong luồng phát.
 static const SPISettings NAND_READ_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE3);
 
+// Đường GHI cũng 20MHz, cùng lập luận với đường đọc ở trên (acquireSPI() vốn đã mở
+// transaction 20MHz trên đúng bộ dây này). Opcode Page Program 0x02 của W25Q128JV
+// chịu tới 133MHz nên 20MHz rất dư an toàn về phía chip.
+// Tách hằng số riêng (không dùng chung NAND_SPI_SETTINGS 4MHz của lệnh erase) để
+// REVERT 1 DÒNG nếu breadboard không chịu nổi: dấu hiệu là dữ liệu tải về bị hỏng
+// (ảnh nhiễu / "Bad jpegSize" / audio rè bất thường).
+static const SPISettings NAND_WRITE_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE3);
+
 bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     _spiMutex = spiMutex;
 
@@ -222,8 +230,13 @@ static void writeEnableInternal() {
     digitalWrite(PIN_NAND_CS, HIGH);
 }
 
-void NandStorage::eraseSector(uint32_t addr) {
-    if (!acquireSPI()) return;
+bool NandStorage::eraseSector(uint32_t addr) {
+    // Erase bi skip im lang cuc ky nguy hiem: NAND chi clear bit 1->0, ghi de len
+    // vung CHUA erase cho ra du lieu rac ma khong he bao loi.
+    if (!acquireSPI()) {
+        DLOG("[NAND] ERR: eraseSector SPI timeout @ %lu", (unsigned long)addr);
+        return false;
+    }
 
     SPI.beginTransaction(NAND_SPI_SETTINGS);
 
@@ -240,17 +253,21 @@ void NandStorage::eraseSector(uint32_t addr) {
 
     SPI.endTransaction();
     releaseSPI();
+    return true;
 }
 
-void NandStorage::eraseRange(uint32_t addr, uint32_t len) {
-    if (len == 0) return;
+bool NandStorage::eraseRange(uint32_t addr, uint32_t len) {
+    if (len == 0) return true;
 
     uint32_t current = addr;
     uint32_t remaining = len;
 
     while (remaining > 0) {
         if ((current % 65536U) == 0 && remaining >= 65536U) {
-            if (!acquireSPI()) return;
+            if (!acquireSPI()) {
+                DLOG("[NAND] ERR: erase64k SPI timeout @ %lu", (unsigned long)current);
+                return false;
+            }
 
             SPI.beginTransaction(NAND_SPI_SETTINGS);
             writeEnableInternal();
@@ -272,7 +289,10 @@ void NandStorage::eraseRange(uint32_t addr, uint32_t len) {
         }
 
         if ((current % 32768U) == 0 && remaining >= 32768U) {
-            if (!acquireSPI()) return;
+            if (!acquireSPI()) {
+                DLOG("[NAND] ERR: erase32k SPI timeout @ %lu", (unsigned long)current);
+                return false;
+            }
 
             SPI.beginTransaction(NAND_SPI_SETTINGS);
             writeEnableInternal();
@@ -293,7 +313,7 @@ void NandStorage::eraseRange(uint32_t addr, uint32_t len) {
             continue;
         }
 
-        eraseSector(current & ~4095U);
+        if (!eraseSector(current & ~4095U)) return false;
         current = (current & ~4095U) + 4096U;
         if (remaining > 4096U) {
             remaining -= 4096U;
@@ -301,13 +321,19 @@ void NandStorage::eraseRange(uint32_t addr, uint32_t len) {
             remaining = 0;
         }
     }
+    return true;
 }
 
-void NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
-    if (!data || len == 0) return;
-    if (!acquireSPI()) return;
+bool NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
+    if (!data || len == 0) return false;
+    // Truoc day return im lang o day -> khong ghi gi nhung caller van tuong da ghi
+    // xong (writeChunk tra ve len vo dieu kien) -> file tai ve thung lo am tham.
+    if (!acquireSPI()) {
+        DLOG("[NAND] ERR: write SPI timeout @ %lu", (unsigned long)addr);
+        return false;
+    }
 
-    SPI.beginTransaction(NAND_SPI_SETTINGS);
+    SPI.beginTransaction(NAND_WRITE_SPI_SETTINGS);
 
     uint32_t currentAddr = addr;
     uint32_t bytesLeft = len;
@@ -326,9 +352,10 @@ void NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
         SPI.transfer((currentAddr >> 8) & 0xFF);
         SPI.transfer(currentAddr & 0xFF);
 
-        for (uint32_t i = 0; i < chunkLen; i++) {
-            SPI.transfer(data[dataOffset + i]);
-        }
+        // Bulk thay vi vong lap tung byte — cung ly do da ap dung cho duong DOC o
+        // readRaw(): SPI.transfer() don byte ton ~3.5us/byte (phan lon la overhead
+        // loi goi), bulk ~0.45us/byte. Ghi 1 page 256B: ~900us -> ~120us.
+        SPI.writeBytes(data + dataOffset, chunkLen);
         digitalWrite(PIN_NAND_CS, HIGH);
 
         waitBusyInternal();
@@ -340,6 +367,7 @@ void NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
 
     SPI.endTransaction();
     releaseSPI();
+    return true;
 }
 
 bool NandStorage::acquireSPI() {
@@ -372,10 +400,13 @@ void NandStorage::writeSlotTable() {
     for (uint8_t i = 0; i < NAND_SLOT_COUNT; i++) {
         memcpy(header + 4 + i * sizeof(SlotEntry), &_slots[i], sizeof(SlotEntry));
     }
-    eraseRange(0x000000, 4096);
-    writeRaw(0x000000, header, sizeof(header));
+    // Bảng slot hỏng = mất toàn bộ metadata của mọi slot, nên phải kêu lên khi
+    // ghi trượt thay vì im lặng như trước.
+    if (!eraseRange(0x000000, 4096) || !writeRaw(0x000000, header, sizeof(header))) {
+        DLOG("[NAND] ERR: slot table write FAILED");
+        return;
+    }
     _tableValid = true;
-    // DLOG("[NAND] wrote NSLT table");
 }
 
 void NandStorage::formatAll() {

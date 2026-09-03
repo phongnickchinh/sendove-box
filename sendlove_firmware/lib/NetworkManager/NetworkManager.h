@@ -38,6 +38,12 @@ public:
     /// Force RF reconnect if Wi-Fi is disconnected (with fallback & timeout)
     bool ensureConnected(uint32_t timeoutMs = 5000);
 
+    /// Báo chip vừa tỉnh khỏi Light Sleep. Lần ensureConnected() kế tiếp sẽ ÉP tái
+    /// lập association thay vì tin WiFi.status() — sau khi ngủ, biến trạng thái này
+    /// thường vẫn là WL_CONNECTED dù association đã chết ở phía AP (CPU ngủ nên
+    /// driver không xử lý được beacon-loss/deauth event). Xem ensureConnected().
+    void notifyWakeFromSleep() { _forceReassociate = true; }
+
     /// Get current formatted time string ("14:30")
     void getTimeString(char* buffer, size_t maxLen) const;
 
@@ -138,6 +144,7 @@ private:
     static void wakeupSyncTaskWorker(void* param);
     static void ntpTaskWorker(void* param);
 
+    volatile bool _forceReassociate = false;
     volatile bool _isSyncing = false;
     volatile bool _isFirebaseSyncing = false;
     volatile bool _isNtpSyncing = false;

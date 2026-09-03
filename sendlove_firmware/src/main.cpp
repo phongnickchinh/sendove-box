@@ -264,6 +264,11 @@ void Task_UIController(void *pvParameters) {
       
       appCtx.powerManager.enterLightSleep(sleepTimeUs, &appCtx.display);
 
+      // Vừa tỉnh dậy: đánh dấu để lần ensureConnected() kế tiếp ÉP tái lập
+      // association. WiFi.status() sau light sleep thường vẫn báo WL_CONNECTED
+      // dù association đã chết -> nếu tin nó thì mọi http.GET() đều trả -1.
+      appCtx.network.notifyWakeFromSleep();
+
       // Nháy đèn nền 3 lần NGAY LẬP TỨC sau khi thức dậy.
       // Gọi ở đây (trước delay) để đảm bảo các FreeRTOS task khác chưa resume,
       // SPI bus chưa có xung đột, GPIO an toàn để toggle.
@@ -360,14 +365,26 @@ void setup() {
   char wifiSsid[WIFI_SSID_MAX_LEN] = "";
   char wifiPass[WIFI_PASS_MAX_LEN] = "";
 
-  if (!appCtx.configManager.loadWiFi(wifiSsid, wifiPass)) {
+  bool credsFromNvs = appCtx.configManager.loadWiFi(wifiSsid, wifiPass);
+  if (!credsFromNvs) {
     strncpy(wifiSsid, DEFAULT_WIFI_SSID, sizeof(wifiSsid) - 1);
     strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
-    DLOG("[BOOT] WiFi: using defaults");
   }
 
-  DLOG("[BOOT] WiFi SSID: %s", wifiSsid);
-  appCtx.network.connectWiFi(wifiSsid, wifiPass);
+  // Log rõ nguồn credentials: trước đây chỉ in SSID nên không phân biệt được
+  // "đang dùng creds mặc định" với "đang dùng creds cũ còn sót trong NVS".
+  DLOG("[BOOT] WiFi: %s (%s)", wifiSsid, credsFromNvs ? "NVS" : "default");
+
+  if (appCtx.network.connectWiFi(wifiSsid, wifiPass) != WiFiConnectResult::CONNECTED && credsFromNvs) {
+    // Creds trong NVS (lưu từ lần provisioning trước) có thể đã cũ/sai — ví dụ
+    // đổi mật khẩu router. Trước đây hễ NVS có BẤT KỲ SSID nào thì creds mặc định
+    // trong config.h không bao giờ được thử tới, nên box đi thẳng vào AP mode dù
+    // creds mặc định vẫn dùng được. Thử nốt trước khi bỏ cuộc.
+    DLOG("[BOOT] NVS creds fail -> try default");
+    strncpy(wifiSsid, DEFAULT_WIFI_SSID, sizeof(wifiSsid) - 1);
+    strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
+    appCtx.network.connectWiFi(wifiSsid, wifiPass);
+  }
   appCtx.layoutEngine.loadConfig(defaultLayoutJson);
 
 #if ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD

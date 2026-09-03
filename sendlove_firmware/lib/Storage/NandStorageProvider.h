@@ -60,6 +60,11 @@ private:
     int8_t _activeSlot = 0;
     uint32_t _writeOffset = 0;
     uint32_t _slotCapacity = 0;
+    /// Erase-as-you-write: địa chỉ tuyệt đối đã erase tới đâu trong slot đang ghi.
+    /// openForWrite() chỉ erase 1 block 64KB đầu (không erase nguyên slot ~5.3MB —
+    /// từng gây block đồng bộ 15-25s khiến socket HTTP bị TCP Zero-Window/timeout
+    /// giữa chừng). writeChunk() erase thêm từng block khi con trỏ ghi sắp chạm tới.
+    uint32_t _erasedUpToAddr = 0;
 
     int8_t parseSlotId(const char* identifier) const;
     /// Số byte vật lý của một slot (slot cuối chạy tới hết chip 16MB)

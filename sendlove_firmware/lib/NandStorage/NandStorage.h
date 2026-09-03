@@ -45,14 +45,18 @@ public:
     /// Read raw data bytes from specified Flash address
     void readRaw(uint32_t addr, uint8_t* data, uint32_t len);
 
-    /// Erase a 4KB Flash sector at specified address
-    void eraseSector(uint32_t addr);
+    /// Erase a 4KB Flash sector at specified address. Trả về false nếu KHÔNG lấy
+    /// được SPI mutex (không erase được) — caller PHẢI kiểm, vì ghi đè lên vùng
+    /// chưa erase cho ra dữ liệu rác mà chip không hề báo lỗi.
+    bool eraseSector(uint32_t addr);
 
-    /// Erase a continuous flash range using the largest supported erase granularity
-    void eraseRange(uint32_t addr, uint32_t len);
+    /// Erase a continuous flash range using the largest supported erase granularity.
+    /// false = có ít nhất một block/sector không erase được.
+    bool eraseRange(uint32_t addr, uint32_t len);
 
-    /// Write raw data bytes to Flash address (handles page programming)
-    void writeRaw(uint32_t addr, const uint8_t* data, uint32_t len);
+    /// Write raw data bytes to Flash address (handles page programming).
+    /// false = không lấy được SPI mutex, KHÔNG có byte nào được ghi.
+    bool writeRaw(uint32_t addr, const uint8_t* data, uint32_t len);
 
     /// Erase all slots & header table (Format Flash)
     void formatAll();

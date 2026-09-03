@@ -76,41 +76,48 @@ bool NetworkManager::ensureConnected(uint32_t timeoutMs) {
         return false;
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
+    // KHONG duoc tin mot minh WiFi.status(). Sau Light Sleep no RAT HAY van bao
+    // WL_CONNECTED du association da chet o phia AP: CPU ngu suot 5 phut nen driver
+    // khong he xu ly duoc beacon-loss/deauth event, bien trang thai giu nguyen gia
+    // tri cu. Tin vao no -> bo qua reconnect -> moi http.GET() sau do tra ve -1
+    // (dung trieu chung user bao 2026-09-03: "wifi da connect nhung get http van
+    // ra -1"). Te hon: sau timer wake box chi thuc 2s, chua du de driver tu phat
+    // hien mat beacon (~6s+) roi auto-reconnect -> ket vinh vien qua hang tram chu ky.
+    // Vi vay: vua ngu day thi LUON tai lap association, khong tin trang thai cu.
+    // Ngoai ra kiem them IP: WL_CONNECTED chi nghia la da associate + auth xong,
+    // chua chac da xin duoc IP tu DHCP; gui HTTP khi chua co IP cung ra -1.
+    if (!_forceReassociate && WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0) {
         return true;
     }
 
-    DLOG("[NET] reconnecting...");
-    WiFi.reconnect();
+    if (_wifiSsid[0] == '\0') {
+        DLOG("[NET] no creds to reconnect");
+        return false;
+    }
+
+    DLOG("[NET] re-assoc (wake=%d st=%d)", _forceReassociate ? 1 : 0, (int)WiFi.status());
+    _forceReassociate = false;
 
     uint32_t start = millis();
-    uint32_t phase1 = (timeoutMs > 2000) ? 2000 : timeoutMs;
-    while (WiFi.status() != WL_CONNECTED && (millis() - start < phase1)) {
+
+    // WiFi.reconnect() khong du: no dua tren chinh trang thai driver dang sai.
+    // Phai dut diem association cu roi begin() lai sach se.
+    WiFi.disconnect(false);
+    delay(50);
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(_wifiSsid, _wifiPassword);
+
+    while (millis() - start < timeoutMs) {
+        if (WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0) {
+            DLOG("[NET] WiFi OK (%lums)", (unsigned long)(millis() - start));
+            return true;
+        }
         delay(100);
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-        DLOG("[NET] WiFi reconnected");
-        return true;
-    }
-
-    // Nếu soft reconnect chưa thành công và có thông tin Wi-Fi, restart lại kết nối
-    if (_wifiSsid[0] != '\0') {
-        DLOG("[NET] full WiFi restart...");
-        WiFi.disconnect(false);
-        delay(50);
-        WiFi.mode(WIFI_STA);
-        WiFi.setAutoReconnect(true);
-        WiFi.begin(_wifiSsid, _wifiPassword);
-
-        while (WiFi.status() != WL_CONNECTED && (millis() - start < timeoutMs)) {
-            delay(100);
-        }
-    }
-
-    bool ok = (WiFi.status() == WL_CONNECTED);
-    DLOG("[NET] WiFi status: %s", ok ? "OK" : "FAIL");
-    return ok;
+    DLOG("[NET] WiFi FAIL %lums st=%d", (unsigned long)(millis() - start), (int)WiFi.status());
+    return false;
 }
 
 bool NetworkManager::isTimeSynced() const {
@@ -427,7 +434,7 @@ static portMUX_TYPE s_syncMux = portMUX_INITIALIZER_UNLOCKED;
 
 // Bao lau khong nhan them byte nao thi coi la stream chet. http.setTimeout(30000)
 // chi ap cho mot lan doc, khong chot duoc ca vong lap.
-static const uint32_t DOWNLOAD_STALL_TIMEOUT_MS = 10000;
+static const uint32_t DOWNLOAD_STALL_TIMEOUT_MS = 30000;
 
 struct FirebaseTaskParams {
     NetworkManager* self;
@@ -481,14 +488,24 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 1. Tái kết nối Wi-Fi (chờ tối đa 5s với fallback)
-    if (!ensureConnected(5000)) {
+    // 1. Tái kết nối Wi-Fi. 12s chứ không phải 5s: sau Light Sleep đây là một lần
+    // associate + 4-way handshake + xin IP DHCP hoàn toàn mới (xem ensureConnected),
+    // thực tế tốn 3-8s. Cắt ở 5s là bỏ dở giữa chừng đúng lúc sắp xong.
+    // Không sợ tốn pin oan: Task_UIController bị khoá không cho ngủ khi isSyncing().
+    if (!ensureConnected(12000)) {
         DLOG("[NET] sync skip: no wifi");
         _isSyncing = false;
         return false;
     }
 
     if (isPlaybackActive()) { _isSyncing = false; return false; }
+
+    // Mỗi phiên TLS tới Firebase cần ~35-45KB heap cho mbedTLS handshake (in/out
+    // content buffer mặc định 16KB mỗi chiều — KHÔNG chỉnh được: setBufferSizes()
+    // là API của ESP8266, WiFiClientSecure trên ESP32 không có, đã kiểm chứng
+    // 2026-09-03). Nếu về sau còn gặp http.GET() = -1 mà Wi-Fi rõ ràng vẫn sống,
+    // đây là con số cần nhìn đầu tiên để phân biệt OOM với lỗi đường truyền.
+    DLOG("[NET] sync start heap=%u", (unsigned)ESP.getFreeHeap());
 
     // 2. Đồng bộ thời gian NTP trước để các mốc timestamp phía sau luôn chính xác
     syncNtpTime(5000);
@@ -701,14 +718,18 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                 }
 
                 // Stream PCM data vào slot (không gọi closeWrite vì không đổi metadata)
-                uint8_t abuf[256];
+                // 2048B thay vi 256B — cung ly do nhu vong lap video: buffer nho +
+                // delay(1) vo dieu kien tung ep tran toc do tai, de dinh STALL.
+                uint8_t abuf[2048];
                 int     aTotalRead = 0;
                 uint32_t aLastProgressMs = millis();
                 while (!aWriteError && httpAudio.connected() && (aLen > 0 || aLen == -1)) {
                     size_t av = aStream->available();
                     if (av) {
                         size_t tr = (av < sizeof(abuf)) ? av : sizeof(abuf);
-                        int c = aStream->readBytes(abuf, tr);
+                        // read() chu khong readBytes() — xem giai thich day du o vong
+                        // lap tai video trong checkAndDownloadNewMessages().
+                        int c = aStream->read(abuf, tr);
                         if (c > 0) {
                             size_t aw = storage->writeChunk(abuf, c);
                             if (aw < (size_t)c) {
@@ -731,7 +752,11 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                         aWriteError = true;
                         break;
                     }
-                    delay(1);
+                    // Chi nhuong CPU khi THUC SU khong co data (xem giai thich o
+                    // vong lap video phia tren).
+                    if (av == 0) {
+                        delay(1);
+                    }
                 }
                 // Chốt phiên append: ghi audioSize vào bảng
                 // slot. Không có bước này thì phần audio nằm
@@ -786,10 +811,16 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
 
     int httpCode = http.GET();
     if (httpCode < 0) {
-        // Tự thử lại lần 2 sau 500ms nếu ổ cắm TCP vừa khôi phục sau khi chip tỉnh dậy từ Light Sleep
-        delay(500);
-        httpCode = http.GET();
-        DLOG("[NET] HTTP msg retry: %d", httpCode);
+        // -1 = HTTPC_ERROR_CONNECTION_REFUSED: TCP/TLS connect thất bại. Thử lại
+        // suông trên cùng client (cách cũ) gần như vô ích khi nguyên nhân là link
+        // Wi-Fi đã chết hoặc DNS cũ — phải ÉP tái lập association trước, việc này
+        // cũng xin lại DNS server mới từ DHCP.
+        DLOG("[NET] msg GET %d, heap=%u -> re-assoc", httpCode, (unsigned)ESP.getFreeHeap());
+        _forceReassociate = true;
+        if (ensureConnected(12000)) {
+            httpCode = http.GET();
+            DLOG("[NET] HTTP msg retry: %d", httpCode);
+        }
     }
 
     if (httpCode != HTTP_CODE_OK) {
@@ -891,6 +922,13 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     uint64_t successfullyProcessedMaxTs = lastTs;
     bool downloadedAnyMedia = false;
     _hasPendingMessages = false;
+
+    // Giữ RF luôn bật hết công suất trong suốt quá trình tải — Modem Sleep mặc
+    // định (WIFI_PS_MIN_MODEM) tăng độ trễ/rớt gói TCP Window Update, góp phần
+    // gây download bị ngắt giữa chừng ở tốc độ cao. Bật lại tiết kiệm điện ngay
+    // sau vòng lặp (mọi lối thoát khỏi vòng lặp bên dưới đều là `break`, không
+    // có `return`, nên luôn chạy tới đây).
+    WiFi.setSleep(false);
 
     for (JsonObject msg : msgList) {
         uint64_t ts = 0;
@@ -1014,7 +1052,11 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                     WiFiClient* stream = http.getStreamPtr();
                     if (storage->openForWrite(writeSlotId)) {
                         DLOG("[NET] writing slot %s", writeSlotId);
-                        uint8_t buffer[256];
+                        // 2048B thay vi 256B: buffer nho + delay(1) vo dieu kien moi
+                        // vong lap tung ep tran toc do tai xuong con ~20-25KB/s (256B
+                        // rut can tren 1 tick 10ms). Van la streaming cuon chieu, RAM
+                        // tieu thu khong doi bat ke file lon nho.
+                        uint8_t buffer[2048];
                         bool writeError = false;
                         // Voi len == -1 (chunked, khong co Content-Length) dieu kien
                         // vong lap khong bao gio tu sai: chi thoat khi server dong
@@ -1026,7 +1068,15 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             size_t sizeAvail = stream->available();
                             if (sizeAvail) {
                                 size_t toRead = (sizeAvail < sizeof(buffer)) ? sizeAvail : sizeof(buffer);
-                                int c = stream->readBytes(buffer, toRead);
+                                // read() chu KHONG readBytes(): WiFiClientSecure khong override
+                                // readBytes() nen no roi ve Stream::readBytes() doc TUNG BYTE MOT
+                                // (Stream.cpp:41), moi byte lai goi available() -> mbedtls_ssl_read()
+                                // 2 lan. Chunk 2048B = ~4096 loi goi mbedTLS; ca file 2.2MB = hon 4
+                                // TRIEU loi goi -> tran toc do ~20-25KB/s. Te hon nua: khi buffer
+                                // mbedTLS can giua chung chunk, timedRead() busy-spin toi 30 GIAY
+                                // (Stream.cpp:31, _timeout = 30s) khong nhuong CPU, khong rut socket.
+                                // read(buf,len) chi ton 1 available() + 1 mbedtls_ssl_read cho ca khoi.
+                                int c = stream->read(buffer, toRead);
                                 if (c > 0) {
                                     size_t written = storage->writeChunk(buffer, c);
                                     if (written < (size_t)c) {
@@ -1051,7 +1101,20 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                 writeError = true;
                                 break;
                             }
-                            delay(1);
+                            // Chi nhuong CPU khi THUC SU khong co data — nhuong vo dieu
+                            // kien moi vong lap la nguyen nhan chinh khien tai xuong bi
+                            // tran toc do va de dinh STALL khi mang chap chon.
+                            if (sizeAvail == 0) {
+                                delay(1);
+                            }
+                        }
+                        // Thoat vong lap do !http.connected() (khong phai STALL, khong
+                        // phai du byte) = ket noi bi dut giua chung. Truoc day khong in
+                        // gi ca nen phai suy ra tu dong "DL err" -> khong phan biet duoc
+                        // "dut ket noi" voi "tai thieu byte". Log rieng de chan doan.
+                        if (!writeError && !http.connected() &&
+                            (initialLen > 0 && totalRead < initialLen)) {
+                            DLOG("[NET] conn DROPPED @ %d/%d", totalRead, initialLen);
                         }
                         // Chốt kết quả TRƯỚC khi quyết định commit hay huỷ. closeWrite() ghi
                         // slot table + set unread bit; gọi vô điều kiện như code cũ khiến 1 lần
@@ -1071,6 +1134,12 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         // Kiểm tra dữ liệu đã tải trọn vẹn 100% chưa
                         if (downloadComplete) {
                             DLOG("[NET] DL OK slot %s", writeSlotId);
+
+                            // Đóng phiên HTTP video TRƯỚC khi mở phiên audio mới —
+                            // downloadVoiceSegment() dùng chung 1 WiFiClientSecure client,
+                            // để phiên cũ chưa .end() có thể làm phiên mới bắt tay sai trạng
+                            // thái. http.end() gọi lại lần nữa ở cuối khối vẫn an toàn (no-op).
+                            http.end();
 
                             // Voice/bg_music là phụ với ảnh/video: tải lỗi chỉ log, không
                             // huỷ cả message (hành vi giữ nguyên như code cũ).
@@ -1153,6 +1222,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         }
     }
 
+    WiFi.setSleep(true);
 
     if (successfullyProcessedMaxTs > lastTs) {
         if (cfg.init(NVS_NAMESPACE)) {

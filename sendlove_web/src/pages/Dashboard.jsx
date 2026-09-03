@@ -59,7 +59,9 @@ export default function Dashboard() {
         {boxes.length === 0 ? (
           <>
             <span className="sl-section-label">Hộp của bạn</span>
-            <p className="sl-body" style={{ margin: 0 }}>
+            {/* Màu caramel-700 xác nhận từ Figma (#83513E) — riêng câu này,
+                không dùng màu neutral-500 mặc định của .sl-body. */}
+            <p className="sl-body" style={{ margin: 0, color: 'var(--caramel-700)' }}>
               Kết nối một hộp mới để bắt đầu gửi tin nhắn.
             </p>
           </>
@@ -142,7 +144,7 @@ export default function Dashboard() {
                 <Icon name="palette" size={21} style={{ flex: '0 0 auto' }} />
                 <span style={{ flex: 1 }}>Giao diện tối</span>
                 <button
-                  type="button" className="sl-toggle" role="switch"
+                  type="button" className="sl-toggle sl-toggle--accent" role="switch"
                   aria-checked={theme === 'dark'} aria-label="Bật giao diện tối"
                   onClick={toggleTheme}
                 >

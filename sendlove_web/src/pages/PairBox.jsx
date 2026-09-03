@@ -51,12 +51,14 @@ export default function PairBox() {
   return (
     <Screen>
       <Body center>
-        <form onSubmit={handlePair} className="sl-login-card" style={{ position: 'relative', textAlign: 'left' }}>
+        <form onSubmit={handlePair} className="sl-pair-card" style={{ position: 'relative', textAlign: 'left' }}>
+          {/* Màu #9E6244 xác nhận từ Figma (carbon:close-outline) — cùng màu chữ
+              nút đăng nhập ở Login, không có trong thang token nên dùng literal. */}
           <button
             type="button" className="sl-iconbtn" onClick={() => navigate('/dashboard')}
-            aria-label="Đóng" style={{ position: 'absolute', top: -4, right: -4 }}
+            aria-label="Đóng" style={{ position: 'absolute', top: -4, right: -4, color: '#9E6244' }}
           >
-            <Icon name="x" size={20} />
+            <Icon name="x" size={24} />
           </button>
 
           <div>
@@ -71,9 +73,10 @@ export default function PairBox() {
 
           {error && <div className="sl-reason">{error}</div>}
 
+          {/* fontWeight 600 xác nhận Figma (14/SemiBold) — .sl-label mặc định 500. */}
           <label className="sl-field">
-            <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-              <Icon name="key" size={14} style={{ color: 'var(--neutral-700)' }} />
+            <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', fontWeight: 600 }}>
+              <Icon name="key" size={12} style={{ color: 'var(--neutral-700)' }} />
               Mã kết nối
             </span>
             <input
@@ -89,8 +92,8 @@ export default function PairBox() {
           </label>
 
           <label className="sl-field">
-            <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-              <Icon name="text" size={14} style={{ color: 'var(--neutral-700)' }} />
+            <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', fontWeight: 600 }}>
+              <Icon name="text" size={12} style={{ color: 'var(--neutral-700)' }} />
               Tên hiển thị cho hộp
             </span>
             <input

@@ -320,6 +320,11 @@
   transition: background .18s ease;
 }
 .sl-toggle[aria-checked="true"] { background: var(--rose-400); justify-content: flex-end; }
+/* Toggle "Giao diện tối" trong account-popover: Figma dùng accent caramel
+   (#B87548, cùng tông chevron/pill receiver ở box-card), KHÔNG phải hồng như
+   toggle báo thức — modifier riêng, không đổi màu mặc định của .sl-toggle
+   dùng chung ở ReceiverAlarms. */
+.sl-toggle--accent[aria-checked="true"] { background: var(--caramel-700); }
 .sl-toggle__knob {
   width: 18px; height: 18px;
   border-radius: var(--r-full);
@@ -449,13 +454,26 @@
 /* ---------- biến thể viền đậm cho field trong dialog ghép hộp ---------- */
 .sl-input--accent { border-color: var(--rose-800); }
 
+/* ---------- card dialog "new-box" (PairBox) ----------
+   KHÁC card của Login ("Content", 327/r10/có viền): "inside-layer" trong Figma
+   là 379 rộng, r12, KHÔNG viền, padding 20 đều, gap 16. Từng nhầm dùng chung
+   .sl-login-card — hai card khác nhau thật trong thiết kế, tách riêng. */
+.sl-pair-card {
+  width: 100%; max-width: 379px;
+  display: flex; flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  border-radius: var(--r-md);
+  background: var(--neutral-0);
+}
+
 /* ---------- pill vai trò trên box-card ---------- */
 .sl-rolepill {
   flex: 0 0 auto;
   padding: 2px 10px;
   border-radius: var(--r-full);
   color: var(--neutral-0);
-  font-size: 12px; font-weight: 600; line-height: 1.6;
+  font-size: 14px; font-weight: 600; line-height: 1.4; /* xác nhận Figma: 14/SemiBold, không phải 12 */
 }
 .sl-rolepill--sender { background: var(--rose-400); }
 .sl-rolepill--receiver { background: var(--caramel-300); }
@@ -485,7 +503,9 @@
   display: flex; flex-direction: column; gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-sm);
-  background: var(--neutral-0);
+  /* Xác nhận Figma (Frame 42 trong account-popover.json): nền caramel-50,
+     KHÔNG phải trắng — trước đây dùng nhầm neutral-0. */
+  background: var(--caramel-50);
   box-shadow: var(--shadow-modal);
 }
 .sl-popover__row {
@@ -519,8 +539,12 @@
   text-align: center;
 }
 .sl-login-logo {
+  font-family: 'Dancing Script', cursive; /* đúng Figma — riêng logo này KHÔNG dùng Quicksand */
   font-size: 40px; font-weight: 700; line-height: 1.15;
-  color: var(--rose-50);
+  /* Màu cố định #FDF0EF, KHÔNG dùng var(--rose-50): nền hero là gradient cố định,
+     không đổi theo theme, nhưng --rose-50 thì có (thành rose trong suốt ở dark mode
+     — gần như vô hình trên gradient). Chữ đè lên hero phải luôn cùng một màu. */
+  color: #FDF0EF;
   text-shadow: 0 2px 16px rgba(0, 0, 0, .35);
 }
 .sl-login-card {
@@ -547,11 +571,15 @@
   font-size: 14px; font-weight: 600; line-height: 1.4;
   cursor: pointer;
   transition: background .18s ease;
+  /* INNER_SHADOW radius 6, #f4f5fa@0.60, offset (0,-3) — xác nhận từ Figma. */
+  box-shadow: inset 0 -3px 6px rgba(244, 245, 250, .6);
 }
 .sl-login-btn:hover:not(:disabled) { background: var(--caramel-50); }
 .sl-login-btn:disabled { opacity: .6; cursor: not-allowed; }
 .sl-login-terms {
-  font-size: 12px; line-height: 1.5; color: var(--neutral-0);
+  font-size: 12px; line-height: 1.5;
+  /* Màu cố định #FFFFFF — lý do giống .sl-login-logo, xem ghi chú ở đó. */
+  color: #FFFFFF;
   text-shadow: 0 1px 8px rgba(0, 0, 0, .4);
 }
 

@@ -144,6 +144,26 @@ private:
     static void wakeupSyncTaskWorker(void* param);
     static void ntpTaskWorker(void* param);
 
+    // --- Firebase Auth: idToken riêng của box thay cho Database Secret ---
+    // Giữ sẵn dạng "Bearer <jwt>" để addHeader() không phải nối chuỗi lần nữa.
+    // Đặt trong #if để chế độ cũ không phải gánh 1.4KB BSS vô ích.
+#if FIREBASE_USE_IDTOKEN
+    char   _authHeaderValue[FIREBASE_ID_TOKEN_MAX_LEN + 8] = "";
+    time_t _idTokenExpiry = 0;
+#endif
+
+    /// Đảm bảo có idToken còn hạn. Ưu tiên refresh token trong NVS (không phải
+    /// gửi lại mật khẩu); chỉ đăng nhập bằng mật khẩu khi chưa có/refresh hỏng.
+    bool ensureIdToken(bool force = false);
+    bool authWithPassword();
+    bool authWithRefreshToken(const char* refreshToken);
+
+    /// Gắn header Authorization vào request (no-op khi còn dùng Database Secret)
+    void addAuthHeader(class HTTPClient& http);
+
+    /// Gọi sau mỗi request: 401 nghĩa là token chết -> ép lấy lại ở chu kỳ sau
+    void noteAuthFailure(int httpCode, const char* where);
+
     volatile bool _forceReassociate = false;
     volatile bool _isSyncing = false;
     volatile bool _isFirebaseSyncing = false;

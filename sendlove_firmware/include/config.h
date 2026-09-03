@@ -73,6 +73,30 @@ static constexpr uint32_t FIREBASE_TIMEOUT_MS = 10000;
 static constexpr const char *NVS_KEY_LAST_DOWNLOAD_TS = "last_dl_ts";
 static constexpr uint8_t MAX_ALARMS = 10;
 
+// Bat xac thuc chung chi TLS cho moi ket noi Firebase (thay cho setInsecure()).
+// Root CA nam o include/firebase_root_ca.h.
+// Dat ve 0 = quay lai setInsecure() — DUONG LUI KHAN CAP, chi dung khi da xac
+// dinh loi la o tang TLS (doc dong log "[NET] tls: ..."). Chay o che do 0 nghia
+// la box lai ho MITM: bat ky ai trong cung mang doc/sua duoc tin nhan va lay
+// duoc FIREBASE_AUTH_SECRET.
+#define FIREBASE_TLS_VERIFY 1
+
+// Xac thuc voi Firebase bang idToken rieng cua box (Firebase Auth) thay vi
+// Database Secret quyen admin.
+//   1 = signInWithPassword -> idToken (han 1h) -> header Authorization: Bearer,
+//       refresh token luu NVS. Rules `auth.uid === $box_id` moi co hieu luc.
+//   0 = quay lai `?auth=<FIREBASE_AUTH_SECRET>` (DUONG LUI).
+// Dat 1 CHI KHI da du 3 dieu kien, neu khong box se mat ket noi hoan toan:
+//   (a) Firebase Console > Authentication > bat Email/Password
+//   (b) da chay `node scripts/provision_box_auth.js <BOX_ID>` va dien
+//       BOX_AUTH_EMAIL/BOX_AUTH_PASSWORD vao config_secrets.h
+//   (c) da deploy database.rules.json len dung instance `iot-app-839a2`
+#define FIREBASE_USE_IDTOKEN 0
+
+// Trong idToken JWT cua Firebase (~900-1100 byte). De du bien 1400.
+static constexpr size_t FIREBASE_ID_TOKEN_MAX_LEN = 1400;
+static constexpr size_t FIREBASE_REFRESH_TOKEN_MAX_LEN = 400;
+
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";
 static constexpr const char *FW_VERSION = "2.1.0";

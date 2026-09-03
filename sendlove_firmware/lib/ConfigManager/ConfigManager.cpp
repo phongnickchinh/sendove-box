@@ -169,3 +169,24 @@ uint32_t ConfigManager::getSecondsToNextAlarm(time_t currentEpochTime) {
 
     return minSecRemaining;
 }
+
+bool ConfigManager::saveRefreshToken(const char* token) {
+    if (token == nullptr || token[0] == '\0') return false;
+    if (_prefs.putString(KEY_FB_REFRESH, token) > 0) return true;
+    DLOG("[CFG] ERR: refresh token save");
+    return false;
+}
+
+bool ConfigManager::loadRefreshToken(char* outToken, size_t maxLen) {
+    if (outToken == nullptr || maxLen == 0) return false;
+    String t = _prefs.getString(KEY_FB_REFRESH, "");
+    if (t.isEmpty()) return false;
+
+    strncpy(outToken, t.c_str(), maxLen - 1);
+    outToken[maxLen - 1] = '\0';
+    return true;
+}
+
+void ConfigManager::clearRefreshToken() {
+    _prefs.remove(KEY_FB_REFRESH);
+}

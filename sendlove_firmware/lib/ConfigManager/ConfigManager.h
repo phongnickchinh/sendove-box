@@ -76,6 +76,18 @@ public:
     /// @return Số giây còn lại, hoặc 0xFFFFFFFF nếu không có báo thức
     uint32_t getSecondsToNextAlarm(time_t currentEpochTime);
 
+    // --- Firebase Auth ---
+
+    /// Lưu refresh token của Firebase Auth (đổi lấy idToken mới mà không cần
+    /// gửi lại mật khẩu). Token này không hết hạn theo thời gian.
+    bool saveRefreshToken(const char* token);
+
+    /// Đọc refresh token. Trả về false nếu chưa từng lưu.
+    bool loadRefreshToken(char* outToken, size_t maxLen);
+
+    /// Xoá refresh token (khi Firebase báo token đã bị thu hồi/không hợp lệ)
+    void clearRefreshToken();
+
 private:
     Preferences _prefs;
 
@@ -87,6 +99,7 @@ private:
     static constexpr const char* KEY_LAST_DL_TS    = "last_dl_ts";
     static constexpr const char* KEY_ALARM_COUNT   = "alarm_cnt";
     static constexpr const char* KEY_ALARM_DATA    = "alarm_data";
+    static constexpr const char* KEY_FB_REFRESH    = "fb_refresh";
 };
 
 #endif // CONFIG_MANAGER_H

@@ -894,3 +894,237 @@ tả "4x" — nên có thể chưa phải toàn bộ câu chuyện, hoặc "4x" 
 
 
 
+---
+
+## 10. Vá bảo mật theo `code_review_2_9_gemini_38.md` — Phase A: bật xác thực TLS (2026-09-03)
+
+Kế hoạch đầy đủ (Phase A→D + phát hiện ngoài báo cáo) nằm ở
+`C:\Users\phamp\.claude\plans\t-i-c-n-b-n-c-sequential-treasure.md`.
+Phạm vi user chốt: **bỏ OTA** (VULN-02/12 — chỉ test local, chấp nhận rủi ro) và **bỏ VULN-04**
+(erase 5.5MB — đã fix ở vòng 2).
+
+### Báo cáo Gemini SAI ở 2 chỗ — đã verify bằng code, đừng "sửa" lại
+
+1. **VULN-08 "Captive Portal XSS qua SSID" — FALSE POSITIVE hoàn toàn.**
+   `captive_portal_html.h:172` dùng `nm.textContent = n.ssid` (DOM API, không hề parse HTML),
+   `:179` gán `.value`. **Không có `innerHTML` nào nhận dữ liệu SSID** — `:160` chỉ
+   `box.innerHTML = ""` để xoá danh sách. Tầng JSON cũng escape đúng (`jsonEscape()` trong
+   `NetworkManager.cpp`: xử lý `"`, `\`, ký tự < 0x20, ép `unsigned char` để byte UTF-8 > 127
+   không lọt nhánh ký tự điều khiển). **Không cần vá gì.**
+   *Nit tuỳ chọn duy nhất*: `seen[n.ssid]` (`:165`) dùng object thường làm map — SSID tên
+   `__proto__`/`constructor` sẽ bị coi là "đã thấy" và biến mất khỏi danh sách. Đó là "giấu 1
+   mạng", **không phải XSS**. Sửa bằng `Object.create(null)` nếu rảnh.
+2. **VULN-06 "markAsRead() làm mòn Sector 0" — SAI.**
+   `NandStorageProvider::markAsRead()` chỉ gọi `saveNvsState()` (NVS, ESP-IDF có wear-leveling
+   sẵn), **không đụng `writeSlotTable()`**. Số lần ghi Sector 0 thật = tối đa 3/message
+   (`closeWrite` → `closeAppend` → `setItemText`). 20 msg/ngày ⇒ ~4,5 năm mới chạm 100k chu kỳ.
+   Hạ ưu tiên xuống P3, **đề xuất hoãn**.
+
+Ngoài ra **VULN-05 bị nói quá**: với HTTPS thì `?auth=<secret>` nằm TRONG đường hầm TLS —
+proxy log / router cache / header Referer **không** đọc được (claim của báo cáo sai cho HTTPS).
+Rủi ro thật là secret nằm cứng trong flash (`esptool read_flash` lấy được) và là quyền admin.
+Lưu ý: **chuyển secret từ `config.h` sang NVS KHÔNG cứu được gì** — NVS nằm trong cùng bản dump flash.
+
+### Đã làm (Phase A) — CHƯA build/flash/test trên máy thật
+
+- **File mới `include/firebase_root_ca.h`** (commit bình thường, cert không phải secret): chứa
+  **GTS Root R1** (RSA) + **GTS Root R4** (ECC), bản self-signed tải từ `https://pki.goog/repo/certs/`,
+  hết hạn **2036-06-22**. Đã round-trip verify: trích ngược từ header ra PEM và `openssl x509`
+  cho đúng fingerprint SHA-256 `D9:47:43:2A:...:F4:CF` (R1) và `34:9D:FA:40:...:3C:7D` (R4).
+- **Vì sao phải có CẢ HAI root** — đo thật bằng `openssl s_client`, không suy đoán:
+  - `iot-app-839a2.asia-southeast1.firebasedatabase.app` → leaf → `GTS WR1` → **GTS Root R1**
+  - `firebasestorage.googleapis.com` → leaf → `GTS WE2` → **GTS Root R4**
+
+  Chỉ nhúng R1 thì Realtime DB chạy nhưng **đường tải media chết**. Root mà server gửi kèm trong
+  chain là bản cross-sign bởi GlobalSign (hết hạn **2028-01-28**) — không dùng bản đó.
+- **`setCACertBundle()` KHÔNG dùng được trên Arduino core 2.0.17** (cùng loại bẫy với
+  `setBufferSizes` ở §8 — verify source trước khi tin): đọc
+  `libraries/WiFiClientSecure/src/esp_crt_bundle.c:179-186`, `arduino_esp_crt_bundle_attach()`
+  return sớm với `log_e("Failed to attach bundle")` nếu chưa gọi `arduino_esp_crt_bundle_set()`
+  — **wrapper Arduino không nhúng sẵn bundle mặc định** dù `sdkconfig` có
+  `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y`. Muốn dùng phải tự sinh blob bằng `gen_crt_bundle.py`.
+  **Đừng đào lại hướng này.**
+- **`NetworkManager.cpp`**: thêm `configureTlsClient()` + `logTlsError()`, đặt SAU khối
+  `#include <WiFiClientSecure.h>` ở giữa file — **file này include WiFiClientSecure ở dòng ~461
+  chứ không phải đầu file**, đặt helper lên đầu sẽ lỗi incomplete type. Thay **cả 5** chỗ
+  `setInsecure()` (status / flags / patch flags / alarms / messages). `setCACert()` bật
+  `MBEDTLS_SSL_VERIFY_REQUIRED` + hostname verification (`ssl_client.cpp:180, 257, 292`).
+- **Cờ lùi `FIREBASE_TLS_VERIFY`** trong `config.h`: đặt 0 = quay lại `setInsecure()`. Có cờ này vì
+  theo Session Rule §8 agent không build được, mỗi vòng thử-sai tốn nguyên 1 lượt flash của User.
+- **KHÔNG đặt `setHandshakeTimeout()`** (mặc định 120s): siết ngắn không giúp gì cho bảo mật mà
+  link yếu (associate + DHCP đã tốn 3-8s, xem Fix vòng 4) sẽ đẻ ra một kiểu fail trông giống lỗi
+  cert nhưng không phải.
+- **Chốt chặn thời gian trong `syncWakeup()` — BẮT BUỘC, không phải phụ kiện.** Với `setInsecure()`
+  thì NTP hỏng vẫn chạy; với `VERIFY_REQUIRED` thì `time(nullptr)` gần 0 lúc boot nguội →
+  `BADCERT_FUTURE` → **mọi** handshake fail. Nếu giờ chưa hợp lệ: hạ `_isTimeSynced = false`
+  (bắt buộc — `syncNtpTime()` short-circuit 60s sẽ return true suông) rồi retry NTP 15s; vẫn sai
+  thì `DLOG("[NET] sync abort: time invalid")` và bỏ chu trình.
+- **Log chẩn đoán** (vì thay đổi này đẻ thêm một kiểu fail hình dạng `-1`):
+  `WiFiClientSecure::lastError(char*, size_t)` có thật trong core 2.0.17 → `[NET] tls <where>: ...`
+  ở cả 6 điểm fail (status/flags/alarms/msg/media/audio). Heap in ở `[NET] status OK heap=` và
+  `[NET] GET OK len=N heap=`.
+
+### Cần User xác minh trên máy thật (Phase A phải flash RIÊNG, chưa áp Phase B)
+
+1. `[NET] NTP OK` xuất hiện **trước** mọi lời gọi Firebase; không thấy `[NET] sync abort: time invalid`.
+2. `status` → `flags` → `messages` chạy trọn, không `-1`.
+3. **Tải được 1 message có media** — đây là bước chứng minh root R4 (Storage) đúng; các bước trên
+   chỉ chứng minh R1.
+4. **Bật tay `boxes/<BOX_ID>/flags/sync_alarms_flag = true` trên Firebase Console** rồi sync:
+   `syncFirebaseAlarms()` là 1 trong 5 client nhưng **chỉ chạy khi cờ này bật** — boot-and-sync
+   thường không hề chạm tới nó, lỗi ở đó sẽ ẩn tới tận lần báo thức sau rồi trông như bug mới.
+5. Heap: nhìn `[NET] GET OK len=N heap=` (phiên TLS sống lâu nhất, giữ qua cả đoạn tải audio lồng
+   bên trong, và là chỗ từng có tiền sử OOM). Kỳ vọng > ~60KB.
+6. Nếu hỏng: `[NET] tls ...` phân biệt lỗi cert với lỗi mạng. Đường lùi: `FIREBASE_TLS_VERIFY 0`.
+
+Rủi ro tồn dư đã biết: nếu Google đổi root thì box mất cloud và phải nạp lại firmware. Với hạn
+2036 thì rủi ro thấp. Dấu hiệu nhận biết trên log là `[NET] tls ...` báo lỗi verify.
+
+### Còn lại, chưa làm
+
+- **Phase B** (chờ Phase A xác minh xong): GPIO 8 bọc `spiMutex` (user đã chốt **giữ đèn**, không
+  xoá — vì `wakeupFlash()` giờ chỉ gọi `gpio_hold_dis()`, đây là chỉ báo timer-wake duy nhất còn
+  lại); `std::atomic<AppState> currentAppState`; trần `MAX_MEDIA_BYTES`; **đo**
+  `uxTaskGetStackHighWaterMark` (ESP-IDF trả về **bytes**, không phải words) trước khi động vào
+  `showWrappedText`.
+  → **Không đụng `isSyncing()`**: báo cáo nói quá. 4 cờ `volatile` nhưng `_isSyncing` một mình đã
+  phủ trọn chu trình (set trong `portENTER_CRITICAL` ở `triggerWakeupSync`, clear cuối
+  `syncWakeup`) — đọc gộp 4 cờ không tạo cửa sổ nào mà đọc 1 cờ không có.
+- **Phase C** (mòn Sector 0): đề xuất **hoãn**, xem số liệu 4,5 năm ở trên. Nếu làm thì thiết kế
+  đúng là dời điểm commit (`bool commit = true` cho `closeWrite`/`closeAppend`/`setItemText`),
+  đã verify an toàn vì `openForAppend()` chỉ đọc state RAM (`_lastWrittenOffset`), không đọc lại
+  bảng từ flash.
+- **Phase D**: user chọn hướng "custom token + rules `$box_id == auth.uid` + refresh idToken 1h".
+  **Nhưng khảo sát cho thấy `sendlove_backend` ĐÃ CÓ SẴN nguyên bộ device-auth chưa từng được
+  firmware dùng**: `POST /device/register` (bảo vệ bằng provisioning key) trả
+  `{box_id, device_secret, rcode, scode}`; middleware `requireDeviceAuth` đọc header
+  `X-Device-Id` + `X-Device-Secret`; `GET /device/poll?last_download_ts=&available_slots=` trả
+  `flags` + message mới — **trùng khít** việc `checkAndDownloadNewMessages()` đang tự làm bằng REST
+  thẳng lên RTDB. Đã nêu đề xuất đổi hướng cho user, **chờ user xác nhận**; đánh đổi thật là
+  `device_secret` **tĩnh** so với idToken **hết hạn 1h**.
+  Cần chốt trước khi code: backend đã deploy Cloud Functions chưa (URL production), lấy
+  `PROVISIONING_KEY` ở đâu, `/device/poll` trả media URL dạng signed URL hay path Storage.
+- **Phát hiện ngoài báo cáo**: AP `SendloveBox-Setup` là **AP MỞ** (`apPassword` mặc định `""`,
+  `main.cpp` gọi `startProvisioningAP("SendloveBox-Setup")`) và `/save` không có CSRF token → ai
+  trong tầm sóng cũng đổi được Wi-Fi của box rồi MitM nó. Đặt mật khẩu WPA2 là **quyết định sản
+  phẩm** (đánh đổi trải nghiệm setup) — chờ user quyết, không tự làm.
+
+---
+
+## 11. 🔴 DATABASE MỞ CÔNG KHAI + chuyển sang idToken (direct RTDB) — 2026-09-03
+
+### Phát hiện nghiêm trọng nhất từ trước tới nay (đã kiểm chứng bằng curl)
+
+RTDB `iot-app-839a2.asia-southeast1.firebasedatabase.app` **đọc VÀ ghi được mà không cần
+xác thực gì cả**:
+
+```
+GET  /boxes.json?shallow=true            -> 200 {"ESP32_A1B2C3D4E5F6":true}
+GET  /messages/ESP32_.../status.json     -> 200 (dữ liệu thật)
+PUT  /_sectest_probe_delete_me.json      -> 200   ← GHI ĐƯỢC, không auth
+Storage .../o/<bin_url>?alt=media        -> 200   ← tải media, không token
+```
+
+(Node ghi thử đã xoá ngay, xác nhận trả `null`.)
+
+**Nghĩa là `FIREBASE_AUTH_SECRET` chưa bao giờ là mắt xích yếu — không hề có ổ khoá nào.**
+Ai biết URL là đọc hết tin nhắn, tải hết video/voice của người dùng, ghi đè dữ liệu.
+So với việc này thì cả 12 mục trong `code_review_2_9_gemini_38.md` đều nhỏ.
+
+### 🔑 NGUYÊN NHÂN GỐC — sai instance, KHÔNG phải quên deploy
+
+`firebase database:instances:list` cho ra **2 instance**:
+
+| Instance | Trạng thái | Ai dùng |
+|---|---|---|
+| `iot-app-839a2-default-rtdb` | **DISABLED** (HTTP 423 "disabled by a database owner") | không ai |
+| `iot-app-839a2` | đang sống | firmware + backend (`firebase.ts:7`) |
+
+`firebase.json` cũ dùng dạng `"database": { "rules": ... }` (không có `instance`) → CLI deploy
+vào **instance mặc định**, tức cái đã bị disable. Nên mọi lần deploy trước đây đều "thành công"
+mà rules không bao giờ tới được instance thật. **Đây là bài học: có nhiều instance thì bắt buộc
+khai báo `instance` tường minh.**
+
+Đã sửa `firebase.json` thành dạng mảng có `instance: "iot-app-839a2"`.
+
+### Rules mới (`database.rules.json`) — CHƯA DEPLOY
+
+Đổi từ `.read:false/.write:false` trống rỗng sang least-privilege theo `auth.uid === $box_id`:
+- `boxes/$box_id/status` — box đọc + ghi (heartbeat)
+- `boxes/$box_id/flags`  — box đọc + ghi (reset cờ)
+- `boxes/$box_id/config` — box CHỈ đọc (alarm_list)
+- `messages/$box_id`     — box CHỈ đọc, **giữ nguyên `.indexOn: ["timestamp"]`** (bắt buộc, nếu
+  mất thì query `orderBy="timestamp"&startAt=` của firmware gãy)
+- KHÔNG cấp quyền đọc `device_secret` / `code` / `pairing` — box không cần.
+
+**Deploy rules này AN TOÀN NGAY BÂY GIỜ, không hỏng gì** (đã verify từng đường):
+- Box vẫn chạy — Database Secret **bypass toàn bộ rules**
+- Backend vẫn chạy — Admin SDK bypass
+- Web vẫn chạy — đi qua axios `VITE_API_URL`; `sendlove_web/src/config/firebase.js` có export
+  `database` nhưng **grep toàn `sendlove_web/src` không nơi nào import dùng**
+
+Lệnh: `firebase deploy --only database --project iot-app-839a2`
+(Agent bị classifier chặn deploy production — User tự chạy.)
+
+⚠️ **`firebase deploy --only storage` thì NGƯỢC LẠI — sẽ làm CHẾT đường tải media.** Firmware
+build URL `?alt=media` **không kèm token**, chạy được chỉ vì Storage đang mở. Muốn siết
+`storage.rules` thì box phải xác thực khi tải (xem "ẩn số" bên dưới).
+
+### Trạng thái provider Firebase Auth (đo thật bằng REST)
+
+| Cách | Kết quả | Kết luận |
+|---|---|---|
+| `accounts:signInWithPassword` | `PASSWORD_LOGIN_DISABLED` | Email/Password **CHƯA BẬT** |
+| `accounts:signUp` (anonymous) | `ADMIN_ONLY_OPERATION` | Anonymous **CHƯA BẬT** |
+| `accounts:signInWithCustomToken` | `INVALID_CUSTOM_TOKEN: 3 dot separated segments` | endpoint sống, nhưng cần backend ký |
+
+→ Hướng direct-RTDB cần **bật Email/Password trong Console** (1 toggle). Đó là điều kiện tiên quyết.
+
+### Đã code (CHƯA build/flash, CHƯA bật)
+
+- **`sendlove_backend/scripts/provision_box_auth.js`** — script admin SDK chạy OFFLINE, tạo user
+  Auth với `uid = BOX_ID` (để rule `auth.uid === $box_id` khớp mà không cần bảng tra cứu), email
+  `<boxid>@box.sendlove.invalid` (`.invalid` là TLD dành riêng RFC 2606), mật khẩu ngẫu nhiên 128
+  bit in ra MỘT LẦN. Có guard: box đã có tài khoản thì từ chối, phải `--reset-password` tường minh.
+- **`config_secrets.h`**: thêm `BOX_AUTH_EMAIL`/`BOX_AUTH_PASSWORD` (đang là `FILL_ME`).
+  `FIREBASE_API_KEY` **đã có sẵn từ trước và trùng khớp** `VITE_FIREBASE_API_KEY` của web — không
+  phải thêm gì. (Web API key không phải secret, nó nằm trong bundle web công khai.)
+- **`config.h`**: `#define FIREBASE_USE_IDTOKEN 0` — **MẶC ĐỊNH TẮT**, bật lên 1 CHỈ KHI đủ 3 điều
+  kiện: (a) bật Email/Password, (b) chạy script + điền config_secrets, (c) deploy rules. Bật sớm
+  = box mất kết nối hoàn toàn.
+- **`ConfigManager`**: `saveRefreshToken` / `loadRefreshToken` / `clearRefreshToken` (NVS key
+  `fb_refresh`).
+- **`NetworkManager`**:
+  - `ensureIdToken()` gọi 1 lần đầu mỗi chu kỳ sync, **đặt SAU chốt chặn thời gian** — hạn token so
+    bằng `time(nullptr)`, RTC sai thì token vừa lấy đã bị coi là hết hạn.
+  - Ưu tiên `securetoken.googleapis.com/v1/token` (refresh), chỉ `signInWithPassword` khi chưa có
+    refresh token hoặc refresh hỏng.
+  - **⚠️ Hai endpoint đặt tên trường KHÁC NHAU**: identitytoolkit trả `idToken`/`refreshToken`/
+    `expiresIn` (camelCase), securetoken trả `id_token`/`refresh_token`/`expires_in` (snake_case).
+    `parseAuthResponse(..., bool snakeCase)` xử lý cả hai. `expiresIn` là **CHUỖI** giây, không phải số.
+  - Dùng `DeserializationOption::Filter` chỉ cấp phát 3 trường cần — response còn kèm
+    email/localId/kind, cấp phát trọn gói là phí heap đúng lúc sắp cần ~45KB cho handshake kế tiếp.
+  - **Token đi qua header `Authorization: Bearer`, KHÔNG qua `?auth=`** — idToken JWT dài ~900-1100
+    byte, nhét vào query sẽ tràn `url[256]`/`url[384]`. Đã kiểm chứng RTDB REST **có** parse header
+    này: token rác → `401 "Unauthorized request."`, khác hẳn `200` khi không gửi header.
+  - `_authHeaderValue` giữ sẵn dạng `"Bearer <jwt>"` để `addHeader()` khỏi nối chuỗi; bọc trong
+    `#if` để chế độ cũ không gánh 1.4KB BSS vô ích.
+  - `noteAuthFailure()` gọi sau mỗi request: 401/403 thì hạ `_idTokenExpiry` để chu kỳ sau lấy token
+    mới. **Không retry ngay** — token sống 1h còn chu kỳ sync vài giây, nên 401 gần như luôn là rule
+    từ chối chứ không phải hết hạn; retry ngay chỉ tốn thêm handshake mà vẫn 401.
+  - `fbAuthQuery(out, n, sep)` sinh phần `?auth=` (chế độ cũ) hoặc chuỗi rỗng (chế độ idToken).
+    Với URL messages, auth nối bằng `'&'` vì `orderBy` đã chiếm `'?'`.
+- Cert: `identitytoolkit` và `securetoken` **đều chain về GTS Root R4** (đo thật) — đã có sẵn
+  trong `firebase_root_ca.h` của Phase A, không phải nhúng thêm.
+
+### Ẩn số còn lại (chưa giải quyết được)
+
+Khi siết `storage.rules`, box phải xác thực lúc tải media. Về lý thuyết dùng cùng idToken với
+header `Authorization: Firebase <idToken>`, **nhưng KHÔNG verify được**: Storage đang mở nên gửi
+header token rác vẫn trả `200`. Phải thử lại **sau khi** siết rules. Đây là điểm duy nhất mà
+Phase D (signed URL từ backend) giải quyết gọn hơn hướng direct-RTDB.
+
+### Vẫn KHÔNG giải quyết được bằng hướng này
+
+Refresh token nằm trong NVS = cùng bản dump flash với firmware. `esptool read_flash` vẫn lấy được.
+Chỉ **Flash Encryption + Secure Boot** mới chống, chưa bàn tới.

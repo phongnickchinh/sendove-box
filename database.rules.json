@@ -2,8 +2,26 @@
   "rules": {
     ".read": false,
     ".write": false,
+
+    "boxes": {
+      "$box_id": {
+        "status": {
+          ".read": "auth != null && auth.uid === $box_id",
+          ".write": "auth != null && auth.uid === $box_id"
+        },
+        "flags": {
+          ".read": "auth != null && auth.uid === $box_id",
+          ".write": "auth != null && auth.uid === $box_id"
+        },
+        "config": {
+          ".read": "auth != null && auth.uid === $box_id"
+        }
+      }
+    },
+
     "messages": {
       "$box_id": {
+        ".read": "auth != null && auth.uid === $box_id",
         ".indexOn": ["timestamp"]
       }
     }

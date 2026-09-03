@@ -432,7 +432,8 @@
   width: 100%;
   padding: var(--sp-6) var(--sp-4);
   border-radius: 16px;
-  border: 1px solid var(--rose-300);
+  /* dash:[4,4] xác nhận từ Figma — viền đứt, không phải viền đặc. */
+  border: 1px dashed var(--rose-300);
   background: transparent;
   cursor: pointer;
 }
@@ -553,3 +554,51 @@
   font-size: 12px; line-height: 1.5; color: var(--neutral-0);
   text-shadow: 0 1px 8px rgba(0, 0, 0, .4);
 }
+
+/* ---------- box-card (Dashboard) ----------
+   Hai NHÓM thật theo Figma, không phải "tên+pill" rồi "chevron" rời:
+     trái  = avatar + tên + hàng trạng thái (chấm + "Online", icon pin + "%")
+     phải  = pill vai trò + chevron GỘP CHUNG một khối, neo phải nhờ
+             space-between của card cha.
+   Viền đổi màu theo vai trò: sender = rose-300 (khớp #F4A3AF tuyệt đối),
+   receiver = caramel-300 (khớp #E7AE75 tuyệt đối). */
+.sl-boxcard {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--neutral-0);
+  border: 0.5px solid var(--caramel-300);
+  cursor: pointer;
+  text-align: left;
+}
+.sl-boxcard--sender { border-color: var(--rose-300); }
+.sl-boxcard--receiver { border-color: var(--caramel-300); }
+
+.sl-boxcard__left { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+
+.sl-boxcard__avatar {
+  flex: 0 0 auto;
+  width: 44px; height: 44px;
+  border-radius: var(--r-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.sl-boxcard__avatar--sender { background: var(--rose-200); color: var(--rose-800); }
+.sl-boxcard__avatar--receiver { background: var(--caramel-100); color: var(--caramel-800); }
+
+.sl-boxcard__mid { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+/* Hàng trạng thái: chấm màu + nhãn, rồi icon pin + %. Cùng pattern gap:6 đã
+   dùng ở ReceiverUI cho hàng pin/firmware. */
+.sl-boxcard__status { display: flex; align-items: center; gap: var(--sp-3); }
+.sl-boxcard__statusitem { display: flex; align-items: center; gap: 6px; color: var(--neutral-500); font-size: 12px; line-height: 1.4; }
+.sl-boxcard__dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: var(--r-full); }
+
+.sl-boxcard__right { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); }
+
+/* Chevron trong nhóm phải: rose-500 khớp tuyệt đối cho sender; receiver dùng
+   caramel-700 (không có hex gốc trong thang, giữ đúng ý "đậm hơn pill một
+   bậc" của Figma). */
+.sl-boxcard__chevron--sender { color: var(--rose-500); }
+.sl-boxcard__chevron--receiver { color: var(--caramel-700); }

@@ -67,26 +67,49 @@ export default function Dashboard() {
           <>
             <span className="sl-section-label">Hộp của bạn</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {boxes.map(([boxId, box]) => (
-                <button
-                  key={boxId}
-                  type="button"
-                  className="sl-listcard"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/box/${boxId}/${box.role === 'sender' ? 'sender' : 'receiver'}`)}
-                >
-                  <span className="sl-chip">
-                    <Icon name={box.role === 'sender' ? 'chat' : 'mailbox'} size={24} />
-                  </span>
-                  <div className="sl-listcard__mid">
-                    <span className="sl-label-s" style={{ fontSize: 15 }}>{box.box_name}</span>
-                    <span className={`sl-rolepill sl-rolepill--${box.role === 'sender' ? 'sender' : 'receiver'}`}>
-                      {ROLE_LABEL[box.role] || ROLE_LABEL.receiver}
-                    </span>
-                  </div>
-                  <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
-                </button>
-              ))}
+              {boxes.map(([boxId, box]) => {
+                const role = box.role === 'sender' ? 'sender' : 'receiver';
+                return (
+                  <button
+                    key={boxId}
+                    type="button"
+                    className={`sl-boxcard sl-boxcard--${role}`}
+                    onClick={() => navigate(`/box/${boxId}/${role}`)}
+                  >
+                    {/* Nhóm trái: avatar + tên + hàng trạng thái. */}
+                    <div className="sl-boxcard__left">
+                      <span className={`sl-boxcard__avatar sl-boxcard__avatar--${role}`}>
+                        <Icon name={role === 'sender' ? 'chat' : 'mailbox'} size={24} />
+                      </span>
+                      <div className="sl-boxcard__mid">
+                        <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.3, color: 'var(--caramel-800)' }}>
+                          {box.box_name}
+                        </span>
+                        {/* Chưa có API trạng thái/pin cho danh sách hộp (gọi riêng từng hộp
+                            tốn N request) — mặc định cứng, xem sendlove-api-con-thieu.md. */}
+                        <div className="sl-boxcard__status">
+                          <span className="sl-boxcard__statusitem">
+                            <span className="sl-boxcard__dot" style={{ background: 'var(--success-fill)' }} />
+                            Online
+                          </span>
+                          <span className="sl-boxcard__statusitem">
+                            <Icon name="battery" size={13} />
+                            100%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Nhóm phải: pill vai trò + chevron GỘP CHUNG, neo phải. */}
+                    <div className="sl-boxcard__right">
+                      <span className={`sl-rolepill sl-rolepill--${role}`}>
+                        {ROLE_LABEL[box.role] || ROLE_LABEL.receiver}
+                      </span>
+                      <Icon name="chevron" size={20} className={`sl-boxcard__chevron--${role}`} />
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </>
         )}

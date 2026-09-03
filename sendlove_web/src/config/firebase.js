@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, FacebookAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
 
@@ -24,5 +24,10 @@ export const storage = getStorage(app);
 
 // Provider cho Google Sign-in
 export const googleProvider = new GoogleAuthProvider();
+
+// Provider cho Facebook Sign-in. Phải tự bật "Facebook" trong
+// Firebase Console > Authentication > Sign-in method (cần App ID/Secret từ
+// Meta for Developers) — không cấu hình được từ code.
+export const facebookProvider = new FacebookAuthProvider();
 
 export default app;

@@ -60,6 +60,41 @@
   --frame-w: 430px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* --- Chữ trên nút hồng chính: CỐ Ý không đổi theo theme.
+     rose-400 gần như giữ nguyên độ sáng ở cả sáng/tối, nên luật tương phản
+     "chữ trên nút hồng luôn tối, không phải trắng" (~7:1) vẫn đúng ở cả hai —
+     không được trỏ token này về --caramel-900, vì --caramel-900 tự đảo màu
+     trong dark mode và sẽ phá vỡ luật. */
+  --on-accent: #3D2A20;
+}
+
+/* ============================================================
+   Dark mode — override tầng BỀ MẶT (nền trang/thẻ, chữ, viền, đường kẻ).
+   KHÔNG đổi rose-*: đó là màu thương hiệu, giữ nguyên ở cả hai theme.
+   Áp dụng khi document có [data-theme="dark"] (ThemeContext đặt trên <html>).
+   ============================================================ */
+:root[data-theme='dark'] {
+  --caramel-50:  #201810;  /* nền trang */
+  --caramel-100: #3A2C1E;  /* nền pill/chip nhạt */
+  --caramel-300: #4A3928;  /* viền thẻ/input */
+  --caramel-700: #C9A98A;  /* chữ phụ đậm (nhãn, icon) */
+  --caramel-800: #DAB998;  /* chữ nhãn trên thẻ */
+  --caramel-900: #F3E7DA;  /* chữ chính */
+
+  --neutral-0:   #2C2117;  /* nền thẻ/modal */
+  --neutral-100: #3A2C20;  /* đường kẻ phân cách */
+  --neutral-400: #7C6A59;  /* chữ mờ nhất */
+  --neutral-500: #A9927E;  /* chữ phụ */
+  --neutral-700: #D8C6B4;  /* chữ nhãn */
+
+  --rose-50: rgba(224, 117, 142, 0.16);  /* nền tint icon — rose trong suốt trên nền tối */
+
+  --success-bg: rgba(74, 124, 89, 0.18);  --success-text: #7FBF93;
+  --error-bg:   rgba(196, 68, 60, 0.18);  --error-text:   #E8897F;
+  --warning-bg: rgba(216, 155, 60, 0.18); --warning-text: #E8B968;
+
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 /* ============================================================

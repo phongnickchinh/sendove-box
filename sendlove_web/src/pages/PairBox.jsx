@@ -3,8 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, Actions, Header, Button, Tips } from '../components/ui/Screen';
+import { Screen, Body, Button, Tips } from '../components/ui/Screen';
 
+/**
+ * Frame "new-box" trong Figma — ở đó đây là một modal đè lên Dashboard.
+ * Giữ route /pair độc lập (không refactor thành modal-trên-Dashboard — đổi
+ * kiến trúc điều hướng để có lớp nền mờ hiện Dashboard phía sau tốn công
+ * không tương xứng), chỉ dựng đúng phong cách CARD của dialog đó.
+ */
 export default function PairBox() {
   const [pairingCode, setPairingCode] = useState('');
   const [boxName, setBoxName] = useState('');
@@ -44,56 +50,70 @@ export default function PairBox() {
 
   return (
     <Screen>
-      <AppBar onBack={() => navigate('/dashboard')} />
-      <form onSubmit={handlePair} style={{ display: 'contents' }}>
-        <Body>
-          <Header title="Kết nối hộp mới" />
-          <p className="sl-body">
-            Nhập mã hiện trên màn hình hộp. Mã bắt đầu bằng <b>S</b> nếu bạn là người gửi,
-            hoặc <b>R</b> nếu bạn là người nhận.
-          </p>
+      <Body center>
+        <form onSubmit={handlePair} className="sl-login-card" style={{ position: 'relative', textAlign: 'left' }}>
+          <button
+            type="button" className="sl-iconbtn" onClick={() => navigate('/dashboard')}
+            aria-label="Đóng" style={{ position: 'absolute', top: -4, right: -4 }}
+          >
+            <Icon name="x" size={20} />
+          </button>
+
+          <div>
+            <div className="sl-label" style={{ textTransform: 'uppercase', letterSpacing: .4, fontSize: 17, fontWeight: 600, color: 'var(--neutral-700)' }}>
+              Ghép hộp mới
+            </div>
+            <p className="sl-body" style={{ marginTop: 6 }}>
+              Nhập mã hiện trên màn hình hộp. Mã bắt đầu bằng <b>S</b> nếu bạn là người gửi,
+              hoặc <b>R</b> nếu bạn là người nhận.
+            </p>
+          </div>
 
           {error && <div className="sl-reason">{error}</div>}
 
           <label className="sl-field">
             <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-              <Icon name="key" size={18} style={{ color: 'var(--rose-700)' }} />
+              <Icon name="key" size={14} style={{ color: 'var(--neutral-700)' }} />
               Mã kết nối
             </span>
             <input
-              className="sl-input"
+              className="sl-input sl-input--accent"
               value={pairingCode}
               onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
               placeholder="Ví dụ: SABC12DEF9"
               autoComplete="off"
               autoCapitalize="characters"
-              // uppercase chi khi da co chu: neu khong placeholder cung bi viet hoa theo
-              style={{ textTransform: pairingCode ? 'uppercase' : 'none', letterSpacing: 2, fontWeight: 600 }}
+              style={{ textTransform: pairingCode ? 'uppercase' : 'none', letterSpacing: 2, fontWeight: 700 }}
             />
+            <Tips>Mã gồm đúng 10 ký tự.</Tips>
           </label>
 
           <label className="sl-field">
             <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-              <Icon name="text" size={18} style={{ color: 'var(--rose-700)' }} />
+              <Icon name="text" size={14} style={{ color: 'var(--neutral-700)' }} />
               Tên hiển thị cho hộp
             </span>
             <input
-              className="sl-input"
+              className="sl-input sl-input--accent"
               value={boxName}
               onChange={(e) => setBoxName(e.target.value)}
-              placeholder="Ví dụ: Hộp quà của Vợ Yêu"
+              placeholder="Ví dụ: Hộp quà của Vợ Yêu 💕"
             />
           </label>
 
-          <Tips>Tên này chỉ hiện trên máy bạn — đổi lúc nào cũng được.</Tips>
-
-          <Actions>
-            <Button kind="pri" type="submit" disabled={isLoading}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-4)', marginTop: 'var(--sp-2)' }}>
+            <Button kind="pri" type="submit" disabled={isLoading} block={false} style={{ minWidth: 134 }}>
               {isLoading ? 'Đang ghép đôi…' : 'Ghép đôi ngay'}
             </Button>
-          </Actions>
-        </Body>
-      </form>
+            <button
+              type="button" onClick={() => navigate('/dashboard')}
+              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--caramel-800)', fontFamily: 'var(--font)', fontSize: 14, fontWeight: 600 }}
+            >
+              Huỷ
+            </button>
+          </div>
+        </form>
+      </Body>
     </Screen>
   );
 }

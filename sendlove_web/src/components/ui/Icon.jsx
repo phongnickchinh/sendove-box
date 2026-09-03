@@ -249,6 +249,16 @@ const PATHS = {
       <path d="M4 6h16" /><path d="M11 12h9" /><path d="M7 18h13" />
     </>
   ),
+
+  /* Hộp thư — thay cho "heart" ở dòng "Love to <tên>" trong Header, đúng
+     ẩn dụ mailbox của Figma (solar:mailbox-linear) hơn là trái tim. */
+  mailbox: (
+    <>
+      <path d="M4 11a5 5 0 015-5h6a5 5 0 015 5v7a1 1 0 01-1 1H5a1 1 0 01-1-1z" />
+      <path d="M4 11h16" />
+      <circle cx="12" cy="7.5" r="1.4" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, sw = 1.75, ...rest }) {

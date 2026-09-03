@@ -96,6 +96,103 @@ const PATHS = {
       <path d="M8 6L4 10l4 4" />
     </>
   ),
+
+  /* --- trạng thái hộp: pin, sóng, chuông, cài đặt --- */
+  battery: (
+    <>
+      <rect x="2" y="7" width="17" height="10" rx="2.5" />
+      <path d="M21.5 10.5v3" />
+    </>
+  ),
+  /* Ba mức sóng dùng chung một khung 24 nên chồng lên nhau không lệch tâm. */
+  wifi: (
+    <>
+      <path d="M2.5 9a14 14 0 0119 0" />
+      <path d="M6 12.5a9 9 0 0112 0" />
+      <path d="M9.5 16a4 4 0 015 0" />
+      <path d="M12 19.5h.01" />
+    </>
+  ),
+  wifi2: (
+    <>
+      <path d="M6 12.5a9 9 0 0112 0" />
+      <path d="M9.5 16a4 4 0 015 0" />
+      <path d="M12 19.5h.01" />
+    </>
+  ),
+  wifi1: (
+    <>
+      <path d="M9.5 16a4 4 0 015 0" />
+      <path d="M12 19.5h.01" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M6 9a6 6 0 1112 0c0 4 1.5 5.5 2 6.5H4c.5-1 2-2.5 2-6.5z" />
+      <path d="M10 19a2 2 0 004 0" />
+    </>
+  ),
+  gear: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3" />
+    </>
+  ),
+  phone: (
+    <>
+      <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+      <path d="M10.5 18.5h3" />
+    </>
+  ),
+
+  /* --- hành động --- */
+  plus: (
+    <>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M9 7V4.5h6V7" />
+      <path d="M6.5 7l1 12.5h9L17.5 7" />
+    </>
+  ),
+  unlink: (
+    <>
+      <path d="M9.5 14.5l5-5" />
+      <path d="M13 6.5l1.5-1.5a4 4 0 015.5 5.5L18.5 12" />
+      <path d="M11 17.5L9.5 19a4 4 0 01-5.5-5.5L5.5 12" />
+    </>
+  ),
+  power: (
+    <>
+      <path d="M12 3v8" />
+      <path d="M18.4 6.6a9 9 0 11-12.8 0" />
+    </>
+  ),
+
+  /* --- đăng nhập / ghép đôi --- */
+  key: (
+    <>
+      <circle cx="8" cy="14" r="4" />
+      <path d="M11 11.5L20 4" />
+      <path d="M17 7l2 2" />
+    </>
+  ),
+  lock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="10" rx="2.5" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 017 0v2.5" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, sw = 1.75, ...rest }) {

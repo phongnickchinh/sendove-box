@@ -1,32 +1,13 @@
-:root {
-  /* Color Palette - Sweet & Romantic (Pastel Pink/Purple) */
-  --color-primary: #ff758c;
-  --color-primary-light: #ff7eb3;
-  --color-secondary: #a18cd1;
-  --color-secondary-light: #fbc2eb;
-  
-  --color-background-start: #ffdde1;
-  --color-background-end: #ee9ca7;
-  
-  --color-text-main: #3a3a3a;
-  --color-text-muted: #6b6b6b;
-  --color-white: #ffffff;
-  --color-glass-border: rgba(255, 255, 255, 0.4);
-  --color-glass-bg: rgba(255, 255, 255, 0.65);
-  
-  /* Typography */
-  --font-heading: 'Dancing Script', cursive;
-  --font-body: 'Inter', sans-serif;
-  
-  /* Layout & Shadows */
-  --radius-soft: 24px;
-  --radius-pill: 9999px;
-  --shadow-glass: 0 8px 32px 0 rgba(255, 117, 140, 0.2);
-  --shadow-hover: 0 12px 40px 0 rgba(255, 117, 140, 0.35);
-  
-  /* Transitions */
-  --transition-smooth: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
+/* ============================================================
+   Reset toàn cục. Mọi giá trị thiết kế nằm ở styles/tokens.css và
+   styles/sendlove.css — file này CỐ Ý không định nghĩa màu, font hay
+   khoảng cách nào của riêng nó.
+
+   Bản cũ đặt h1-h6 sang 'Dancing Script' màu hồng và phủ nền gradient
+   lên body, nên mỗi màn dùng hệ mới phải tự gỡ lại hai luật đó. Nay
+   không còn màn nào chạy hệ cũ nên gỡ hẳn ở đây.
+   ============================================================ */
+@import './styles/tokens.css';
 
 * {
   margin: 0;
@@ -35,20 +16,12 @@
 }
 
 body {
-  font-family: var(--font-body);
-  color: var(--color-text-main);
-  background: linear-gradient(135deg, var(--color-background-start) 0%, var(--color-background-end) 100%);
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+  font-family: var(--font);
+  color: var(--caramel-900);
+  background: var(--caramel-50);
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-heading);
-  font-weight: 700;
-  color: var(--color-primary);
 }
 
 a {
@@ -56,94 +29,16 @@ a {
   color: inherit;
 }
 
-/* Glassmorphism Utilities */
-.glass-panel {
-  background: var(--color-glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-soft);
-  box-shadow: var(--shadow-glass);
+/* Bàn phím phải luôn nhìn thấy được ô đang chọn. */
+:focus-visible {
+  outline: 2px solid var(--rose-400);
+  outline-offset: 2px;
 }
 
-.glass-button {
-  background: linear-gradient(135deg, var(--color-primary-light), var(--color-primary));
-  color: var(--color-white);
-  border: none;
-  padding: 12px 32px;
-  border-radius: var(--radius-pill);
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: var(--transition-smooth);
-  box-shadow: 0 4px 15px rgba(255, 117, 140, 0.4);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.glass-button:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-hover);
-  background: linear-gradient(135deg, var(--color-primary), var(--color-primary-light));
-}
-
-.glass-button:active {
-  transform: translateY(1px);
-}
-
-/* Input Fields */
-.glass-input {
-  width: 100%;
-  padding: 14px 20px;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-pill);
-  font-family: var(--font-body);
-  font-size: 1rem;
-  color: var(--color-text-main);
-  transition: var(--transition-smooth);
-}
-
-.glass-input:focus {
-  outline: none;
-  background: rgba(255, 255, 255, 0.8);
-  border-color: var(--color-primary-light);
-  box-shadow: 0 0 0 3px rgba(255, 117, 140, 0.2);
-}
-
-/* Utilities */
-.text-gradient {
-  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.fade-in {
-  animation: fadeIn 0.6s ease-out forwards;
-}
-
-.slide-up {
-  animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }

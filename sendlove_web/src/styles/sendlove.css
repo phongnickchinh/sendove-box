@@ -21,13 +21,7 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* index.css cũ đặt h1-h6 sang Dancing Script màu hồng và ép font cho input.
-   Các màn đã chuyển sang hệ mới phải thoát khỏi hai luật đó; giữ nguyên
-   index.css để những màn chưa chuyển không đổi dáng giữa chừng. */
-.sl-page h1, .sl-page h2, .sl-page h3,
-.sl-page h4, .sl-page h5, .sl-page h6 {
-  font-family: var(--font);
-}
+/* Form control khong thua ke font tu body theo mac dinh cua trinh duyet. */
 .sl-page button, .sl-page input, .sl-page textarea, .sl-page select {
   font-family: var(--font);
 }
@@ -177,6 +171,10 @@
 .sl-btn--pri:hover:not(:disabled) { filter: brightness(.96); }
 .sl-btn--gho { background: transparent; color: var(--rose-700); }
 .sl-btn--gho:hover:not(:disabled) { background: var(--rose-50); }
+/* Nút phá huỷ: nền error-fill chữ trắng, KHÔNG dùng hồng chính — hồng là màu
+   của hành động bình thường, mượn nó cho việc xoá là mời người dùng bấm nhầm. */
+.sl-btn--dan { background: var(--error-fill); color: var(--neutral-0); }
+.sl-btn--dan:hover:not(:disabled) { filter: brightness(.94); }
 .sl-btn--block { width: 100%; }
 
 /* ---------- acts(): hàng nút ghim đáy, cách safe-area 34 ----------
@@ -283,3 +281,116 @@
 }
 .sl-preview > video,
 .sl-preview > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---------- toggle 44x24, knob 18 (toggle() ở màn 10/12) ---------- */
+.sl-toggle {
+  flex: 0 0 auto;
+  width: 44px; height: 24px;
+  padding: 3px;
+  border: none;
+  border-radius: var(--r-full);
+  background: var(--neutral-100);
+  display: flex; align-items: center; justify-content: flex-start;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+.sl-toggle[aria-checked="true"] { background: var(--rose-400); justify-content: flex-end; }
+.sl-toggle__knob {
+  width: 18px; height: 18px;
+  border-radius: var(--r-full);
+  background: var(--neutral-0);
+}
+.sl-toggle:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---------- hàng viền đứt "thêm ..." (add-alarm, add-widget) ---------- */
+.sl-addrow {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 14px var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px dashed var(--rose-300);
+  background: transparent;
+  color: var(--rose-700);
+  font-family: var(--font);
+  font-size: 14px; font-weight: 600; line-height: 1.4;
+  cursor: pointer;
+}
+.sl-addrow:disabled {
+  border-color: var(--neutral-100);
+  color: var(--neutral-400);
+  cursor: not-allowed;
+}
+
+/* ---------- segmented control (seg/cell ở màn 10) ---------- */
+.sl-seg {
+  display: flex; gap: var(--sp-1);
+  padding: var(--sp-1);
+  border-radius: var(--r-md);
+  background: var(--neutral-100);
+}
+.sl-seg__cell {
+  flex: 1 1 0;
+  height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--r-sm);
+  background: transparent;
+  font-family: var(--font);
+  font-size: 14px; font-weight: 500; line-height: 1.4;
+  color: var(--neutral-500);
+  cursor: pointer;
+}
+.sl-seg__cell[aria-pressed="true"] {
+  background: var(--neutral-0);
+  font-weight: 600;
+  color: var(--caramel-900);
+}
+
+/* ---------- dải ghi chú nền caramel (wake-note ở màn 10) ---------- */
+.sl-note {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  background: var(--caramel-50);
+  color: var(--caramel-700);
+  font-size: 12px; line-height: 1.4;
+}
+.sl-note svg { flex: 0 0 auto; margin-top: 1px; }
+.sl-note--warn { background: var(--warning-bg); color: var(--warning-text); }
+.sl-note--err  { background: var(--error-bg);   color: var(--error-text); }
+
+/* ---------- thanh trượt 0-100 (độ sáng, âm lượng) ----------
+   accent-color chỉ tô phần đã chọn; phần còn lại rơi về track mặc định của
+   trình duyệt và ra màu tối, nên phải tự vẽ cả hai đầu. */
+.sl-range {
+  width: 100%;
+  height: 24px;
+  appearance: none; -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.sl-range::-webkit-slider-runnable-track {
+  height: 8px; border-radius: var(--r-full);
+  background: var(--neutral-100);
+}
+.sl-range::-moz-range-track {
+  height: 8px; border-radius: var(--r-full);
+  background: var(--neutral-100);
+}
+.sl-range::-moz-range-progress {
+  height: 8px; border-radius: var(--r-full);
+  background: var(--rose-400);
+}
+.sl-range::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; margin-top: -6px;
+  border-radius: var(--r-full);
+  background: var(--rose-400);
+  border: 2px solid var(--neutral-0);
+}
+.sl-range::-moz-range-thumb {
+  width: 20px; height: 20px;
+  border-radius: var(--r-full);
+  background: var(--rose-400);
+  border: 2px solid var(--neutral-0);
+}

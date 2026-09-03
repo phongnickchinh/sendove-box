@@ -1,8 +1,8 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Package, LogOut, Plus } from 'lucide-react';
 import { logOut } from '../api/auth';
+import Icon from '../components/ui/Icon';
+import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Screen';
 
 export default function Dashboard() {
   const { user, profile } = useAuth();
@@ -13,76 +13,58 @@ export default function Dashboard() {
     navigate('/');
   };
 
-  return (
-    <div className="fade-in">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-        <div>
-          <h1 className="text-gradient" style={{ fontSize: '2.5rem' }}>Xin chào, {user?.displayName?.split(' ')[0] || 'bạn'}!</h1>
-          <p style={{ color: 'var(--color-text-muted)' }}>Hãy chọn một hộp quà để tiếp tục.</p>
-        </div>
-        <button onClick={handleLogout} className="glass-button" style={{ padding: '8px 16px', fontSize: '0.9rem' }}>
-          <LogOut size={18} strokeWidth={1.5} /> Đăng xuất
-        </button>
-      </div>
+  const boxes = Object.entries(profile?.boxes_list || {});
+  const firstName = user?.displayName?.split(' ').slice(-1)[0] || 'bạn';
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '24px' }}>
-        {/* Placeholder for Box List */}
-        {profile?.boxes_list && Object.keys(profile.boxes_list).length > 0 ? (
-          Object.entries(profile.boxes_list).map(([boxId, box]) => (
-            <div 
-              key={boxId} 
-              className="glass-panel slide-up" 
-              style={{ padding: '24px', cursor: 'pointer', transition: 'var(--transition-smooth)' }}
-              onClick={() => navigate(`/box/${boxId}/${box.role === 'sender' ? 'sender' : 'receiver'}`)}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ padding: '12px', background: 'var(--color-primary-light)', borderRadius: '16px', color: 'white' }}>
-                  <Package size={32} strokeWidth={1.5} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '1.2rem', marginBottom: '4px' }}>{box.box_name}</h3>
-                  <span style={{ 
-                    fontSize: '0.8rem', 
-                    padding: '4px 12px', 
-                    borderRadius: '12px', 
-                    background: 'rgba(255,255,255,0.8)',
-                    color: box.role === 'sender' ? 'var(--color-primary)' : 'var(--color-secondary)',
-                    fontWeight: 600
-                  }}>
-                    {box.role === 'sender' ? 'Người Gửi' : 'Người Nhận'}
+  return (
+    <Screen>
+      <AppBar
+        right={
+          <button type="button" className="sl-iconbtn" onClick={handleLogout} aria-label="Đăng xuất">
+            <Icon name="power" size={20} />
+          </button>
+        }
+      />
+      <Body>
+        <Header title={`Chào ${firstName}`} />
+        <p className="sl-body">Chọn một hộp quà để tiếp tục.</p>
+
+        {boxes.length === 0 ? (
+          <div className="sl-card sl-card--center">
+            <CircleIcon size={56} bg="var(--rose-50)" color="var(--rose-400)" icon="chat" iconSize={24} />
+            <span className="sl-heading">Chưa có hộp nào</span>
+            <span className="sl-body">Ghép đôi chiếc hộp đầu tiên bằng mã hiện trên màn hình của nó.</span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {boxes.map(([boxId, box]) => (
+              <button
+                key={boxId}
+                type="button"
+                className="sl-listcard"
+                style={{ cursor: 'pointer' }}
+                onClick={() => navigate(`/box/${boxId}/${box.role === 'sender' ? 'sender' : 'receiver'}`)}
+              >
+                <span className="sl-chip">
+                  <Icon name={box.role === 'sender' ? 'chat' : 'heart'} size={24} />
+                </span>
+                <div className="sl-listcard__mid">
+                  <span className="sl-label-s" style={{ fontSize: 15 }}>{box.box_name}</span>
+                  <span className="sl-caption">
+                    {box.role === 'sender' ? 'Bạn là người gửi' : 'Bạn là người nhận'}
                   </span>
                 </div>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', gridColumn: '1 / -1' }}>
-            <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>Bạn chưa có hộp quà nào.</p>
+                <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
+              </button>
+            ))}
           </div>
         )}
 
-        {/* Add New Box Card */}
-        <div 
-          className="glass-panel slide-up" 
-          style={{ 
-            padding: '24px', 
-            cursor: 'pointer', 
-            display: 'flex', 
-            flexDirection: 'column', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            border: '2px dashed var(--color-primary-light)',
-            background: 'rgba(255, 255, 255, 0.3)',
-            minHeight: '120px'
-          }}
-          onClick={() => navigate('/pair')}
-        >
-          <div style={{ color: 'var(--color-primary)', marginBottom: '8px' }}>
-            <Plus size={32} strokeWidth={1.5} />
-          </div>
-          <p style={{ fontWeight: 600, color: 'var(--color-primary)' }}>Kết nối Box mới</p>
-        </div>
-      </div>
-    </div>
+        <button type="button" className="sl-addrow" onClick={() => navigate('/pair')}>
+          <Icon name="plus" size={20} />
+          Kết nối hộp mới
+        </button>
+      </Body>
+    </Screen>
   );
 }

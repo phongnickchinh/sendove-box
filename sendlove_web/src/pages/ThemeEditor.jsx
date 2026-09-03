@@ -96,6 +96,11 @@ export default function ThemeEditor() {
               padding: '3px 8px', borderRadius: 999, background: 'var(--caramel-100)',
               fontSize: 12, fontWeight: 500, color: 'var(--caramel-800)',
             }}>{sel.type}</span>
+            {/* Không có nút này thì bảng thuộc tính mở vĩnh viễn và danh sách
+                widget bên dưới không bao giờ chạm tới được. */}
+            <button type="button" className="sl-iconbtn" onClick={() => setSelectedId(null)} aria-label="Đóng">
+              <Icon name="x" size={20} />
+            </button>
           </div>
 
           {sel.fixed ? (

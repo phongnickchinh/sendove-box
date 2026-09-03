@@ -193,6 +193,62 @@ const PATHS = {
       <circle cx="12" cy="12" r="3" />
     </>
   ),
+
+  /* --- giao diện màn hình hộp --- */
+  palette: (
+    <>
+      <path d="M12 3a9 9 0 000 18 2 2 0 001.6-3.2 2 2 0 011.6-3.2h1.9A4.9 4.9 0 0021 9.6C20.4 5.8 16.6 3 12 3z" />
+      <circle cx="7.5" cy="11" r="1" />
+      <circle cx="10.5" cy="7.5" r="1" />
+      <circle cx="15" cy="8" r="1" />
+    </>
+  ),
+  sd: (
+    <>
+      <path d="M7 3h7l4 4v12a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
+      <path d="M9.5 4.8v3" />
+      <path d="M12 4.8v3" />
+      <path d="M14.5 6.2v1.6" />
+    </>
+  ),
+  layers: (
+    <>
+      <path d="M12 3l9 5-9 5-9-5z" />
+      <path d="M3 13l9 5 9-5" />
+    </>
+  ),
+  move: (
+    <>
+      <path d="M12 3.5v17" />
+      <path d="M3.5 12h17" />
+      <path d="M9.5 6.5L12 4l2.5 2.5" />
+      <path d="M9.5 17.5L12 20l2.5-2.5" />
+      <path d="M6.5 9.5L4 12l2.5 2.5" />
+      <path d="M17.5 9.5L20 12l-2.5 2.5" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 4v11" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M4.5 19.5h15" />
+    </>
+  ),
+  alignL: (
+    <>
+      <path d="M4 6h16" /><path d="M4 12h9" /><path d="M4 18h13" />
+    </>
+  ),
+  alignC: (
+    <>
+      <path d="M4 6h16" /><path d="M7.5 12h9" /><path d="M5.5 18h13" />
+    </>
+  ),
+  alignR: (
+    <>
+      <path d="M4 6h16" /><path d="M11 12h9" /><path d="M7 18h13" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, sw = 1.75, ...rest }) {

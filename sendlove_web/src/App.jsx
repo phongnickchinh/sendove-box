@@ -8,6 +8,9 @@ import SenderDashboard from './pages/SenderDashboard';
 import ReceiverUI from './pages/ReceiverUI';
 import ReceiverAlarms from './pages/ReceiverAlarms';
 import ReceiverConfig from './pages/ReceiverConfig';
+import ThemePicker from './pages/ThemePicker';
+import ThemeEditor from './pages/ThemeEditor';
+import ThemeSend from './pages/ThemeSend';
 import AuthRoute from './components/AuthRoute';
 
 function App() {
@@ -30,6 +33,11 @@ function App() {
           <Route path="/box/:boxId/receiver" element={<ReceiverUI />} />
           <Route path="/box/:boxId/receiver/alarm" element={<ReceiverAlarms />} />
           <Route path="/box/:boxId/receiver/config" element={<ReceiverConfig />} />
+
+          {/* Theme: dựng trước backend. Chạy trên src/theme/layout.js, không gọi API nào. */}
+          <Route path="/box/:boxId/receiver/theme" element={<ThemePicker />} />
+          <Route path="/box/:boxId/receiver/theme/edit" element={<ThemeEditor />} />
+          <Route path="/box/:boxId/receiver/theme/send" element={<ThemeSend />} />
         </Route>
 
         {/* Bắt mọi path sai về trang chủ */}

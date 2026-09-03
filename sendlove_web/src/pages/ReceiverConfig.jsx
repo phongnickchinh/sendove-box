@@ -203,6 +203,19 @@ export default function ReceiverConfig() {
               {savingCfg ? 'Đang lưu…' : 'Lưu đèn, màn hình và âm lượng'}
             </Button>
 
+            {/* --- giao diện màn hình hộp: dựng trước backend, xem theme/layout.js --- */}
+            <button
+              type="button" className="sl-listcard" style={{ cursor: 'pointer' }}
+              onClick={() => navigate(`/box/${boxId}/receiver/theme`)}
+            >
+              <Icon name="palette" size={20} style={{ color: 'var(--rose-800)' }} />
+              <div className="sl-listcard__mid">
+                <span className="sl-label-s">Giao diện màn hình hộp</span>
+                <span className="sl-caption">Bố cục, phông chữ và màu trên màn 240 × 240.</span>
+              </div>
+              <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
+            </button>
+
             {/* --- firmware: chỉ đọc, hộp tự cài --- */}
             <div className="sl-listcard">
               <CircleIcon size={40} bg="var(--caramel-50)" color="var(--caramel-700)" icon="gear" iconSize={20} />

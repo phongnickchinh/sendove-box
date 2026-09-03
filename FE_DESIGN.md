@@ -131,3 +131,58 @@ Login (3.1)
 ---
 
 *Cập nhật lần cuối: phiên thiết kế cấu trúc FE — SendLove Box.*
+
+---
+
+## 7. Cập nhật sau UI phase (2026-09-03, nhánh `fe-apply-design`)
+
+Tài liệu ở trên viết trước khi đối chiếu lại code. Ba mục đã lạc hậu:
+
+### 7.1 Đính chính
+
+1. **Mục 4.1 sai.** `BoxConfig` **đã có sẵn** `led_state`, `display_brightness`,
+   `playback_volume`, và `BoxFlags` đã có `config_flag`
+   (`sendlove_backend/src/types/box.types.ts`). Không cần đổi schema.
+   Route `PUT /boxes/:boxId/config` cũng đã có, validator ở
+   `validation.middleware.ts:121-125`.
+2. **Alarm CRUD đã đủ**: `POST/GET/PATCH/DELETE /boxes/:boxId/alarms`
+   (`routes/alarm.routes.ts`), chỉ role `receiver` gọi được.
+   `DELETE /boxes/:boxId/unpair` cũng đã có.
+3. **Captive portal đã có `/scan`** trả `{status, nets:[{ssid,rssi,lock}]}`
+   (`NetworkManager.cpp:274-276`, `handleCaptiveScan()`), kèm client poll +
+   dedup sẵn trong `captive_portal_html.h`. Ghi chép cũ nói chưa có là sai.
+4. **Màn hình hộp là 240 × 240** (`config.h:17-18`), không phải 128×160.
+
+### 7.2 Route table sau khi sửa
+
+```
+/                                     Login (public)
+/dashboard                            Dashboard          [AuthRoute]
+/pair                                 PairBox            [AuthRoute]
+/box/:boxId/sender                    SenderUI
+/box/:boxId/sender/dashboard          SenderDashboard    (route đứt gãy — đã nối)
+/box/:boxId/receiver                  ReceiverUI
+/box/:boxId/receiver/alarm            ReceiverAlarms     (mới)
+/box/:boxId/receiver/config           ReceiverConfig     (mới, gồm huỷ ghép đôi)
+/box/:boxId/receiver/theme            ThemePicker        (mới, chưa có backend)
+/box/:boxId/receiver/theme/edit       ThemeEditor        (mới, chưa có backend)
+/box/:boxId/receiver/theme/send       ThemeSend          (mới, chưa có backend)
+*                                      → redirect "/"
+```
+
+Đã xoá: `Home.jsx`, `ReceiverDashboard.jsx`, `Navbar.jsx`, `App.css`.
+`AuthRoute` không còn dựng khung chung — mọi trang tự dựng `<Screen>`, nên tham
+số `bare` đã bỏ.
+
+### 7.3 Còn nợ
+
+- **Màn 3.7 "Xác nhận đã gửi"** (`/box/:boxId/sender/confirm`) chưa tách khỏi
+  bước 3 của `SenderUI`.
+- **Theme**: không route, không API ghi file trên `IStorageProvider`, không khoá
+  NVS. UI đã dựng, chạy trên `src/theme/layout.js`.
+- **Portal màn 17/18/22**: thiếu route đặt giờ (`settimeofday`), sửa báo thức từ
+  portal, quay về Wi-Fi cũ (`loadBackupWiFi` có sẵn nhưng chưa ai gọi), factory
+  reset (`clearAll()` có sẵn), chọn theme trên thẻ.
+- **Portal chưa nạp lên hộp thật.** `pio run` SUCCESS, flash 74.0%, khối
+  `<script>` giữ nguyên từng ký tự — nhưng luồng quét → chọn → lưu → lên mạng
+  phải thử trên thiết bị trước khi merge.

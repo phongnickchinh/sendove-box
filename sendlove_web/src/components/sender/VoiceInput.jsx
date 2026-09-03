@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { VoiceRecorder } from '../../utils/voiceRecorder';
 import Icon from '../ui/Icon';
 import { Actions, Button, Tips } from '../ui/Screen';
@@ -32,7 +32,7 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isRecording]);
+  }, [isRecording, stopRecording]);
 
   const drawWaveform = () => {
     if (!recorderRef.current || !canvasRef.current) return;
@@ -67,14 +67,17 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
     drawWaveform();
   };
 
-  const stopRecording = async () => {
+  // useCallback: identity chỉ đổi khi isRecording đổi — CÙNG nhịp với effect
+  // bên dưới. Nếu để hàm thường (đổi identity mỗi render) rồi thêm vào deps
+  // effect, interval đếm giờ sẽ bị lập lại mỗi lần component render lại.
+  const stopRecording = useCallback(async () => {
     if (!recorderRef.current || !isRecording) return;
     setIsRecording(false);
     cancelAnimationFrame(animationRef.current);
 
     const data = await recorderRef.current.stop();
     setRecordedData(data);
-  };
+  }, [isRecording]);
 
   const handleConfirm = () => {
     if (recordedData && onRecordComplete) {

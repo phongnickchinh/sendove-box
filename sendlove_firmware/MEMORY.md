@@ -1047,7 +1047,21 @@ khai báo `instance` tường minh.**
 
 Đã sửa `firebase.json` thành dạng mảng có `instance: "iot-app-839a2"`.
 
-### Rules mới (`database.rules.json`) — CHƯA DEPLOY
+### Rules mới (`database.rules.json`) — ~~CHƯA DEPLOY~~ ✅ **ĐÃ DEPLOY 2026-09-04**
+
+> Tiêu đề gốc "CHƯA DEPLOY" giữ lại gạch ngang cho đúng lịch sử. User tự chạy lệnh lúc
+> 2026-09-04; CLI báo `rules for database iot-app-839a2 released successfully`.
+> **Đo lại bằng curl sau khi deploy — lỗ hổng đã đóng:**
+>
+> | Probe (không auth) | Trước | Sau |
+> |---|---|---|
+> | `GET /boxes.json?shallow=true` | 200 | **401** |
+> | `GET /messages.json?shallow=true` | 200 | **401** |
+> | `PUT /_sectest_probe.json` | 200 | **401** |
+>
+> Đây là lỗ hổng nghiêm trọng nhất của dự án và nó đã được vá thật, không phải "deploy xong
+> là xong" — số 401 ở trên mới là bằng chứng, vì chính lần deploy trước đây cũng báo
+> "thành công" mà rules rơi nhầm instance.
 
 Đổi từ `.read:false/.write:false` trống rỗng sang least-privilege theo `auth.uid === $box_id`:
 - `boxes/$box_id/status` — box đọc + ghi (heartbeat)
@@ -1063,8 +1077,11 @@ khai báo `instance` tường minh.**
 - Web vẫn chạy — đi qua axios `VITE_API_URL`; `sendlove_web/src/config/firebase.js` có export
   `database` nhưng **grep toàn `sendlove_web/src` không nơi nào import dùng**
 
-Lệnh: `firebase deploy --only database --project iot-app-839a2`
-(Agent bị classifier chặn deploy production — User tự chạy.)
+Lệnh: `firebase deploy --only database --project iot-app-839a2` — **đã chạy 2026-09-04.**
+(Agent bị classifier của Claude Code chặn deploy production — xác nhận lại lần nữa ngày
+2026-09-04, không phải chuyện của riêng một phiên. User tự chạy. Có đường vòng kỹ thuật là ghi
+thẳng `.settings/rules.json` qua REST bằng Database Secret, nhưng đó là cùng một hành động
+deploy production qua cửa khác — **đừng làm**, hãy đưa lệnh cho user.)
 
 ⚠️ **`firebase deploy --only storage` thì NGƯỢC LẠI — sẽ làm CHẾT đường tải media.** Firmware
 build URL `?alt=media` **không kèm token**, chạy được chỉ vì Storage đang mở. Muốn siết
@@ -1214,10 +1231,26 @@ comment `/// Flash backlight 3x` đều đã lỗi thời, **không nháy gì c�
   `apPassword = ""` (`NetworkManager.h:84`) và `main.cpp:445` gọi không truyền mật khẩu ⇒ **AP mở**.
 - **Phase D** — chờ user chốt hướng + 3 ẩn số ở §10.
 
-### Việc user phải làm, chưa ai làm
+### Việc user phải làm
 
-1. **`firebase deploy --only database --project iot-app-839a2`** — vẫn là món **duy nhất** đóng
-   được lỗ hổng đang sống đã chứng minh bằng curl ở §11. Agent bị classifier chặn deploy production.
-   ⚠️ **Đừng chạy `--only storage`** — sẽ làm chết đường tải media (xem §11).
+1. ✅ **XONG 2026-09-04** — `firebase deploy --only database --project iot-app-839a2`.
+   RTDB giờ trả **401** cho cả đọc lẫn ghi khi không auth (bảng đo ở §11).
+   ⚠️ **Vẫn đừng chạy `--only storage`** — sẽ làm chết đường tải media (xem §11).
 2. Flash `7c1ac23` **một mình** và chạy 6 mục xác minh Phase A ở §10.
 3. Sau khi Phase A đạt → flash tiếp 4 commit Phase B, đọc `[PLAY] stack hwm=` để quyết B4 bước 2.
+
+### Sau khi deploy rules: điều gì đổi, điều gì KHÔNG
+
+**Không đổi gì với đường chạy hiện tại** — và đây là lý do deploy được ngay mà không cần chờ
+firmware: box vẫn dùng `?auth=<FIREBASE_AUTH_SECRET>`, mà **Database Secret bypass toàn bộ rules**;
+backend đi qua Admin SDK cũng bypass; web không hề import `database` (đã verify lại 2026-09-04:
+`sendlove_web/src/config/firebase.js:22` có export nhưng không file nào import, chỉ `auth` được dùng).
+
+**Rules mới CHƯA có hiệu lực thật với box** cho tới khi bật `FIREBASE_USE_IDTOKEN 1`. Trước đó,
+`auth.uid === $box_id` chưa bao giờ được đánh giá vì box đang là admin. Nói cách khác: deploy này
+đóng cửa với **người ngoài**, chưa hạ quyền của **box**. Hạ quyền box là việc của Phase D.
+
+**Lỗ hổng còn lại, chưa đóng:** Firebase Storage vẫn mở — firmware build URL `?alt=media` không
+kèm token và vẫn tải được. Ai biết `bin_url` vẫn lấy được video/voice của người dùng. Siết chỗ này
+phải làm cùng lúc với việc cho box xác thực khi tải, nếu không là chết đường media (xem "ẩn số"
+ở §11).

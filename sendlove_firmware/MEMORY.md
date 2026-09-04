@@ -1352,3 +1352,73 @@ Nên cùng lúc cũng loại được:
 làm hỏng chẩn đoán: user revert về flash 1 rồi phát lại tin cũ, thấy vẫn lỗi, và điều đó KHÔNG
 loại được đường ghi như tưởng — vì `7c1ac23` cũng là con của `eb3c9b2` nên cũng ghi ở 20MHz, và
 byte hỏng thì đã nằm sẵn trên NAND rồi.
+
+---
+
+## 15. Phase D — CHỐT hướng **direct RTDB (idToken)**, 2026-09-05
+
+### Quyết định của user
+
+User cân nhắc cả hai rồi **chốt direct-RTDB**. Trong cùng phiên user có nói "dùng device-auth
+backend" trước, sau đó **đổi lại**. Bản chốt là **direct-RTDB**. Đừng mở lại tranh luận này.
+
+### Ba ẩn số của §10 — ĐÃ CÓ ĐÁP ÁN (đọc code thật, không suy đoán)
+
+Khảo sát trước khi user chốt, ghi lại vì vẫn có giá trị nếu sau này quay xe:
+
+1. **Backend ĐÃ deploy.** `firebase functions:list` → `api | v1 | https | us-central1 | nodejs20`.
+   URL: `https://us-central1-iot-app-839a2.cloudfunctions.net/api`, device routes ở `/device`.
+2. **`PROVISIONING_KEY`** = biến môi trường `DEVICE_PROVISIONING_KEY`, so với header
+   `X-Provisioning-Key` ở `POST /device/register`. **Hiện CHƯA đặt** — không có `.env` nào trong
+   `sendlove_backend`, và middleware từ chối MỌI đăng ký kèm 500 khi biến trống.
+3. **`/device/poll` trả SIGNED URL**, không phải path Storage:
+   `generateDownloadUrl(m.bin_url, 15)` → GCS signed URL **v4**, hạn **15 phút**, `action: 'read'`.
+
+### Lỗ Storage: ĐÓNG ĐƯỢC bằng hướng này — đính chính "ẩn số" của §11
+
+§11 ghi đây là "ẩn số còn lại" và ngụ ý direct-RTDB không giải được. **Nói vậy là quá bi quan.**
+Cái §11 không làm được là *kiểm chứng*, không phải *thiết kế* — và lý do không kiểm chứng được
+chính là vì Storage đang mở, nên token rác cũng trả 200. Siết rules xong thì kiểm chứng được ngay.
+
+Khảo sát 2026-09-05 cho thấy đủ mảnh ghép, đo bằng đọc code:
+
+1. **Đường dẫn Storage**: `media/{boxId}/{messageId}/video.bin`
+   (`message.service.ts:23` — `const basePath = \`media/${boxId}/${messageId}\``).
+2. **`boxId` trong path ĐÚNG BẰNG `auth.uid`** — cả hai đều là `ESP32_A1B2C3D4E5F6`. Nên rule
+   viết thẳng được, không cần bảng tra cứu:
+   `match /media/{boxId}/{allPaths=**} { allow read: if request.auth.uid == boxId; }`
+3. **Không ai khác đọc Storage trực tiếp**: web export `storage` ở `config/firebase.js:23` nhưng
+   **không file nào import** (y hệt trường hợp `database` ở §11). Upload của web đi qua **signed
+   POST policy** do backend cấp, mà signed POST **bypass rules**. Nên deny-all cho `write` không
+   làm hỏng gì.
+4. **Firmware gắn được header**: nó đã dùng `http.addHeader()` ở 5 chỗ. Media URL dựng ở
+   `NetworkManager.cpp:1028` (voice) và `:1388` (video).
+
+⚠️ **Scheme header KHÁC với RTDB**: Firebase Storage nhận `Authorization: Firebase <idToken>`,
+**không phải** `Bearer`. `_authHeaderValue` hiện giữ sẵn dạng `"Bearer <jwt>"` cho RTDB nên
+**không dùng lại được** cho Storage — phải dựng chuỗi riêng.
+
+⚠️ **Bucket**: firmware trỏ `iot-app-839a2.firebasestorage.app` (không phải `.appspot.com` —
+curl thử `.appspot.com` trả 404). `firebase.json` khai `"storage": { "rules": "storage.rules" }`
+không kèm bucket → deploy vào bucket mặc định. Xác minh bucket mặc định đúng là cái firmware
+đang gọi trước khi deploy.
+
+Đổi lại, direct-RTDB được: code đã viết xong ở `7c1ac23`; không phải deploy lại backend; không
+cần provisioning key; và **né được cái bẫy tiền tố `box_`** (xem dưới).
+
+### Cái bẫy `box_` — chỉ ảnh hưởng hướng device-auth, ghi lại phòng khi quay xe
+
+`device-auth.middleware.ts` tra box bằng `` `box_${req.deviceId}` ``, nhưng RTDB thật có khoá là
+`ESP32_A1B2C3D4E5F6` (đo ở §11), **không có tiền tố**. Đi hướng device-auth mà không xử lý chỗ
+này thì mọi request trả 401. Hướng direct-RTDB không dính, vì `BOX_ID` trong `config_secrets.h`
+**đúng bằng** `ESP32_A1B2C3D4E5F6` → rule `auth.uid === $box_id` khớp thẳng.
+
+### Ba điều kiện để bật `FIREBASE_USE_IDTOKEN 1` — còn 2
+
+- (a) Bật Email/Password trên Console — **CHƯA**. REST hiện trả `PASSWORD_LOGIN_DISABLED`.
+- (b) Chạy `provision_box_auth.js` + điền 2 trường vào `config_secrets.h` — **CHƯA**, vẫn `FILL_ME`.
+      Điều kiện chạy đã đủ: `serviceAccountKey.json` có, `firebase-admin` đã cài.
+      **Hai giá trị đó do script IN RA, không tự nghĩ.** Mật khẩu chỉ hiện MỘT LẦN.
+- (c) Deploy `database.rules.json` — ✅ **XONG 2026-09-04** (xem §11).
+
+Bật cờ khi chưa đủ (a) và (b) = box **mất kết nối hoàn toàn**.

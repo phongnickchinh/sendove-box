@@ -24,6 +24,12 @@
 > Màn hình ST7789 không có chân CS nên luôn nhận xung nhịp SPI. Việc chia sẻ chung bus SPI2 với NAND Flash gây hiện tượng nhiễu hình ảnh khi đọc dữ liệu NAND.
 > **Giải pháp đang áp dụng**:
 > - Đồng bộ cùng `SPI_MODE3` cho cả LGFX và NAND để không lệch bit do SCK Idle nhảy.
+>   - ⚠️ **Đính chính 2026-09-04 — con số 3 KHÔNG bắt buộc, cái bắt buộc là CẢ BUS DÙNG CHUNG
+>     MỘT MODE.** Cả MODE0 lẫn MODE3 đều lấy mẫu ở sườn LÊN; thiệt hại nằm ở mức idle của SCK —
+>     đổi CPOL giữa hai chủ bus sinh 1 sườn lên giả nên ST7789 chốt nhầm 1 bit. MODE3 được chọn
+>     chỉ vì driver flash dùng nó. Từ nay mode nằm ở `SPI_BUS_MODE` (`config.h`), đổi theo
+>     `ACTIVE_STORAGE_TYPE`: **MODE3 cho NAND (không đổi), MODE0 cho thẻ SD** — vì thư viện `SD`
+>     của Arduino-ESP32 hardcode `SPI_MODE0` và `SD.begin()` không có tham số mode. Xem mục 12.
 > - Lệnh Hack NOP (`0x00`) với TFT_DC=0 rồi kéo TFT_DC=1 trước mỗi phiên lấy SPI Mutex của NAND, giúp màn hình ST7789 bỏ qua dữ liệu giao tiếp với Flash.
 
 ---
@@ -890,6 +896,149 @@ tả "4x" — nên có thể chưa phải toàn bộ câu chuyện, hoặc "4x" 
 5. Sau khi nạp firmware NSL3 lần đầu: tin nhắn cũ (nếu còn) bị xoá 1 lần — xác nhận đúng dự kiến.
 6. Message tạo từ card mới xuất hiện trên Firebase với `type:"image"` (không phải `"static"`) và có
    `bg_music_url` khi có đính kèm audio.
+
+---
+
+## 12. PHASE 4 — Hoàn thiện tầng lưu trữ THẺ SD (2026-09-04, CHƯA flash/test máy thật)
+
+> Đánh số **12** để chừa §10/§11 cho nhánh `security-hardening` đang viết song song — hai nhánh cùng
+> append vào cuối file này, trùng số sẽ thành xung đột đúng vùng đã được dặn tránh.
+
+Bối cảnh: module SD sắp hàn **thay thế** W25Q128 trên đúng bộ chân cũ (kể cả CS = GPIO 8), hai chip
+không bao giờ cùng nằm trên bo. `SDStorageProvider` trước đó mới là scaffold Phase 3A, **không chạy được**.
+
+### Quyết định đã CHỐT với user (2026-09-04)
+- **20 slot** trên thẻ (NAND giữ 3 vì bị giới hạn 16MB).
+- **Trạng thái hàng chờ nằm trên THẺ** (`/media/index.bin`), KHÔNG dùng NVS — để trạng thái đi theo dữ
+  liệu khi rút/cắm thẻ, tránh cảnh NVS báo "có tin chưa đọc" mà file đã biến mất theo thẻ.
+- Làm trên nhánh `main` tại worktree gốc. `ACTIVE_STORAGE_TYPE` **giữ `STORAGE_TYPE_NAND`** khi commit.
+
+### Vì sao 20 slot KHÔNG cần đụng class cha
+`IStorageProvider` trao đổi hoàn toàn bằng **chuỗi identifier**, không có hàm nào trả về slot index hay
+bitmask. `_unreadBitmask` là private member của riêng `NandStorageProvider` (`NandStorageProvider.h:56`).
+Bản SD dùng **1 byte cờ `unread` mỗi slot** trong manifest nên vượt trần 8 thoải mái.
+Ràng buộc thật sự duy nhất: `NetworkManager.cpp:1043,1178` khai báo `char writeSlotId[16]` → identifier
+phải ≤ 15 ký tự (đang dùng thập phân trần `"0"`…`"19"`, 2 ký tự).
+
+### Bug NGHIÊM TRỌNG đã tìm ra và sửa: không có thẻ = treo cứng box
+`main.cpp:398-404` chạy `while (1) { delay(100); }` khi `storage->init()` trả `false`.
+`NandStorage::init()` **không bao giờ** trả false nên nhánh này chưa từng chạy trong đời.
+`SD.begin()` thì trả false mỗi khi thẻ vắng/lỏng/không phải FAT — tình huống **bình thường** với thẻ rút
+được. Bản cũ `SDStorageProvider::init()` trả thẳng kết quả mount ra ngoài.
+→ **`init()` giờ LUÔN trả `true`**; không mount được thì chạy ở chế độ rỗng (`isFull()` trả true để hệ
+thống không cố tải, `hasUnreadMessage()`/`getUnreadCount()` trả 0).
+
+### Xung đột SPI mode (nguy cơ nhiễu hình lớn nhất) — đã xử lý
+Thư viện `SD` của Arduino-ESP32 **hardcode `SPI_MODE0`** (`sd_diskio.cpp`, struct `AcquireSPI`, cả 2
+constructor) và `SD.begin()` **không có tham số mode** → phía SD không dời được. Đã kiểm chứng trực tiếp
+trong source `~/.platformio/packages/framework-arduinoespressif32/`.
+→ Thêm `SPI_BUS_MODE` vào `config.h`, gate bằng `ACTIVE_STORAGE_TYPE`: **0 cho SD, 3 cho NAND**.
+`DisplayDriver.h:19` đọc hằng số này. Bản NAND commit ra cấu hình LovyanGFX **giống hệt trước**.
+`Panel_ST7789` của LovyanGFX vốn mặc định mode 0 nên đây không phải hạ cấp.
+Comment `Mode 3 (obligatory)` ở `DisplayDriver.h:9` là **SAI**, đã sửa (xem đính chính ở §2).
+
+**Bẫy đã tránh:** NOP hack ở `NandStorage::acquireSPI()` mở `SPISettings(..., SPI_MODE3)`. Copy nguyên
+sang `SDCardManager` là **tái tạo đúng cú lật CPOL đang muốn khử**. Bản SD dùng `SPI_BUS_MODE`.
+
+### Tổ chức thư mục trên thẻ
+```
+/media/index.bin      manifest 488B (hàng chờ + metadata 20 slot), giữ trong RAM
+/media/slot_NN.bin    media — layout GIỐNG HỆT slot NAND:
+                        [4B kích thước][header container 16B][payload][AUDC + audio]
+/media/slot_NN.txt    caption sidecar (chỉ tạo khi tin có text)
+```
+- **Audio nối vào CÙNG file** với video (như NAND) → `readAt(dataSize + k)` chỉ là đọc offset tuyệt đối,
+  **`AudioPlayer` không phải sửa dòng nào**, không rủi ro regression bản NAND.
+- **Caption để file sidecar** chứ không nhét manifest: 256B × 20 = 5KB RAM thường trú, quá đắt trên
+  ESP32-C3 nơi §8 đang giành từng KB cho TLS handshake.
+- Mọi đường dẫn dựng từ **index đã parse**, không bao giờ từ chuỗi thô → diệt tận gốc bug cũ:
+  `buildFilePath()` map `"0"`→`/media/0.bin` nhưng `"slot_0"`→`/media/slot_0.bin`, trong khi đường ghi
+  trả `"slot_0"` còn `getFirstValidIdentifier()` trả `"0"` → **ghi và đọc trỏ 2 file khác nhau**.
+
+### Các bug khác của bản SD cũ đã sửa
+| Bug | Hậu quả |
+|---|---|
+| `seek()` là hàm rỗng | Toàn bộ đường đọc `MediaPlayer` chạy bằng `seek()` → **không phát được gì** |
+| `readAt()` không override (mặc định trả 0) | `AudioPlayer` fail ở bước kiểm magic `AUDC` → **câm vĩnh viễn** |
+| `isFull()` cứng `false` + `getNextWriteSlotIdentifier()` luôn trả `"slot_0"` | **Mọi lượt tải ghi đè cùng 1 file** |
+| `getItemInfo()` cứng `type=VIDEO, fps=15`, `dataSize` = cả file | Sai metadata; còn gọi `getFileSize()` (I/O thật) **mỗi frame** vì `main.cpp:183` gọi nó mỗi vòng `player.update()` |
+| `getNextValidIdentifier()` hardcode `% 5` | Sai với mọi slot count khác 5 |
+| `Serial.println` nhưng `main.cpp` không `Serial.begin()` | **Mọi lỗi SD vô hình** → đã đổi hết sang `DLOG` |
+
+### Chi tiết cài đặt đáng nhớ
+- **`_hdrPeek`**: chụp 16 byte header container vào RAM ngay trong `writeChunk` khi con trỏ ghi còn dưới
+  20, thay vì đọc ngược từ file lúc `closeWrite()` như NAND (NAND đọc lại được vì ghi thẳng flash; SD
+  còn buffer stdio xen giữa). Sentinel `dataSize == 4` rơi ra miễn phí: nhánh text-only không ghi gì →
+  `_hdrPeek` toàn 0 → nhánh `else` → `VIMG/4/fps=1/frames=1`, đúng y bản NAND.
+- **Back-patch 4 byte tiền tố**: `seek(0)` trên chính handle `"w"` đang mở rồi ghi 4 byte. `"w"` là
+  `O_TRUNC` — cắt file xảy ra lúc **open**, không phải lúc write, nên ghi đè đầu file không làm ngắn file.
+  Phương án dự phòng nếu sai: đóng rồi mở lại mode `"r+"`.
+- **`openForAppend()` seek tới `slots[idx].dataSize`, KHÔNG phải EOF** → header `AUDC` rơi đúng offset mà
+  `AudioPlayer::loadFromStorage()` dò (`readAt(dataSize, ...)`), kể cả sentinel `dataSize == 4`.
+- **`readAt()` dùng file handle THỨ HAI** (`_atFile` trong `SDCardManager`). Seek-rồi-seek-lại trên một
+  handle chung chính là bug mà comment ở `IStorageProvider.h:44-47` tồn tại để chặn — mỗi vòng
+  `MediaPlayer::update()` chạy `readAt`→`readData`→`readAt` liên tục.
+- **`closeWrite()` và `discardWrite()` đều XOÁ file `.txt`**: NAND miễn nhiễm vì `setSlotInfo()` `memset`
+  cả `SlotEntry` (giết luôn `textLen`); sidecar không có ràng buộc đó nên caption tin cũ sẽ hiện đè lên
+  tin mới dùng lại slot.
+- **`SD.begin()` mặc định 4MHz** → quá chậm cho video 15fps. Đang đặt `SD_SPI_FREQ_HZ = 20MHz`.
+- **`discardWrite()` có 2 nhiệm vụ** (giống NAND): huỷ phiên chưa commit, VÀ undo slot **đã commit** —
+  đường "tin nhắn tĩnh" gọi `closeWrite()` trước rồi mới biết audio có tải được không.
+
+### Quy tắc đã áp dụng cho code mới (đừng phá khi sửa sau)
+- `DLOG` **phải nằm ngoài** vùng giữ mutex: `ScreenLogger::render()` lấy chính `spiMutex` (không đệ quy,
+  timeout 50ms). Một `DLOG` đặt nhầm trong `writeChunk` (chạy mỗi 2KB) tốn 50ms/chunk và **trông y hệt
+  lỗi mạng**. Vì vậy `writeChunk`/`appendChunk` cố tình không có log nào ở nhánh thành công.
+- Mọi lời gọi `SD.*` / `File.*` phải nằm trong `acquireSPI()/releaseSPI()`; không `acquireSPI()` lồng nhau.
+- `getItemInfo()` và `isFull()` **thuần RAM, zero I/O** (bị gọi mỗi frame / mỗi tick UI).
+- **KHÔNG dùng `File::size()`** để tính `dataSize`: `VFSFileImpl::size()` gọi `stat()` → trả kích thước
+  trên đĩa, bỏ sót phần còn trong buffer stdio. Phải đếm bằng giá trị `fwrite`/`write` **trả về**.
+- `lib/NandStorage/*` phải có **0 dòng thay đổi** — đừng "dọn" 4 literal `SPI_MODE3` ở đó sang hằng số mới.
+
+### Đã cân nhắc và LOẠI (đừng đào lại)
+- `index.bak` / temp+rename cho manifest: manifest cụt đã tự fail magic check và rơi về "hàng chờ rỗng,
+  file còn nguyên" — backup cũ dẫn tới đúng trạng thái đó chỉ sau 1 tin nhắn, không đáng thêm code.
+- **Dựng lại manifest bằng cách quét file trên thẻ**: không tách được `dataSize` khỏi `audioSize` từ file
+  → cho ra playback **sai một cách tự tin** (audio câm + frame rác) thay vì "không có tin" trung thực.
+- Trần dung lượng mỗi slot trong `writeChunk`: giới hạn thật của SD là dung lượng trống, `fwrite` trả
+  short count là tín hiệu tự nhiên (NAND cần `_slotCapacity` vì slot là vùng flash cố định).
+
+### CHƯA build/flash/test — cần user xác minh
+> **Không tháo NOR cho tới khi xác minh xong Phase A của nhánh bảo mật.**
+
+1. **Bản NAND sau khi sửa `DisplayDriver.h`**: màn hình/đồng hồ/video/audio y như cũ (`SPI_BUS_MODE` = 3).
+2. Bản SD, thẻ trắng: có thể thấy chớp nhiễu ngắn lúc `SD.begin()` — đó là NOP hack đang chạy, không phải
+   lỗi. Lần redraw kế tiếp phải sạch.
+3. **Phép thử phân biệt lệch khung byte**: phát tin **ảnh tĩnh + voice** (state `SHOWING`, nơi overlay
+   `ScreenLogger` vẫn bật — `MediaPlayer.cpp:308` chỉ tắt cho `PLAYING`). Nhìn chữ overlay render sạch
+   30s+ trong lúc audio chạy. Tin video che mất triệu chứng này hoàn toàn.
+4. Boot **không thẻ**: standby vẫn vẽ, **không treo**, hiện `[SDP] khong co the`.
+5. Hexdump `/media/slot_00.bin` sau khi tải video: byte 0..3 = LE (filesize − audioSize − 4); byte 4..7 =
+   `SLBX`/`VJPG`/`VIMG`; tại offset `dataSize` có ASCII `AUDC`. Một phép kiểm này xác thực cùng lúc
+   back-patch, parse `_hdrPeek`, và gốc append.
+6. Tin chỉ text/voice: file đúng `4 + 10 + audio` byte, `dataSize == 4`, phát ra màn đen + chữ + tiếng,
+   **không** lỗi `Bad jpegSize`.
+7. Tải 20 tin không đọc → tin thứ 21 báo full. Đọc 1 tin → lượt tải kế rơi vào **đúng slot đó**.
+8. Ép lỗi giữa chừng (rút Wi-Fi ~50%): `slot_NN.bin` **và** `.txt` biến mất, sync sau retry **đúng slot cũ**.
+9. Tái dùng slot: tin có caption vào slot 3 → đánh dấu đã đọc → tin không caption vào slot 3 →
+   **không còn caption cũ trên màn hình**.
+10. Tự chữa lành, **hai kiểu hỏng khác nhau**, phải thử cả hai:
+    - **Xoá** 1 file `.bin` trên máy tính rồi cắm lại → `getNextUnreadIdentifier()` bỏ cờ unread, đi tiếp.
+    - **Cắt ngắn** 1 file `.bin` (giữ file nhưng xén bớt byte) → `openForRead()` phải trả false với log
+      `slot N cut:`. Đây là kiểu hỏng mà `fileExists()` KHÔNG thấy; nếu lọt thì mỗi frame sẽ đâm vào
+      `Read short` + `delay(2000)` của MediaPlayer, treo hình từng nhịp 2 giây.
+11. `Read short` / `Bad jpegSize` khi phát trên SD = độ trễ đọc, **không phải lỗi logic** → nghi can đầu
+    là `SD_SPI_FREQ_HZ` (thử hạ 10MHz), thứ hai là class thẻ. `[NET] dl STALL` chỉ xuất hiện ở bản SD →
+    thử bỏ dòng `setBufferSize(512)` trong `SDCardManager::openFileForWrite()`.
+
+### Rủi ro còn treo (đo, đừng thiết kế vòng quanh)
+- **Tốc độ nạp audio**: `AudioPlayer::tick()` gọi tới ~6 lần `readAt` 256B, 2 lần mỗi frame. Đã thêm bước
+  bỏ qua seek khi đúng vị trí (`_atPos`) + readahead stdio, nhưng đây là dự đoán thông lượng, chỉ phần
+  cứng mới chốt được. Cần lever đầu tiên: `SD_SPI_FREQ_HZ`.
+- **Heap**: mỗi `File` mở cấp 1 buffer stdio; kích thước mặc định 4096 chỉ áp dụng **có điều kiện**
+  (`vfs_api.cpp:301`, khi `st_blksize == 0`) nên chi phí thật **chưa kiểm chứng**. Có 2 read handle sống
+  cùng lúc với `_jpegBuffer` 32KB của `MediaPlayer`. Nếu `[PLAY] JPEG buf alloc fail` xuất hiện ở bản SD
+  mà không có ở NAND thì đây là nguyên nhân → gọi `setBufferSize()` cho các read handle.
 
 
 

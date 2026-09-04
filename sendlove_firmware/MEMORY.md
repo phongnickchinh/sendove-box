@@ -1254,3 +1254,69 @@ backend đi qua Admin SDK cũng bypass; web không hề import `database` (đã 
 kèm token và vẫn tải được. Ai biết `bin_url` vẫn lấy được video/voice của người dùng. Siết chỗ này
 phải làm cùng lúc với việc cho box xác thực khi tải, nếu không là chết đường media (xem "ẩn số"
 ở §11).
+
+---
+
+## 14. ĐANG TRUY: video + audio giật liên tục sau flash Phase B (2026-09-05)
+
+### Triệu chứng chính xác (user báo trên máy thật)
+
+Video và âm thanh giật, ngắt quãng **liên tục và đều đặn**, bất kể tin nhắn ngắn hay dài, có chữ
+đi kèm hay không. **Nhưng tổng thời lượng phát vẫn kết thúc đúng bằng thời lượng video.**
+
+Chi tiết cuối cùng quan trọng hơn vẻ ngoài: thời lượng do `maxDisplayTime` trong metadata điều
+khiển (`main.cpp`, nhánh `STATE_VIDEO`), **không** do audio. Nên "thời lượng đúng" KHÔNG chứng
+minh audio khoẻ — nó chỉ nói playback chạy theo đồng hồ, frame nào hỏng thì bị bỏ qua chứ không
+làm lệch timeline.
+
+### ĐÃ LOẠI TRỪ — đừng test lại
+
+1. **Cả 4 thay đổi Phase B (B1–B4).** Từng cái một:
+   - B1 chỉ chạy ở nhánh **timer wakeup**, và `player.stop()` được gọi ngay trước đó → không có
+     gì đang phát lúc nháy đèn.
+   - B2: `loop()` chỉ `vTaskDelay(500ms)`; `Task_MediaPlayer` lặp ~20 lần/giây (mỗi vòng decode
+     một frame 40–60ms). Vài chục lần đọc atomic mỗi giây là không đáng kể.
+   - B3 chỉ nằm trong vòng lặp **tải**, và guard chỉ bắn khi vượt 5,5 MB.
+   - B4 nằm trong `playItem()` (dòng 130–323), chạy **một lần mỗi tin**; `update()` mãi dòng 324
+     mới bắt đầu. Hơn nữa nó ở nhánh ảnh tĩnh nên video không bao giờ chạm tới.
+2. **Bug I2S sample rate ở §9** (`stop()` không reset rate phần cứng). **User đã tắt nguồn hẳn
+   rồi bật lại — KHÔNG hết giật.** Bug đó có đặc trưng "reset là hết" vì `init()` mở lại I2S ở
+   rate mặc định; reset không cứu được nghĩa là không phải nó. (Bug vẫn còn nguyên trong code,
+   vẫn cần sửa, nhưng **không phải** thủ phạm của lần này.)
+3. **"Revert về flash 1 vẫn lỗi" KHÔNG loại được đường ghi.** Hai lý do, cả hai đều bị bỏ sót lúc
+   đầu: (a) `7c1ac23` là **con** của `eb3c9b2` nên flash 1 CŨNG chứa bản ghi 20MHz; (b) byte hỏng
+   đã nằm sẵn trên NAND, lùi firmware không sửa dữ liệu đã ghi. Phát lại đúng những tin đó thì
+   bản nào cũng giật y hệt.
+
+### Phép thử hỏng — ghi lại để không dùng lại
+
+"Nhìn overlay log lúc phát để tìm `Bad jpegSize`" là **vô dụng**: video đẩy frame lên màn hình
+~20 lần/giây nên dòng log bị vẽ đè ngay. Không thấy overlay **không** có nghĩa là không có lỗi.
+Và dự án không dùng Serial (`Serial.begin()` đã bỏ, xem đầu `main.cpp`) nên không có đường đọc
+log nào khác trong lúc phát.
+
+### Giả thuyết đang thử (commit `31fdd1f`)
+
+`eb3c9b2` là commit gốc mà `security-hardening` rẽ ra — **có trước toàn bộ việc bảo mật, không
+phải của Phase A hay Phase B**. Nó làm 2 việc lớn ở tầng NAND, chưa cái nào được xác minh trên
+máy thật:
+- Nâng SPI **đường ghi** 4MHz → 20MHz. Chính commit đó ghi sẵn cảnh báo và cách lùi.
+- Đổi chiến lược erase sang **erase-as-you-write** (erase 1 block 64KB rồi erase tiếp khi con trỏ
+  ghi sắp chạm vùng chưa erase), thay cho erase nguyên slot 5,3MB. Đây là thay đổi rủi ro hơn
+  tốc độ, và **chưa được soi kỹ** — bất biến `_erasedUpToAddr` phải luôn đúng, sai một nhịp là
+  xoá đè lên dữ liệu vừa ghi.
+
+`31fdd1f` hạ đường ghi về 4MHz để thử. **Chưa build, chưa flash.**
+
+### Cách test cho đúng
+
+Đổi tốc độ ghi **chỉ ảnh hưởng tin tải về SAU khi flash**. Phải tải tin **mới hoàn toàn** rồi mới
+đánh giá. Phát lại tin cũ sẽ vẫn giật và dễ kết luận nhầm là "sửa không ăn".
+
+### Nếu vẫn giật
+
+Cắt đôi không gian tìm kiếm: flash `bc0f80a` (commit ngay **trước** `eb3c9b2`), tải tin mới, phát.
+- Sạch → thủ phạm nằm trong `eb3c9b2`, và vì tốc độ đã bị loại nên nghi can còn lại là
+  erase-as-you-write / `SPI.writeBytes()` bulk / `NandStorageProvider` (+59 dòng, **chưa ai đọc
+  kỹ**).
+- Vẫn giật → nguyên nhân có **trước** `eb3c9b2`, quay lại soi đường phát và `AudioPlayer::tick()`.

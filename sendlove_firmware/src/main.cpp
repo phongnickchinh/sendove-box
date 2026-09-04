@@ -292,15 +292,25 @@ void Task_UIController(void *pvParameters) {
         activeSleepTimeoutMs = 2000;
 
         // Nháy đèn xanh dương (GPIO 8 - Bản SuperMini, trùng chân NAND CS) để báo hiệu wakeup ngầm.
-        // Cực kì an toàn vì lúc này (vừa thức dậy) bus SPI hoàn toàn rảnh, chưa kích hoạt Sync.
-        pinMode(8, OUTPUT);
-        digitalWrite(8, LOW);  // Đèn sáng (Active LOW) / NAND CS ghim xuống
-        delay(30);
-        digitalWrite(8, HIGH); // Đèn tắt / NAND CS nhả ra
-        delay(70);
-        digitalWrite(8, LOW);
-        delay(30);
-        digitalWrite(8, HIGH);
+        // Đây là chỉ báo timer-wake DUY NHẤT còn lại: wakeupFlash() (DisplayDriver.cpp:171)
+        // giờ chỉ gọi gpio_hold_dis(), tên hàm đã lỗi thời, không nháy gì cả. User chốt giữ đèn.
+        //
+        // PHẢI giữ spiMutex suốt đoạn nháy. Comment cũ ghi "bus SPI hoàn toàn rảnh" là SAI:
+        // Task_MediaPlayer có thể đang đẩy pixel lên SCK/MOSI, mà GPIO 8 chính là CS của
+        // W25Q128. Ghim CS xuống LOW 30ms trong lúc có xung clock -> NAND chốt nhầm opcode.
+        // Giữ mutex triệt tiêu đúng cơ chế đó (CS LOW mà không có clock là vô hại).
+        // Chi phí: giữ mutex ~160ms lúc vừa thức, chấp nhận được.
+        if (appCtx.display.acquireSPI()) {
+          pinMode(8, OUTPUT);
+          digitalWrite(8, LOW);  // Đèn sáng (Active LOW) / NAND CS ghim xuống
+          delay(30);
+          digitalWrite(8, HIGH); // Đèn tắt / NAND CS nhả ra
+          delay(70);
+          digitalWrite(8, LOW);
+          delay(30);
+          digitalWrite(8, HIGH);
+          appCtx.display.releaseSPI();
+        }
       }
 
       // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm

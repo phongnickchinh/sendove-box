@@ -654,9 +654,15 @@ void NetworkManager::addAuthHeader(HTTPClient& http) {
 // sinh String tam — khai bao tuong minh khong ton them gi.
 void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
 #if FIREBASE_USE_IDTOKEN
-    if (_authHeaderValue[0] != '\0') {
+    // Kiem do dai chu KHONG chi kiem [0] nhu addAuthHeader(): o day ta doc tu
+    // offset 7, ma bat bien "buffer luon rong hoac 'Bearer <jwt khac rong>'" nam
+    // trong parseAuthResponse() chu khong nhin thay duoc tai cho nay. Neu sau nay
+    // ai doi tien to hoac them duong ghi khac, guard nay bien loi doc tran bo dem
+    // thanh no-op thay vi hong am tham.
+    static const size_t kBearerPrefixLen = 7;   // do dai cua "Bearer "
+    if (strlen(_authHeaderValue) > kBearerPrefixLen) {
         String h = "Firebase ";
-        h += (_authHeaderValue + 7);
+        h += (_authHeaderValue + kBearerPrefixLen);
         http.addHeader("Authorization", h);
     }
 #else

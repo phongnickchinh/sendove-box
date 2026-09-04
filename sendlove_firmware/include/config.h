@@ -140,4 +140,42 @@ static constexpr uint16_t AUDIO_DMA_BUF_LEN    = 512;   // samples per DMA buffe
 // đúng cao độ. File PCM trên NAND vẫn 8kHz, không đổi.
 static constexpr uint8_t  AUDIO_OVERSAMPLE     = 4;
 
+// ============================================================
+// SD Card Storage (chỉ có tác dụng khi ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD)
+// ============================================================
+// Module SD THAY THẾ chip W25Q128 trên đúng bộ chân cũ (SCK 4 / MOSI 6 / MISO 5),
+// dùng lại luôn CS = GPIO 8. Hai chip không bao giờ cùng nằm trên bo.
+static constexpr uint8_t PIN_SD_CS = PIN_NAND_CS;
+
+// 20 slot tin nhắn trên thẻ (NAND chỉ có NAND_SLOT_COUNT = 3 vì bị giới hạn 16MB).
+// Bản SD dùng 1 byte cờ unread cho mỗi slot trong manifest, KHÔNG dùng bitmask
+// uint8_t như NandStorageProvider, nên không bị trần 8 slot.
+static constexpr uint8_t SD_SLOT_COUNT = 20;
+
+// SD.begin() mặc định 4MHz — quá chậm cho video 15fps (đọc 1 frame JPEG ~15KB
+// đã ăn hết ngân sách 66ms). Thư viện tự hạ về 400kHz trong lúc init rồi mới
+// dùng con số này. Hạ xuống 10MHz nếu breadboard sinh "Read short"/"Bad jpegSize".
+static constexpr uint32_t SD_SPI_FREQ_HZ = 20000000;
+
+static constexpr const char *SD_MEDIA_DIR = "/media";
+static constexpr const char *SD_MANIFEST_PATH = "/media/index.bin";
+
+// Trần caption lưu trong file sidecar — bằng SLOT_TEXT_MAX_LEN của bản NAND
+// để hai bản hiển thị giống hệt nhau.
+static constexpr uint16_t SD_TEXT_MAX_LEN = 256;
+
+// MODE SPI DÙNG CHUNG CHO CẢ BUS (LovyanGFX + storage).
+// ST7789 không có chân CS nên thấy mọi byte trên bus. Đổi CPOL giữa hai chủ bus
+// làm chân SCK nhảy mức lúc idle -> sinh 1 sườn LÊN giả -> ST7789 chốt nhầm 1 bit
+// -> lệch khung byte (chính là "lệch bit do SCK Idle nhảy" ở MEMORY.md mục 2).
+// Thư viện SD của Arduino-ESP32 HARDCODE SPI_MODE0 (sd_diskio.cpp, struct
+// AcquireSPI) và SD.begin() không có tham số mode -> phía SD KHÔNG dời được.
+// Vậy khi chạy thẻ SD phải kéo cả bus về MODE0. Panel_ST7789 của LovyanGFX vốn
+// mặc định mode 0 nên đây không phải hạ cấp. Bản NAND giữ nguyên MODE3.
+#if ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD
+static constexpr uint8_t SPI_BUS_MODE = 0;
+#else
+static constexpr uint8_t SPI_BUS_MODE = 3;
+#endif
+
 #endif // CONFIG_H

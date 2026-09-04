@@ -6,7 +6,13 @@
 #include <LovyanGFX.hpp>
 #include <esp_sleep.h>
 
-/// LovyanGFX configuration for ST7789 240x240 (CS-less, Mode 3 (obligatory), Shared SPI2)
+/// LovyanGFX configuration for ST7789 240x240 (CS-less, Shared SPI2)
+/// SPI mode KHONG co dinh: lay theo SPI_BUS_MODE trong config.h, doi theo
+/// ACTIVE_STORAGE_TYPE (MODE3 cho NAND, MODE0 cho the SD). Ghi chu cu ghi
+/// "Mode 3 (obligatory)" la SAI: ca 2 mode deu lay mau o suon LEN, cai bat
+/// buoc la CA BUS DUNG CHUNG MOT MODE (ST7789 khong co CS nen doi CPOL giua
+/// hai chu bus sinh 1 suon len gia -> lech khung byte). Thu vien SD hardcode
+/// MODE0 nen bien the SD phai keo ca bus ve 0.
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI _bus_instance;
@@ -16,7 +22,7 @@ public:
     {
       auto cfg = _bus_instance.config();
       cfg.spi_host = SPI2_HOST;
-      cfg.spi_mode = 3;
+      cfg.spi_mode = SPI_BUS_MODE;
       // 40MHz thay vi 20MHz. Day mot frame 240x240 RGB565 = 921.600 bit;
       // o 20MHz rieng phan day len LCD da ton ~46ms, trong khi ngan sach
       // mot frame o 15fps chi la 66ms -> cong them giai ma JPEG (~22ms) va

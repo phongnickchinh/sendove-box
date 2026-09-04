@@ -1236,8 +1236,20 @@ comment `/// Flash backlight 3x` đều đã lỗi thời, **không nháy gì c�
 1. ✅ **XONG 2026-09-04** — `firebase deploy --only database --project iot-app-839a2`.
    RTDB giờ trả **401** cho cả đọc lẫn ghi khi không auth (bảng đo ở §11).
    ⚠️ **Vẫn đừng chạy `--only storage`** — sẽ làm chết đường tải media (xem §11).
-2. Flash `7c1ac23` **một mình** và chạy 6 mục xác minh Phase A ở §10.
-3. Sau khi Phase A đạt → flash tiếp 4 commit Phase B, đọc `[PLAY] stack hwm=` để quyết B4 bước 2.
+2. ✅ **Phase A + Phase B đã chạy trên máy thật 2026-09-05** — nhưng theo đường khác kế hoạch:
+   user flash thẳng `31fdd1f` (chứa cả A lẫn B) thay vì flash `7c1ac23` riêng. Box **tải được
+   tin nhắn mới có media và phát bình thường** với `FIREBASE_TLS_VERIFY 1`.
+   → Suy ra được, không cần đo thêm: mục 1–3 của danh sách xác minh Phase A ở §10 **đã đạt**.
+   Đặc biệt **mục 3 — chứng minh GTS Root R4 cho Storage** — là mục quan trọng nhất, vì tải
+   được media nghĩa là chain Storage verify thành công. Mục 1–2 (NTP trước Firebase, status →
+   flags → messages không `-1`) cũng phải đã chạy trọn, nếu không thì không có tin nào về.
+3. **CÒN LẠI, chưa xác minh** (đừng coi Phase A là xong hẳn):
+   - §10 mục 4 — bật tay `sync_alarms_flag = true` trên Console rồi sync. `syncFirebaseAlarms()`
+     là client TLS **duy nhất không chạy trong chu trình boot-and-sync thường**, nên lỗi ở đó
+     vẫn đang ẩn và sẽ lộ ra vào lần báo thức sau, lúc đó trông như bug mới.
+   - §10 mục 5 — đọc số sau `[NET] GET OK len=N heap=`, kỳ vọng > ~60KB.
+   - B4 — đọc `[PLAY] stack hwm=` (nhớ: **phải gửi tin CÓ CHỮ**, cả 2 lời gọi nằm trong
+     `if getItemText`). Chỉ làm B4 bước 2 nếu số đó < ~1024.
 
 ### Sau khi deploy rules: điều gì đổi, điều gì KHÔNG
 
@@ -1257,7 +1269,24 @@ phải làm cùng lúc với việc cho box xác thực khi tải, nếu không 
 
 ---
 
-## 14. ĐANG TRUY: video + audio giật liên tục sau flash Phase B (2026-09-05)
+## 14. ✅ ĐÃ TÌM RA & XÁC MINH: video + audio giật do SPI GHI NAND 20MHz (2026-09-05)
+
+> **KẾT LUẬN: tốc độ SPI đường GHI 20MHz mà `eb3c9b2` đặt vào là thủ phạm.** Breadboard không
+> chịu nổi → dữ liệu tải về hỏng âm thầm → frame JPEG decode trượt (giật hình) + PCM lỗi (giật
+> tiếng), trong khi thời lượng vẫn đúng vì playback chạy theo đồng hồ.
+> **Hạ về 4MHz (`31fdd1f`) + tải tin mới → user xác nhận chạy ổn trên máy thật.**
+>
+> Biến số được cô lập sạch: giữa bản giật (`4cc7651`) và bản chạy (`31fdd1f`) **chỉ khác đúng
+> tốc độ ghi**. Erase vốn đã là 4MHz ở `4cc7651` (con số 20MHz user sửa chỉ nằm trong working
+> tree, chưa từng được flash); đọc giữ 20MHz ở cả hai bản.
+>
+> **KHÔNG nâng lại đường ghi trên breadboard này.** Nếu sau này lên PCB thật trace ngắn thì có
+> thể thử lại, nhưng bắt buộc phải xác minh bằng **tin tải mới hoàn toàn** — tin cũ đã nằm sẵn
+> trên NAND nên không phản ánh gì.
+>
+> Ghi công đúng chỗ: session viết `eb3c9b2` đã tách riêng hằng số và ghi sẵn cảnh báo *"REVERT
+> 1 DÒNG nếu breadboard không chịu nổi"* kèm đúng dấu hiệu nhận biết. Thiết kế đó đã tiết kiệm
+> nguyên một vòng truy lỗi.
 
 ### Triệu chứng chính xác (user báo trên máy thật)
 
@@ -1306,17 +1335,20 @@ máy thật:
   tốc độ, và **chưa được soi kỹ** — bất biến `_erasedUpToAddr` phải luôn đúng, sai một nhịp là
   xoá đè lên dữ liệu vừa ghi.
 
-`31fdd1f` hạ đường ghi về 4MHz để thử. **Chưa build, chưa flash.**
+`31fdd1f` hạ đường ghi về 4MHz. **User đã build, flash, tải tin mới → chạy ổn.** Đóng hồ sơ.
 
-### Cách test cho đúng
+### Được minh oan luôn trong cùng lần test
+
+Bản chạy ổn (`31fdd1f`) **chứa toàn bộ** Phase A + Phase B, và chỉ khác bản giật đúng tốc độ ghi.
+Nên cùng lúc cũng loại được:
+- **erase-as-you-write** của `eb3c9b2` — giữ nguyên, không đụng, mà hết lỗi.
+- **`SPI.writeBytes()` bulk** của `eb3c9b2` — giữ nguyên, không đụng, mà hết lỗi.
+- `NandStorageProvider.cpp` (+59 dòng) — vẫn chưa ai đọc kỹ, nhưng không còn là nghi can.
+
+### Cách test cho đúng (ghi lại cho lần sau)
 
 Đổi tốc độ ghi **chỉ ảnh hưởng tin tải về SAU khi flash**. Phải tải tin **mới hoàn toàn** rồi mới
-đánh giá. Phát lại tin cũ sẽ vẫn giật và dễ kết luận nhầm là "sửa không ăn".
-
-### Nếu vẫn giật
-
-Cắt đôi không gian tìm kiếm: flash `bc0f80a` (commit ngay **trước** `eb3c9b2`), tải tin mới, phát.
-- Sạch → thủ phạm nằm trong `eb3c9b2`, và vì tốc độ đã bị loại nên nghi can còn lại là
-  erase-as-you-write / `SPI.writeBytes()` bulk / `NandStorageProvider` (+59 dòng, **chưa ai đọc
-  kỹ**).
-- Vẫn giật → nguyên nhân có **trước** `eb3c9b2`, quay lại soi đường phát và `AudioPlayer::tick()`.
+đánh giá. Phát lại tin cũ sẽ vẫn giật và dễ kết luận nhầm là "sửa không ăn". Đây là bẫy đã suýt
+làm hỏng chẩn đoán: user revert về flash 1 rồi phát lại tin cũ, thấy vẫn lỗi, và điều đó KHÔNG
+loại được đường ghi như tưởng — vì `7c1ac23` cũng là con của `eb3c9b2` nên cũng ghi ở 20MHz, và
+byte hỏng thì đã nằm sẵn trên NAND rồi.

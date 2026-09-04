@@ -13,6 +13,7 @@
 #include "config.h"
 #include <Arduino.h>
 #include <SPI.h>
+#include <atomic>
 
 // ============================================================================
 // SENDLOVE BOX — Main Firmware (Phase 3A: Storage Abstraction Layer)
@@ -49,7 +50,17 @@ static QueueHandle_t eventQueue = nullptr;
 
 enum class AppState { STATE_STANDBY, STATE_VIDEO };
 
-AppState currentAppState = AppState::STATE_STANDBY;
+// Đọc/ghi từ 3 task (MediaPlayer, UIController, vòng lặp chính) nên phải atomic.
+// 18 chỗ dùng đều là so sánh/gán trực tiếp (đã grep), không chỗ nào bind qua `auto`,
+// nên operator T() / operator= ngầm phủ hết, không cần sửa chỗ nào khác.
+//
+// KHÔNG lock-free: ESP32-C3 là RV32IMC, thiếu extension 'A' cho atomic sub-word.
+// Link được là nhờ ESP-IDF cấp sẵn bản emulation (đã verify bằng nm:
+// __atomic_load_1/store_1/exchange_1 đều là 'T' trong sdk/esp32c3/lib/libnewlib.a).
+// Emulation chạy bằng cách tắt ngắt — rẻ, nhưng đừng gọi từ ISR. Hiện không chỗ nào
+// gọi từ ISR: main.cpp không có IRAM_ATTR nào, chỗ duy nhất trông giống callback
+// (setPlaybackActiveCallback) chạy trong task context.
+std::atomic<AppState> currentAppState{AppState::STATE_STANDBY};
 
 const char *defaultLayoutJson = R"({
   "theme_name": "Default Card Theme",

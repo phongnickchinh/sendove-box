@@ -1128,3 +1128,86 @@ Phase D (signed URL từ backend) giải quyết gọn hơn hướng direct-RTDB
 
 Refresh token nằm trong NVS = cùng bản dump flash với firmware. `esptool read_flash` vẫn lấy được.
 Chỉ **Flash Encryption + Secure Boot** mới chống, chưa bàn tới.
+
+---
+
+## 13. Phase B — VULN-03/07/09/10 đã code (2026-09-04)
+
+> Cố ý bỏ trống số 12: nhánh `main` đã dùng `## 12` cho tầng lưu trữ thẻ SD. Hai nhánh **chưa
+> merge** (`security-hardening` rẽ tại `eb3c9b2`, main đi thêm 4 commit SD). Khi nào merge thì
+> đánh số lại, đừng để hai mục 12.
+
+**Tất cả CHƯA BUILD, CHƯA FLASH, CHƯA TEST TRÊN MÁY THẬT.** Mỗi món một commit riêng, cố ý:
+`7c1ac23` vẫn là "Phase A đứng một mình" để flash xác minh TLS mà không lẫn thứ gì khác.
+
+| Commit | Mục | Nội dung |
+|---|---|---|
+| `fb00498` | B1 / VULN-03 | Bọc đoạn nháy GPIO 8 trong `spiMutex` |
+| `07ba6d9` | B2 / VULN-07 | `currentAppState` → `std::atomic<AppState>` |
+| `1f18bf5` | B3 / VULN-09 | Trần `MAX_MEDIA_BYTES` ở **cả hai** vòng lặp tải |
+| `fe64a6b` | B4 bước 1 / VULN-10 | Đo stack high-water-mark, **chưa** refactor |
+
+### Điều đã đo, không phải suy đoán
+
+- **`std::atomic<AppState>` KHÔNG lock-free trên ESP32-C3.** Chip là RV32IMC, thiếu extension
+  `A` cho atomic sub-word. Link được là nhờ ESP-IDF cấp sẵn bản emulation — verify bằng
+  `riscv32-esp-elf-nm --defined-only tools/sdk/esp32c3/lib/libnewlib.a`, thấy
+  `__atomic_load_1` / `__atomic_store_1` / `__atomic_exchange_1` đều là `T`. Emulation chạy
+  bằng cách **tắt ngắt** ⇒ không được gọi từ ISR. Hiện an toàn: `main.cpp` không có `IRAM_ATTR`
+  nào, và chỗ duy nhất trông giống callback (`setPlaybackActiveCallback`) chạy trong task context.
+- **18 chỗ dùng `currentAppState`** (19 dòng grep ra, 1 là comment), **toàn bộ nằm trong
+  `main.cpp`**, đều là so sánh/gán trực tiếp. Không chỗ nào bind qua `auto` → `operator T()` /
+  `operator=` ngầm phủ hết. Đã grep `auto.*currentAppState` trên cả `src` và `lib`: rỗng.
+  Kiểm việc này *trước* khi sửa là bắt buộc — agent không build được, một lỗi compile tốn nguyên
+  một lượt flash của user.
+- **`showWrappedText()` dùng ~1196 B một khung stack**: `char lines[16][48]` = 768 B +
+  `buf[300]` + `currentLine[64]` + `trial[64]`. `TASK_STACK_MEDIA_PLAYER` = 6144.
+  Tỉ lệ đó *có vẻ* ổn nhưng chưa ai đo đường sâu nhất — nên bước 1 chỉ đặt
+  `DLOG("[PLAY] stack hwm=%u", uxTaskGetStackHighWaterMark(nullptr))`.
+  **Chỉ làm bước 2 (bỏ `lines[16][48]`, đổi sang 2 lượt) nếu con số đo được < ~1024.**
+- **Khoảng cách 2 slot NAND đầu** = `0x560000 - 0x010000` = `0x550000` = 5.570.560 B, nên
+  `MAX_MEDIA_BYTES = 5.500.000` nằm vừa dưới một slot.
+
+### Bẫy đã dính, ghi để khỏi dính lại
+
+- **Hai vòng lặp tải dùng hai cờ lỗi KHÁC NHAU.** Video: `totalRead` → `writeError`.
+  `downloadVoiceSegment()`: `aTotalRead` → `aWriteError` (rồi `ok = !aWriteError`). Đặt nhầm cờ
+  thì slot dở không bị loại ở bước kiểm tra của chính vòng đó.
+- **`core.autocrlf = true`, repo KHÔNG có `.gitattributes`.** Nghĩa là blob trong repo luôn là
+  LF, working tree là CRLF. Sửa `MediaPlayer.cpp` xong thì file trong working tree bị đổi sang
+  LF — *lịch sử không hỏng* (git normalize khi commit, diff vẫn đúng +7 dòng), nhưng file lệch
+  so với bản checkout sạch. Khôi phục bằng `rm <file> && git checkout -- <file>`.
+  Kiểm sau mỗi lần sửa: `file -b <path> | grep CRLF`.
+
+### Comment SAI đã sửa lại trong code
+
+`main.cpp` chỗ nháy GPIO 8 ghi *"Cực kì an toàn vì lúc này bus SPI hoàn toàn rảnh"* — **sai**.
+`Task_MediaPlayer` có thể đang đẩy pixel lên SCK/MOSI, mà GPIO 8 chính là CS của W25Q128; ghim CS
+LOW 30 ms trong lúc có xung clock thì NAND chốt nhầm opcode. Giữ `spiMutex` triệt tiêu đúng cơ chế
+đó (CS LOW mà không có clock là vô hại). Chi phí: giữ mutex ~160 ms lúc vừa thức, lúc SPI rảnh.
+
+Giữ đèn (không xoá) theo quyết định user: đây là chỉ báo timer-wake **duy nhất** còn lại, vì
+`wakeupFlash()` (`DisplayDriver.cpp:171`) giờ chỉ gọi `gpio_hold_dis()` — tên hàm và cả doc
+comment `/// Flash backlight 3x` đều đã lỗi thời, **không nháy gì cả**. Chưa sửa doc comment đó
+(ngoài phạm vi).
+
+### CỐ Ý KHÔNG LÀM
+
+- **`isSyncing()`** — báo cáo Gemini nói quá. 4 cờ `volatile`, nhưng `_isSyncing` một mình đã phủ
+  trọn chu trình (set trong `portENTER_CRITICAL` ở `triggerWakeupSync`, clear cuối `syncWakeup`),
+  nên đọc gộp 4 cờ không tạo cửa sổ nào mà đọc 1 cờ không có. **Không mở lại.**
+- **`Object.create(null)` cho `seen[n.ssid]`** (`captive_portal_html.h:165`) — hệ quả tối đa là
+  giấu 1 mạng tên `__proto__` khỏi danh sách, không phải XSS. Để đó.
+- **Phase C** (mòn Sector 0) — hoãn, số liệu ~4,5 năm ở §10.
+- **Mật khẩu WPA2 cho AP `SendloveBox-Setup` + CSRF cho `/save`** — là **quyết định sản phẩm**
+  (đánh đổi trải nghiệm setup), chờ user quyết. Hiện `startProvisioningAP()` mặc định
+  `apPassword = ""` (`NetworkManager.h:84`) và `main.cpp:445` gọi không truyền mật khẩu ⇒ **AP mở**.
+- **Phase D** — chờ user chốt hướng + 3 ẩn số ở §10.
+
+### Việc user phải làm, chưa ai làm
+
+1. **`firebase deploy --only database --project iot-app-839a2`** — vẫn là món **duy nhất** đóng
+   được lỗ hổng đang sống đã chứng minh bằng curl ở §11. Agent bị classifier chặn deploy production.
+   ⚠️ **Đừng chạy `--only storage`** — sẽ làm chết đường tải media (xem §11).
+2. Flash `7c1ac23` **một mình** và chạy 6 mục xác minh Phase A ở §10.
+3. Sau khi Phase A đạt → flash tiếp 4 commit Phase B, đọc `[PLAY] stack hwm=` để quyết B4 bước 2.

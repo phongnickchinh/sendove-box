@@ -642,6 +642,28 @@ void NetworkManager::addAuthHeader(HTTPClient& http) {
 #endif
 }
 
+// Firebase Storage KHONG nhan scheme "Bearer" — no doi "Firebase <idToken>".
+// Day la ly do phai co ham rieng thay vi dung lai addAuthHeader():
+// `_authHeaderValue` giu san chuoi "Bearer <jwt>" cho RTDB, khong tai su dung duoc.
+//
+// Lay JWT tho bang cach bo 7 ky tu dau ("Bearer "), doi chieu voi cho sinh chuoi:
+// snprintf(outHeader, headerLen, "Bearer %s", idTok) o parseAuthResponse().
+//
+// Dung String thay vi buffer stack ~1.4KB: TASK_STACK_NETWORK chi 6144 va cho nay
+// da nam sau trong call-chain. addHeader() nhan const String& nen dang nao cung
+// sinh String tam — khai bao tuong minh khong ton them gi.
+void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
+#if FIREBASE_USE_IDTOKEN
+    if (_authHeaderValue[0] != '\0') {
+        String h = "Firebase ";
+        h += (_authHeaderValue + 7);
+        http.addHeader("Authorization", h);
+    }
+#else
+    (void)http;
+#endif
+}
+
 void NetworkManager::noteAuthFailure(int httpCode, const char* where) {
 #if FIREBASE_USE_IDTOKEN
     if (httpCode == 401 || httpCode == 403) {
@@ -1033,7 +1055,10 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
     bool ok = false;
     if (httpAudio.begin(client, voiceUrl.c_str())) {
         httpAudio.setTimeout(30000);
+        // Bat buoc khi storage.rules da siet: khong co header nay thi Storage tra 403.
+        addStorageAuthHeader(httpAudio);
         int aCode = httpAudio.GET();
+        noteAuthFailure(aCode, "voice");
         if (aCode == HTTP_CODE_OK) {
             int aLen = httpAudio.getSize();
             WiFiClient* aStream = httpAudio.getStreamPtr();
@@ -1393,8 +1418,11 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             
             if (http.begin(client, fullUrl.c_str())) {
                 http.setTimeout(30000);
+                // Bat buoc khi storage.rules da siet: khong co header nay thi Storage tra 403.
+                addStorageAuthHeader(http);
                 int code = http.GET();
                 if (code < 0) logTlsError(client, "media");
+                noteAuthFailure(code, "media");
                 if (code == HTTP_CODE_OK) {
                     int len = http.getSize();
                     int initialLen = len;

@@ -161,6 +161,11 @@ private:
     /// Gắn header Authorization vào request (no-op khi còn dùng Database Secret)
     void addAuthHeader(class HTTPClient& http);
 
+    /// Như trên nhưng cho Firebase Storage — scheme KHÁC: "Firebase <idToken>",
+    /// KHÔNG phải "Bearer". Không dùng lại được `_authHeaderValue` vì nó giữ sẵn
+    /// dạng Bearer cho RTDB. Cũng no-op khi còn dùng Database Secret.
+    void addStorageAuthHeader(class HTTPClient& http);
+
     /// Gọi sau mỗi request: 401 nghĩa là token chết -> ép lấy lại ở chu kỳ sau
     void noteAuthFailure(int httpCode, const char* where);
 

@@ -302,6 +302,13 @@ bool MediaPlayer::playItem(const char* identifier) {
                 int32_t bandY = (SCREEN_HEIGHT * 2) / 3;
                 _display->showWrappedText(asciiCaption, 8, bandY, SCREEN_WIDTH - 16, SCREEN_HEIGHT - bandY - 8);
             }
+            // ĐO, chưa sửa. showWrappedText() cấp char lines[16][48] = 768B trên stack,
+            // trong khi TASK_STACK_MEDIA_PLAYER từng bị hạ 8192->6144 mà CHƯA HỀ ĐO
+            // (MEMORY.md §9.7). Đây là đường dùng stack sâu nhất của task này, nên đo
+            // ngay tại đây. Chỉ refactor sang 2 lượt nếu con số này < ~1024.
+            // Trên ESP-IDF hàm trả về BYTES (không phải words như FreeRTOS gốc) —
+            // đọc thẳng, đừng nhân 4.
+            DLOG("[PLAY] stack hwm=%u", (unsigned)uxTaskGetStackHighWaterMark(nullptr));
         }
     } else {
         _state = PlaybackState::PLAYING;

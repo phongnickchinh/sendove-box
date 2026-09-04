@@ -1081,6 +1081,13 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                             aTotalRead += c;
                             if (aLen > 0) aLen -= c;
                             aLastProgressMs = millis();
+                            // Tran cung — dat aWriteError (khong phai writeError) de
+                            // slot dang do bi loai o buoc kiem tra cua chinh vong nay.
+                            if (aTotalRead > (int)MAX_MEDIA_BYTES) {
+                                DLOG("[NET] audio dl ABORT: over cap %d", aTotalRead);
+                                aWriteError = true;
+                                break;
+                            }
                         }
                     }
                     // Cung dang treo vo han nhu vong lap video.
@@ -1442,6 +1449,12 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                     totalRead += c;
                                     if (len > 0) len -= c;
                                     lastProgressMs = millis();
+                                    // Tran cung: dung ngay thay vi tai vai phut roi chet cho khac.
+                                    if (totalRead > (int)MAX_MEDIA_BYTES) {
+                                        DLOG("[NET] dl ABORT: over cap %d", totalRead);
+                                        writeError = true;
+                                        break;
+                                    }
                                     // Log thua tay (moi 16KB) de khong doi nhip vong lap.
                                     if (totalRead - lastLoggedRead >= 16384) {
                                         lastLoggedRead = totalRead;

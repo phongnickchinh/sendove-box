@@ -66,6 +66,15 @@ static constexpr uint8_t NAND_SLOT_COUNT = 3;
 static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
     0x010000, 0x560000, 0xAB0000};
 
+// Tran kich thuoc mot lan tai media. Khoang cach 2 slot dau la
+// 0x560000-0x010000 = 0x550000 = 5.570.560 byte, nen 5.500.000 nam vua duoi
+// mot slot.
+// Day KHONG phai lop chan tran bo nho — writeChunk() da chan o _slotCapacity
+// tu truoc. Day la thoat som + log ro ly do: truoc do mot URL tra ve stream
+// vo tan (hoac Content-Length noi doi) khien box tai vai phut roi moi chet o
+// cho khac, khong ai biet vi sao.
+static constexpr uint32_t MAX_MEDIA_BYTES = 5500000;
+
 // Firebase Configuration (Lưu trong config_secrets.h để chống lộ API trên Git)
 #include "config_secrets.h"
 

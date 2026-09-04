@@ -310,7 +310,8 @@ void Task_UIController(void *pvParameters) {
         // Task_MediaPlayer có thể đang đẩy pixel lên SCK/MOSI, mà GPIO 8 chính là CS của
         // W25Q128. Ghim CS xuống LOW 30ms trong lúc có xung clock -> NAND chốt nhầm opcode.
         // Giữ mutex triệt tiêu đúng cơ chế đó (CS LOW mà không có clock là vô hại).
-        // Chi phí: giữ mutex ~160ms lúc vừa thức, chấp nhận được.
+        // Chi phí: giữ mutex 160ms, cộng tối đa 1000ms chờ (timeout mặc định của
+        // acquireSPI) trong trường hợp xấu. Lúc vừa thức thì SPI thường rảnh.
         if (appCtx.display.acquireSPI()) {
           pinMode(8, OUTPUT);
           digitalWrite(8, LOW);  // Đèn sáng (Active LOW) / NAND CS ghim xuống
@@ -321,6 +322,10 @@ void Task_UIController(void *pvParameters) {
           delay(30);
           digitalWrite(8, HIGH);
           appCtx.display.releaseSPI();
+        } else {
+          // Bắt buộc phải log: đèn này là chỉ báo timer-wake duy nhất, nên "không
+          // nháy mà không nói gì" sẽ bị hiểu nhầm là B1 làm hỏng đèn.
+          DLOG("[WAKE] blink skip: spi busy");
         }
       }
 

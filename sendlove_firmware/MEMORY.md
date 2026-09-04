@@ -1165,6 +1165,16 @@ Chỉ **Flash Encryption + Secure Boot** mới chống, chưa bàn tới.
   Tỉ lệ đó *có vẻ* ổn nhưng chưa ai đo đường sâu nhất — nên bước 1 chỉ đặt
   `DLOG("[PLAY] stack hwm=%u", uxTaskGetStackHighWaterMark(nullptr))`.
   **Chỉ làm bước 2 (bỏ `lines[16][48]`, đổi sang 2 lượt) nếu con số đo được < ~1024.**
+  Đã verify hàm này biên dịch được: `INCLUDE_uxTaskGetStackHighWaterMark` = **1** ở
+  `tools/sdk/esp32c3/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h:186`
+  (số `0` ở `FreeRTOS.h:178` chỉ là fallback `#ifndef`, không áp dụng).
+  ⚠️ **Đọc con số cho đúng nghĩa**: hàm trả về mức trống thấp nhất trong **toàn bộ đời task**,
+  không phải của riêng khung `showWrappedText`. Nên `< 1024` có nghĩa "task này chật ở đâu đó",
+  chưa chứng minh `showWrappedText` là thủ phạm. Muốn quy trách nhiệm thì phải đo thêm một điểm
+  nữa ở nhánh không có caption rồi so.
+  ⚠️ **Dòng log chỉ xuất hiện khi tin nhắn CÓ caption** — cả hai lời gọi `showWrappedText` nằm
+  trong `if (_storage->getItemText(...))`. Test bằng video trơn sẽ không thấy gì và dễ tưởng là
+  bản build không ăn.
 - **Khoảng cách 2 slot NAND đầu** = `0x560000 - 0x010000` = `0x550000` = 5.570.560 B, nên
   `MAX_MEDIA_BYTES = 5.500.000` nằm vừa dưới một slot.
 

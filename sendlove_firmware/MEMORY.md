@@ -1617,3 +1617,45 @@ sai kiểu. Cả hai đều chỉ lộ ra khi có **log nói rõ đã nhận đ�
 
 Nên đã thêm vào nhánh lỗi: `DLOG("[NET] auth: thieu idToken; body=%s", body.substring(0,60))`.
 60 ký tự đầu chỉ chứa `kind`/`error`, chưa tới chỗ có token nên không lộ bí mật.
+
+---
+
+## 19. ✅ LỖ HỔNG STORAGE ĐÃ ĐÓNG — đo trên bucket thật (2026-09-05)
+
+User đã chạy `firebase deploy --only storage --project iot-app-839a2`, CLI báo
+`released rules storage.rules to firebase.storage`.
+
+### Đo thật, đúng URL mà firmware dựng
+
+`https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/media%2FESP32_A1B2C3D4E5F6%2Fmsg_...%2Fvideo.bin?alt=media`
+
+| Cách gọi | Trước deploy | Sau deploy |
+|---|---|---|
+| không auth | 200 | **403** ✅ |
+| `Authorization: Firebase <idToken>` | 200 | **206** ✅ |
+| `Authorization: Bearer <idToken>` | 200 | **206** |
+
+206 = Partial Content, đúng vì probe dùng `-r 0-0` xin 1 byte; đó là **thành công**.
+
+### Ẩn số của §11 đã giải xong
+
+§11 ghi "gửi `Authorization: Firebase <idToken>` là giả thuyết chưa verify được, vì Storage đang
+mở nên token rác cũng trả 200". Giờ Storage đã siết nên đo được, và **scheme đó đúng**.
+
+Phát hiện phụ: Storage nhận **cả hai** scheme `Firebase` và `Bearer`. Khác hẳn RTDB (§17) vốn từ
+chối cả hai. Nên lựa chọn `Firebase` trong `addStorageAuthHeader()` là an toàn, không phải sửa.
+
+### Trạng thái bảo mật hiện tại
+
+- ✅ RTDB: đóng với người ngoài (§11), và box đã hạ quyền xuống `auth.uid === $box_id` thật sự
+  vì `FIREBASE_USE_IDTOKEN 1` đã chạy trên máy thật.
+- ✅ Storage: đóng, chỉ box đọc được media của chính nó.
+- ⚠️ Còn lại: AP `SendloveBox-Setup` vẫn mở + `/save` không CSRF (quyết định sản phẩm, chờ user).
+- ⚠️ Còn lại: refresh token nằm trong NVS = cùng bản dump flash. Chỉ Flash Encryption +
+  Secure Boot mới chống, chưa bàn tới.
+
+### Lưu ý cho phiên sau: Simulator KHÔNG phải bằng chứng
+
+Rules Simulator trong Console chỉ chạy thử biểu thức rule, **không** chứng minh hệ thống thật đã
+đổi. Bằng chứng là request HTTP thật tới bucket production, như bảng trên. Cùng loại sai lầm đã
+làm §11 kết luận sai về header RTDB.

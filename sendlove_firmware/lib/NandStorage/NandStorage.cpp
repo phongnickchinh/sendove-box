@@ -26,7 +26,7 @@ static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 // ĐỌC (readRaw) — nằm trong luồng PHÁT, tốc độ ở đây có giá trị thật: đọc chậm
 // thì giữ spiMutex lâu, giành bus với render JPEG lên ST7789 và gây giật (xem
 // MEMORY.md §8). 20MHz có từ commit 8d9ef7d, đã chạy lâu và ổn định.
-static const SPISettings NAND_READ_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE3);
+static const SPISettings NAND_READ_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
 // GHI (writeRaw) — HẠ TỪ 20MHz VỀ 4MHz ĐỂ CHẨN ĐOÁN (2026-09-05), CHƯA phải kết luận.
 // eb3c9b2 nâng đường này 4->20MHz và chính commit đó ghi sẵn: "REVERT 1 DÒNG nếu

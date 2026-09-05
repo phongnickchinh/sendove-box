@@ -1271,12 +1271,35 @@ phải làm cùng lúc với việc cho box xác thực khi tải, nếu không 
 
 ---
 
-## 14. ✅ ĐÃ TÌM RA & XÁC MINH: video + audio giật do SPI GHI NAND 20MHz (2026-09-05)
+## 14. ✅ ĐÃ TÌM RA & XÁC MINH: video + audio giật do SPI NAND chạy 20MHz (2026-09-05)
 
-> **KẾT LUẬN: tốc độ SPI đường GHI 20MHz mà `eb3c9b2` đặt vào là thủ phạm.** Breadboard không
-> chịu nổi → dữ liệu tải về hỏng âm thầm → frame JPEG decode trượt (giật hình) + PCM lỗi (giật
-> tiếng), trong khi thời lượng vẫn đúng vì playback chạy theo đồng hồ.
-> **Hạ về 4MHz (`31fdd1f`) + tải tin mới → user xác nhận chạy ổn trên máy thật.**
+> ### 🔴 KẾT LUẬN CUỐI — đã sửa lại một lần, đọc kỹ chỗ này
+>
+> **20MHz trên breadboard này CHẬP CHỜN ở CẢ đường đọc lẫn đường ghi. Cấu hình ổn định duy nhất
+> là 4MHz cho cả ba hằng số.**
+>
+> Kết luận ban đầu ("chỉ đường GHI là thủ phạm") **chưa đầy đủ**. Diễn biến thật:
+> 1. `31fdd1f` hạ ghi 20→4MHz, giữ đọc ở 20MHz → user test → **ổn**.
+> 2. Ít lâu sau **giật quay lại** dù không đổi gì.
+> 3. User hạ nốt **đọc** xuống 4MHz → **phát mượt trở lại**.
+>
+> Bài học quan trọng hơn con số: **lỗi này không tái hiện mỗi lần.** Đường đọc chạy 20MHz ổn từ
+> `8d9ef7d` suốt nhiều tuần nên ai cũng tưởng nó an toàn — kể cả tôi, đã viết vào comment rằng nó
+> "đã chạy lâu và ổn định". Một lần test đạt **không** chứng minh được gì với lỗi toàn vẹn tín
+> hiệu. Phải phát nhiều lần, nhiều tin.
+>
+> ### Điều bất ngờ đáng ghi nhớ
+>
+> §8 nói đọc chậm thì giữ `spiMutex` lâu, giành bus với render JPEG và **gây** giật. Thực tế
+> **ngược lại**: đọc chậm hơn 5 lần lại mượt hơn. Điều đó chứng minh vấn đề là **tính toàn vẹn dữ
+> liệu trên dây**, không phải tranh chấp bus. Khi hai giả thuyết đối nghịch, con số đo được trên
+> máy thật thắng lý thuyết kiến trúc.
+>
+> Cơ chế gây triệu chứng vẫn như mô tả bên dưới: dữ liệu hỏng âm thầm → frame JPEG decode trượt
+> (giật hình) + PCM lỗi (giật tiếng), trong khi thời lượng vẫn đúng vì playback chạy theo đồng hồ.
+>
+> **Đừng nâng lại bất kỳ đường nào trên breadboard.** Lên PCB thật trace ngắn thì thử lại được,
+> nhưng phải đo bằng tin tải MỚI và phát NHIỀU LẦN.
 >
 > Biến số được cô lập sạch: giữa bản giật (`4cc7651`) và bản chạy (`31fdd1f`) **chỉ khác đúng
 > tốc độ ghi**. Erase vốn đã là 4MHz ở `4cc7651` (con số 20MHz user sửa chỉ nằm trong working

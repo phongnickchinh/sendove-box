@@ -23,12 +23,23 @@ static constexpr uint8_t W25Q_READ_STATUS_1  = 0x05;
 // sector khác, mất dữ liệu im lặng. Canh bạc tệ nhất trong ba đường.
 static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
-// ĐỌC (readRaw) — nằm trong luồng PHÁT, tốc độ ở đây có giá trị thật: đọc chậm
-// thì giữ spiMutex lâu, giành bus với render JPEG lên ST7789 và gây giật (xem
-// MEMORY.md §8). 20MHz có từ commit 8d9ef7d, đã chạy lâu và ổn định.
+// ĐỌC (readRaw) — HẠ 20MHz -> 4MHz ngày 2026-09-05, sau khi giật QUAY LẠI dù
+// đường ghi đã ở 4MHz. Hạ nốt đường đọc thì phát mượt trở lại (user xác nhận).
+//
+// Lý thuyết ở §8 nói ngược: đọc chậm thì giữ spiMutex lâu, giành bus với render
+// JPEG và gây giật. Thực tế bác lại — đọc CHẬM HƠN 5 lần lại MƯỢT HƠN. Điều đó
+// chứng minh vấn đề là TÍNH TOÀN VẸN DỮ LIỆU trên dây, không phải tranh chấp
+// bus. 20MHz trên breadboard này chập chờn, không phải hỏng hẳn: nó từng chạy
+// ổn suốt từ 8d9ef7d nên rất dễ tưởng là an toàn.
+//
+// Đừng nâng lại trên breadboard. Lên PCB thật trace ngắn thì thử lại được,
+// nhưng phải đo bằng tin tải MỚI và phát nhiều lần — lỗi này không tái hiện
+// mỗi lần.
 static const SPISettings NAND_READ_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
-// GHI (writeRaw) — HẠ TỪ 20MHz VỀ 4MHz ĐỂ CHẨN ĐOÁN (2026-09-05), CHƯA phải kết luận.
+// GHI (writeRaw) — HẠ 20MHz -> 4MHz (2026-09-05). Ban đầu là để chẩn đoán, giờ
+// đã thành kết luận: cả ba đường đều chạy 4MHz và đó là cấu hình duy nhất phát
+// mượt ổn định trên breadboard này.
 // eb3c9b2 nâng đường này 4->20MHz và chính commit đó ghi sẵn: "REVERT 1 DÒNG nếu
 // breadboard không chịu nổi: dấu hiệu là dữ liệu tải về bị hỏng (ảnh nhiễu /
 // Bad jpegSize / audio rè bất thường)". User gặp đúng lớp triệu chứng đó.

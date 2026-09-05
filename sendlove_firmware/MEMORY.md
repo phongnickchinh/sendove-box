@@ -1548,3 +1548,49 @@ PATCH chạy an toàn vì đúng lúc đó cả 3 trường firmware ghi (`sync_
 `addStorageAuthHeader()` dùng `Authorization: Firebase <idToken>` — đó là scheme **Storage** ghi
 trong tài liệu, khác dịch vụ nên kết quả của RTDB ở trên **không bác bỏ nó**. Vẫn chưa verify được
 vì Storage đang mở (token rác cũng 200), đúng như §11 đã ghi. Verify sau khi deploy storage.rules.
+
+---
+
+## 18. Endpoint auth của Google trả **chunked** — không đọc bằng stream thô (2026-09-05)
+
+### Triệu chứng trên máy thật
+
+```
+[NET] auth: thieu idToken
+[NET] sync abort: khong lay duoc idToken
+```
+
+Không kèm `signIn fail` (nên POST đã trả **200**) và không kèm `auth JSON err` (nên parse **không
+hề lỗi**). Nghĩa là parse thành công nhưng `doc["idToken"]` rỗng — nghe vô lý, và đó chính là manh mối.
+
+### Nguyên nhân gốc
+
+`parseAuthResponse()` đọc qua `http.getStreamPtr()` — **stream thô, chưa giải mã chunked**. Đo thật:
+
+| Endpoint | Encoding |
+|---|---|
+| `identitytoolkit.googleapis.com` (signInWithPassword) | **chunked**, không Content-Length |
+| `securetoken.googleapis.com` (refresh) | **chunked** |
+| RTDB `...firebasedatabase.app` | `Content-Length` ✅ |
+
+Với chunked, stream thô chứa nguyên dòng kích thước chunk dạng hex trước JSON:
+`4a1\r\n{"kind":...`. ArduinoJson đọc phải `4a1`, **parse `4` thành một SỐ, kết thúc THÀNH CÔNG**,
+rồi `doc["idToken"]` trên một số thì trả null → báo "thiếu idToken" mà không có lỗi JSON nào.
+
+Chỉ `http.getString()` mới giải mã chunked. Đã đổi cả **hai** đường auth sang `getString()`.
+
+### Vì sao đường messages KHÔNG dính
+
+`checkAndDownloadNewMessages()` cũng parse bằng stream thô (`deserializeJson(doc, *stream)`),
+nhưng **RTDB gửi `Content-Length`** nên không có chunk header. Đó là lý do nó luôn chạy đúng.
+**Đừng "sửa" chỗ đó** — zero-copy stream parse ở đó là cố ý, tránh cấp phát String lớn.
+Nếu ngày nào RTDB đổi sang chunked thì nó sẽ hỏng đúng kiểu này.
+
+### Bài học
+
+Hai lần liên tiếp (§17 và §18) đều là **cùng một kiểu lỗi**: một tầng im lặng trả về thứ trông
+như thành công. §17 là header bị từ chối mà không phân biệt được; §18 là parse "thành công" ra
+sai kiểu. Cả hai đều chỉ lộ ra khi có **log nói rõ đã nhận được gì**.
+
+Nên đã thêm vào nhánh lỗi: `DLOG("[NET] auth: thieu idToken; body=%s", body.substring(0,60))`.
+60 ký tự đầu chỉ chứa `kind`/`error`, chưa tới chỗ có token nên không lộ bí mật.

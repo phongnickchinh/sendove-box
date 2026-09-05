@@ -729,7 +729,13 @@ bool NetworkManager::ensureIdToken(bool force) {
 // Dùng filter của ArduinoJson để CHỈ cấp phát 3 trường cần thiết — response
 // signInWithPassword còn kèm email/localId/kind..., cấp phát trọn gói là phí
 // heap đúng lúc sắp cần ~45KB cho handshake TLS kế tiếp.
-static bool parseAuthResponse(Stream& body, char* outToken, size_t tokenLen,
+// Nhan String chu KHONG phai Stream. Ly do (do that 2026-09-05, MEMORY.md muc 18):
+// ca identitytoolkit lan securetoken tra "Transfer-Encoding: chunked", khong co
+// Content-Length. http.getStreamPtr() cho ra stream THO con nguyen dong kich thuoc
+// chunk dang hex, vi du "4a1\r\n{...}". ArduinoJson doc phai "4a1" -> parse "4"
+// thanh mot SO, ket thuc THANH CONG, roi doc["idToken"] = null -> bao
+// "thieu idToken" ma khong he co loi JSON. Chi http.getString() moi giai ma chunked.
+static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLen,
                               time_t& outExpiry, char* outRefresh, size_t refreshLen,
                               bool snakeCase) {
     JsonDocument filter;
@@ -750,7 +756,10 @@ static bool parseAuthResponse(Stream& body, char* outToken, size_t tokenLen,
     const char* expires = doc[snakeCase ? "expires_in"    : "expiresIn"];
 
     if (idTok == nullptr || idTok[0] == '\0') {
-        DLOG("[NET] auth: thieu idToken");
+        // In dau response: khong co dong nay thi "thieu idToken" khong noi len
+        // duoc gi ca — da tung ton mot vong flash vi vay. 60 ky tu dau chi chua
+        // phan "kind"/"error", chua toi cho co token.
+        DLOG("[NET] auth: thieu idToken; body=%s", body.substring(0, 60).c_str());
         return false;
     }
     // Firebase trả expiresIn dạng CHUỖI giây ("3600"), không phải số.
@@ -804,11 +813,15 @@ bool NetworkManager::authWithRefreshToken(const char* refreshToken) {
     }
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
+    // getString() (KHONG phai getStreamPtr) vi response la chunked — xem ghi chu
+    // o parseAuthResponse. Doc xong roi end() ngay de tra connection som.
+    String resp = http.getString();
+    http.end();
+
     // snakeCase = true: endpoint securetoken dùng id_token/refresh_token/expires_in
-    bool ok = parseAuthResponse(*http.getStreamPtr(), _idToken,
+    bool ok = parseAuthResponse(resp, _idToken,
                                 sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), true);
-    http.end();
 
     if (ok && newRefresh[0] != '\0') {
         ConfigManager cfg;
@@ -853,11 +866,15 @@ bool NetworkManager::authWithPassword() {
     }
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
+    // getString() (KHONG phai getStreamPtr) vi response la chunked — xem ghi chu
+    // o parseAuthResponse. Doc xong roi end() ngay de tra connection som.
+    String resp = http.getString();
+    http.end();
+
     // snakeCase = false: endpoint identitytoolkit dùng idToken/refreshToken/expiresIn
-    bool ok = parseAuthResponse(*http.getStreamPtr(), _idToken,
+    bool ok = parseAuthResponse(resp, _idToken,
                                 sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), false);
-    http.end();
 
     if (ok && newRefresh[0] != '\0') {
         ConfigManager cfg;

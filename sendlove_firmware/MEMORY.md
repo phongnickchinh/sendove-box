@@ -1422,3 +1422,46 @@ này thì mọi request trả 401. Hướng direct-RTDB không dính, vì `BOX_I
 - (c) Deploy `database.rules.json` — ✅ **XONG 2026-09-04** (xem §11).
 
 Bật cờ khi chưa đủ (a) và (b) = box **mất kết nối hoàn toàn**.
+
+**Cập nhật 2026-09-05:** điều kiện (a) **ĐÃ XONG** — user bật Email/Password trên Console. Đo
+lại bằng REST: `PASSWORD_LOGIN_DISABLED` → `INVALID_LOGIN_CREDENTIALS`, nghĩa là provider đã
+xử lý yêu cầu, chỉ từ chối vì chưa có tài khoản đó. Còn lại mỗi (b).
+
+---
+
+## 16. Cấp danh tính cho box khi SẢN XUẤT HÀNG LOẠT — CHƯA LÀM (2026-09-05)
+
+### Vấn đề (chưa gây hại lúc này, nhưng chặn sản xuất)
+
+`BOX_ID`, `BOX_AUTH_EMAIL`, `BOX_AUTH_PASSWORD` đều là **hằng số biên dịch** trong
+`config_secrets.h`. `BOX_ID` dùng ở 7 chỗ trong `NetworkManager.cpp`, **không nơi nào suy ra từ
+MAC**. Nên mỗi box cần một bản firmware riêng → 1000 box = 1000 lần build + 1000 ảnh khác nhau.
+`provision_box_auth.js` cũng chỉ chạy một box mỗi lần và in mật khẩu đúng một lần.
+
+Vấn đề này có **trước** và **độc lập với** chuyện email/password — nó là chuyện danh tính nằm
+trong binary.
+
+### Quyết định của user: **phương án A — jig nạp tại xưởng**
+
+Lý do user nêu: **không muốn backend gánh thêm việc.**
+
+Đưa danh tính ra khỏi binary vào **NVS**, để mọi box dùng chung một ảnh firmware. Công cụ tại
+xưởng ghi `BOX_ID` + credentials vào NVS qua serial sau khi flash; script tạo hàng loạt tài khoản
+Auth và xuất ra file. Xác định, chạy offline, không phụ thuộc backend lúc sản xuất.
+
+### Phương án ĐÃ LOẠI: B — tự đăng ký ở lần boot đầu
+
+Box tự suy `BOX_ID` từ efuse MAC, gọi `POST /device/register` kèm provisioning key, backend tạo
+tài khoản rồi trả credentials, box lưu NVS. Backend đã dựng sẵn một nửa (`requireProvisioningKey`,
+sinh `device_secret`/`rcode`/`scode`), và làm hướng này thì **bỏ hẳn được email/password** — backend
+ký custom token cho `uid = BOX_ID`, không mật khẩu nào nằm trên thiết bị.
+
+**User bác vì không muốn backend làm quá nhiều.** Đừng đề xuất lại trừ khi user mở lại.
+
+### Trạng thái: CHƯA XỬ LÝ, cố ý
+
+Không nằm trong phạm vi hiện tại. Việc đang làm (bật Email/Password + chạy script cho **một** box)
+vẫn là đường ngắn nhất để kiểm chứng rules và luồng idToken trên máy thật. Bài toán sản xuất giải
+sau khi luồng này chạy được.
+
+Khi quay lại làm, việc thật sự phải làm là: bỏ 3 hằng số biên dịch, đọc từ NVS, và viết công cụ jig.

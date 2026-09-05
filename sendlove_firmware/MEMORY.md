@@ -1121,9 +1121,11 @@ build URL `?alt=media` **không kèm token**, chạy được chỉ vì Storage 
     `parseAuthResponse(..., bool snakeCase)` xử lý cả hai. `expiresIn` là **CHUỖI** giây, không phải số.
   - Dùng `DeserializationOption::Filter` chỉ cấp phát 3 trường cần — response còn kèm
     email/localId/kind, cấp phát trọn gói là phí heap đúng lúc sắp cần ~45KB cho handshake kế tiếp.
-  - **Token đi qua header `Authorization: Bearer`, KHÔNG qua `?auth=`** — idToken JWT dài ~900-1100
-    byte, nhét vào query sẽ tràn `url[256]`/`url[384]`. Đã kiểm chứng RTDB REST **có** parse header
-    này: token rác → `401 "Unauthorized request."`, khác hẳn `200` khi không gửi header.
+  - ~~**Token đi qua header `Authorization: Bearer`, KHÔNG qua `?auth=`**~~ 🔴 **SAI — xem §17.**
+    Lập luận về kích thước (`url[256]`/`url[384]` tràn) thì đúng, nhưng kết luận "RTDB có parse
+    header này" là **sai**, và cách kiểm chứng cũng sai: session đó thử bằng **token rác** lúc RTDB
+    còn mở toang, thấy không header → 200 còn header rác → 401, rồi suy ra header được chấp nhận.
+    Thực ra RTDB từ chối **mọi** `Bearer` không phải OAuth2 access token, hợp lệ hay rác đều 401.
   - `_authHeaderValue` giữ sẵn dạng `"Bearer <jwt>"` để `addHeader()` khỏi nối chuỗi; bọc trong
     `#if` để chế độ cũ không gánh 1.4KB BSS vô ích.
   - `noteAuthFailure()` gọi sau mỗi request: 401/403 thì hạ `_idTokenExpiry` để chu kỳ sau lấy token
@@ -1465,3 +1467,55 @@ vẫn là đường ngắn nhất để kiểm chứng rules và luồng idToken
 sau khi luồng này chạy được.
 
 Khi quay lại làm, việc thật sự phải làm là: bỏ 3 hằng số biên dịch, đọc từ NVS, và viết công cụ jig.
+
+---
+
+## 17. 🔴 LỖI CHẶN: RTDB KHÔNG nhận idToken qua header — chỉ qua `?auth=` (2026-09-05)
+
+### Đo thật, bằng token HỢP LỆ của chính box
+
+Sau khi tạo xong tài khoản Auth cho box, đăng nhập lấy idToken thật (945 byte,
+`localId = ESP32_A1B2C3D4E5F6` đúng bằng `BOX_ID`) rồi gọi
+`/boxes/ESP32_A1B2C3D4E5F6/status.json`:
+
+| Cách gửi | Kết quả |
+|---|---|
+| `Authorization: Bearer <idToken>` | **401** `"Unauthorized request."` |
+| `Authorization: Firebase <idToken>` | **401** |
+| `?auth=<idToken>` | **200** ✅ |
+| không gửi gì | 401 |
+
+**Kết luận: RTDB REST chỉ nhận idToken qua query `?auth=`.** Không scheme header nào chạy.
+`Bearer` ở RTDB dành cho **OAuth2 access token** của service account, không phải Firebase idToken.
+
+### Hệ quả: code trong `7c1ac23` bật lên là hỏng
+
+`fbAuthQuery()` ở chế độ idToken trả về **chuỗi rỗng** (vì token lẽ ra đi qua header), còn
+`addAuthHeader()` gắn `Bearer`. Nên bật `FIREBASE_USE_IDTOKEN 1` = **mọi request RTDB trả 401**.
+Chưa flash nên chưa ai thấy.
+
+Tin tốt: **rules thì ĐÚNG.** `?auth=` trả 200 chứng minh `auth.uid === $box_id` khớp và phân
+quyền chạy chuẩn. Chỉ sai chỗ vận chuyển token.
+
+### Vì sao không phát hiện sớm hơn
+
+Không phải lỗi bất cẩn đơn thuần — nó là bẫy đo lường: **không thể phân biệt "header bị từ chối"
+với "header được chấp nhận" khi cơ sở dữ liệu đang mở**, vì lúc đó thiếu header vẫn 200. Phải có
+rules siết + token thật mới đo được. Bài học: **đừng kiểm chứng cơ chế xác thực trên một hệ thống
+chưa bật xác thực.**
+
+### Vấn đề kích thước — có thật, phải giải cùng lúc
+
+Lập luận của §11 vẫn đúng: JWT ~945 byte, mà `authQ[64]` và `url[256]`/`url[384]` đều quá nhỏ.
+Nới thẳng các biến cục bộ này sẽ thêm ~2.8KB **stack** cho mỗi hàm, trong khi
+`TASK_STACK_NETWORK` chỉ **6144** → rủi ro tràn stack.
+
+Hướng đề xuất (CHƯA làm, chờ chốt): dựng URL vào **một buffer thành viên dùng chung** (~1.6KB BSS)
+thay vì biến cục bộ. An toàn về reentrancy vì toàn bộ các lời gọi này chạy tuần tự trong cùng
+network task.
+
+### Chưa đụng tới: đường Storage
+
+`addStorageAuthHeader()` dùng `Authorization: Firebase <idToken>` — đó là scheme **Storage** ghi
+trong tài liệu, khác dịch vụ nên kết quả của RTDB ở trên **không bác bỏ nó**. Vẫn chưa verify được
+vì Storage đang mở (token rác cũng 200), đúng như §11 đã ghi. Verify sau khi deploy storage.rules.

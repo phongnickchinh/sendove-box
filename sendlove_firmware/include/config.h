@@ -100,11 +100,18 @@ static constexpr uint8_t MAX_ALARMS = 10;
 //   (b) da chay `node scripts/provision_box_auth.js <BOX_ID>` va dien
 //       BOX_AUTH_EMAIL/BOX_AUTH_PASSWORD vao config_secrets.h
 //   (c) da deploy database.rules.json len dung instance `iot-app-839a2`
-#define FIREBASE_USE_IDTOKEN 0
+#define FIREBASE_USE_IDTOKEN 1
 
 // Trong idToken JWT cua Firebase (~900-1100 byte). De du bien 1400.
 static constexpr size_t FIREBASE_ID_TOKEN_MAX_LEN = 1400;
 static constexpr size_t FIREBASE_REFRESH_TOKEN_MAX_LEN = 400;
+
+// URL dai nhat: base ~160 byte (host + /messages/<BOX_ID>.json + orderBy +
+// startAt) cong "&auth=" cong ca idToken. Do RTDB CHI nhan token qua query
+// (do that 2026-09-05, xem MEMORY.md muc 17), khong cach nao tranh duoc.
+// Buffer nay la THANH VIEN cua NetworkManager, khong phai bien cuc bo: dat
+// tren stack thi moi ham ton them ~1.8KB trong khi TASK_STACK_NETWORK chi 6144.
+static constexpr size_t FIREBASE_URL_MAX_LEN = 1792;
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";

@@ -485,13 +485,23 @@ static void logTlsError(WiFiClientSecure& client, const char* where) {
 // - Che do cu: `?auth=<Database Secret>` nhu truoc.
 // `sep` la ky tu ngan cach dung cho URL do: '?' neu chua co query nao, '&' neu
 // da co san tham so khac.
-static void fbAuthQuery(char* out, size_t n, char sep) {
-    if (n == 0) return;
+// Noi tham so auth vao CUOI _url.
+//
+// Vi sao khong dung header: da do that 2026-09-05 bang idToken hop le cua chinh
+// box (945 byte, localId khop BOX_ID) tren /boxes/<BOX_ID>/status.json:
+//     Authorization: Bearer <idToken>    -> 401 "Unauthorized request."
+//     Authorization: Firebase <idToken>  -> 401
+//     ?auth=<idToken>                    -> 200
+// RTDB chi nhan `Bearer` cho OAuth2 access token cua service account, khong phai
+// Firebase idToken. Xem MEMORY.md muc 17. Dung sua nguoc lai.
+void NetworkManager::appendAuth(char sep) {
+    size_t len = strlen(_url);
+    if (len >= sizeof(_url)) return;
 #if FIREBASE_USE_IDTOKEN
-    (void)sep;
-    out[0] = '\0';
+    if (_idToken[0] == '\0') return;
+    snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, _idToken);
 #else
-    snprintf(out, n, "%cauth=%s", sep, FIREBASE_AUTH_SECRET);
+    snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, FIREBASE_AUTH_SECRET);
 #endif
 }
 
@@ -632,37 +642,22 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
 // securetoken đều về GTS Root R4 — đã có sẵn trong firebase_root_ca.h, không
 // phải nhúng thêm chứng chỉ nào.
 
-void NetworkManager::addAuthHeader(HTTPClient& http) {
-#if FIREBASE_USE_IDTOKEN
-    if (_authHeaderValue[0] != '\0') {
-        http.addHeader("Authorization", _authHeaderValue);
-    }
-#else
-    (void)http;
-#endif
-}
-
-// Firebase Storage KHONG nhan scheme "Bearer" — no doi "Firebase <idToken>".
-// Day la ly do phai co ham rieng thay vi dung lai addAuthHeader():
-// `_authHeaderValue` giu san chuoi "Bearer <jwt>" cho RTDB, khong tai su dung duoc.
+// Firebase Storage NGUOC voi RTDB: no CO nhan header, va scheme la
+// "Firebase <idToken>" (khong phai "Bearer"). Khac dich vu, khac quy uoc.
 //
-// Lay JWT tho bang cach bo 7 ky tu dau ("Bearer "), doi chieu voi cho sinh chuoi:
-// snprintf(outHeader, headerLen, "Bearer %s", idTok) o parseAuthResponse().
+// CHUA VERIFY DUOC tren may that: Storage hien dang mo nen gui token rac cung
+// tra 200, khong phan biet duoc "duoc chap nhan" voi "khong can thiet". Chi do
+// duoc sau khi deploy storage.rules. Day chinh la cai bay da lam muc 11 ket luan
+// sai ve header cua RTDB — dung lap lai kieu suy luan do.
 //
 // Dung String thay vi buffer stack ~1.4KB: TASK_STACK_NETWORK chi 6144 va cho nay
 // da nam sau trong call-chain. addHeader() nhan const String& nen dang nao cung
 // sinh String tam — khai bao tuong minh khong ton them gi.
 void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
 #if FIREBASE_USE_IDTOKEN
-    // Kiem do dai chu KHONG chi kiem [0] nhu addAuthHeader(): o day ta doc tu
-    // offset 7, ma bat bien "buffer luon rong hoac 'Bearer <jwt khac rong>'" nam
-    // trong parseAuthResponse() chu khong nhin thay duoc tai cho nay. Neu sau nay
-    // ai doi tien to hoac them duong ghi khac, guard nay bien loi doc tran bo dem
-    // thanh no-op thay vi hong am tham.
-    static const size_t kBearerPrefixLen = 7;   // do dai cua "Bearer "
-    if (strlen(_authHeaderValue) > kBearerPrefixLen) {
+    if (_idToken[0] != '\0') {
         String h = "Firebase ";
-        h += (_authHeaderValue + kBearerPrefixLen);
+        h += _idToken;
         http.addHeader("Authorization", h);
     }
 #else
@@ -692,7 +687,7 @@ bool NetworkManager::ensureIdToken(bool force) {
 #else
     // Trừ hao 60s: token còn hạn dưới 1 phút thì coi như hết, tránh trường hợp
     // hết hạn ngay giữa chu trình sync.
-    if (!force && _authHeaderValue[0] != '\0' && time(nullptr) < _idTokenExpiry - 60) {
+    if (!force && _idToken[0] != '\0' && time(nullptr) < _idTokenExpiry - 60) {
         return true;
     }
 
@@ -729,7 +724,7 @@ bool NetworkManager::ensureIdToken(bool force) {
 // Dùng filter của ArduinoJson để CHỈ cấp phát 3 trường cần thiết — response
 // signInWithPassword còn kèm email/localId/kind..., cấp phát trọn gói là phí
 // heap đúng lúc sắp cần ~45KB cho handshake TLS kế tiếp.
-static bool parseAuthResponse(Stream& body, char* outHeader, size_t headerLen,
+static bool parseAuthResponse(Stream& body, char* outToken, size_t tokenLen,
                               time_t& outExpiry, char* outRefresh, size_t refreshLen,
                               bool snakeCase) {
     JsonDocument filter;
@@ -757,11 +752,13 @@ static bool parseAuthResponse(Stream& body, char* outHeader, size_t headerLen,
     long ttl = (expires != nullptr) ? atol(expires) : 3600;
     if (ttl <= 0) ttl = 3600;
 
-    int n = snprintf(outHeader, headerLen, "Bearer %s", idTok);
-    if (n < 0 || (size_t)n >= headerLen) {
+    // Luu JWT THO. Truoc day luu "Bearer <jwt>" cho addHeader(), nhung RTDB
+    // khong nhan header — token phai di vao query `?auth=` (MEMORY.md muc 17).
+    int n = snprintf(outToken, tokenLen, "%s", idTok);
+    if (n < 0 || (size_t)n >= tokenLen) {
         // Cắt cụt token = mọi request sau đó 401 mà không rõ lý do. Thà báo hỏng.
         DLOG("[NET] auth: idToken qua dai (%d)", n);
-        outHeader[0] = '\0';
+        outToken[0] = '\0';
         return false;
     }
     outExpiry = time(nullptr) + ttl;
@@ -803,8 +800,8 @@ bool NetworkManager::authWithRefreshToken(const char* refreshToken) {
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
     // snakeCase = true: endpoint securetoken dùng id_token/refresh_token/expires_in
-    bool ok = parseAuthResponse(*http.getStreamPtr(), _authHeaderValue,
-                                sizeof(_authHeaderValue), _idTokenExpiry,
+    bool ok = parseAuthResponse(*http.getStreamPtr(), _idToken,
+                                sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), true);
     http.end();
 
@@ -852,8 +849,8 @@ bool NetworkManager::authWithPassword() {
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
     // snakeCase = false: endpoint identitytoolkit dùng idToken/refreshToken/expiresIn
-    bool ok = parseAuthResponse(*http.getStreamPtr(), _authHeaderValue,
-                                sizeof(_authHeaderValue), _idTokenExpiry,
+    bool ok = parseAuthResponse(*http.getStreamPtr(), _idToken,
+                                sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), false);
     http.end();
 
@@ -877,18 +874,14 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     configureTlsClient(client);
     HTTPClient http;
 
-    char authQ[64];
-    fbAuthQuery(authQ, sizeof(authQ), '?');
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/status.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
 
-    char url[256];
-    snprintf(url, sizeof(url), "https://%s/boxes/%s/status.json%s",
-             FIREBASE_HOST, BOX_ID, authQ);
-
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, _url)) return false;
 
     http.setTimeout(FIREBASE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
-    addAuthHeader(http);
 
     char payload[128];
     uint32_t now = (uint32_t)time(nullptr);
@@ -918,16 +911,12 @@ bool NetworkManager::checkFirebaseFlags() {
     configureTlsClient(client);
     HTTPClient http;
 
-    char authQ[64];
-    fbAuthQuery(authQ, sizeof(authQ), '?');
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
 
-    char url[256];
-    snprintf(url, sizeof(url), "https://%s/boxes/%s/flags.json%s",
-             FIREBASE_HOST, BOX_ID, authQ);
-
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, _url)) return false;
     http.setTimeout(FIREBASE_TIMEOUT_MS);
-    addAuthHeader(http);
 
     int httpCode = http.GET();
     noteAuthFailure(httpCode, "flags");
@@ -961,14 +950,14 @@ bool NetworkManager::checkFirebaseFlags() {
     configureTlsClient(patchClient);
     HTTPClient patchHttp;
 
-    char patchUrl[256];
-    snprintf(patchUrl, sizeof(patchUrl), "https://%s/boxes/%s/flags.json%s",
-             FIREBASE_HOST, BOX_ID, authQ);
+    // Dung lai _url an toan: GET flags o tren da http.end() xong truoc khi toi day.
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
 
-    if (patchHttp.begin(patchClient, patchUrl)) {
+    if (patchHttp.begin(patchClient, _url)) {
         patchHttp.setTimeout(FIREBASE_TIMEOUT_MS);
         patchHttp.addHeader("Content-Type", "application/json");
-        addAuthHeader(patchHttp);
         int pc = patchHttp.PATCH("{\"sync_alarms_flag\":false,\"emergency_ota\":false,\"normal_ota\":false}");
         noteAuthFailure(pc, "flags reset");
         patchHttp.end();
@@ -982,16 +971,12 @@ bool NetworkManager::syncFirebaseAlarms() {
     configureTlsClient(client);
     HTTPClient http;
 
-    char authQ[64];
-    fbAuthQuery(authQ, sizeof(authQ), '?');
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/config/alarm_list.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
 
-    char url[256];
-    snprintf(url, sizeof(url), "https://%s/boxes/%s/config/alarm_list.json%s",
-             FIREBASE_HOST, BOX_ID, authQ);
-
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, _url)) return false;
     http.setTimeout(FIREBASE_TIMEOUT_MS);
-    addAuthHeader(http);
 
     int httpCode = http.GET();
     noteAuthFailure(httpCode, "alarms");
@@ -1170,30 +1155,26 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     configureTlsClient(client);
     HTTPClient http;
 
-    char url[384];
     uint64_t nextTs = (lastTs > 0) ? (lastTs + 1) : 0;
     if (nextTs > 0) {
-        // auth nam CUOI: orderBy/startAt da chiem '?' nen tham so auth (neu con
-        // dung Database Secret) phai noi bang '&'.
-        char authQ[64];
-        fbAuthQuery(authQ, sizeof(authQ), '&');
-        snprintf(url, sizeof(url),
-                 "https://%s/messages/%s.json?orderBy=%%22timestamp%%22&startAt=%llu%s",
-                 FIREBASE_HOST, BOX_ID, (unsigned long long)nextTs, authQ);
+        // auth nam CUOI: orderBy/startAt da chiem '?' nen tham so auth phai noi
+        // bang '&'. Dung o ca 2 che do — Database Secret lan idToken.
+        snprintf(_url, sizeof(_url),
+                 "https://%s/messages/%s.json?orderBy=%%22timestamp%%22&startAt=%llu",
+                 FIREBASE_HOST, BOX_ID, (unsigned long long)nextTs);
+        appendAuth('&');
     } else {
-        char authQ[64];
-        fbAuthQuery(authQ, sizeof(authQ), '?');
-        snprintf(url, sizeof(url),
-                 "https://%s/messages/%s.json%s",
-                 FIREBASE_HOST, BOX_ID, authQ);
+        snprintf(_url, sizeof(_url),
+                 "https://%s/messages/%s.json",
+                 FIREBASE_HOST, BOX_ID);
+        appendAuth('?');
     }
 
-    if (!http.begin(client, url)) {
+    if (!http.begin(client, _url)) {
         DLOG("[NET] HTTP msg init fail");
         return false;
     }
     http.setTimeout(FIREBASE_TIMEOUT_MS);
-    addAuthHeader(http);
 
     int httpCode = http.GET();
     noteAuthFailure(httpCode, "msg");

@@ -145,12 +145,20 @@ private:
     static void ntpTaskWorker(void* param);
 
     // --- Firebase Auth: idToken riêng của box thay cho Database Secret ---
-    // Giữ sẵn dạng "Bearer <jwt>" để addHeader() không phải nối chuỗi lần nữa.
-    // Đặt trong #if để chế độ cũ không phải gánh 1.4KB BSS vô ích.
+    // Giữ JWT THÔ, không kèm tiền tố. Trước đây giữ dạng "Bearer <jwt>" cho
+    // addHeader(), nhưng RTDB KHÔNG nhận header nào cả — chỉ nhận `?auth=`
+    // (đo thật 2026-09-05, xem MEMORY.md §17). Đặt trong #if để chế độ cũ
+    // không phải gánh 1.4KB BSS vô ích.
 #if FIREBASE_USE_IDTOKEN
-    char   _authHeaderValue[FIREBASE_ID_TOKEN_MAX_LEN + 8] = "";
+    char   _idToken[FIREBASE_ID_TOKEN_MAX_LEN] = "";
     time_t _idTokenExpiry = 0;
 #endif
+
+    /// Buffer dựng URL, dùng CHUNG cho mọi request Firebase. Là thành viên chứ
+    /// không phải biến cục bộ vì idToken ~945 byte phải nằm trong URL.
+    /// An toàn: mọi lời gọi này chạy tuần tự trong cùng network task, và
+    /// HTTPClient::begin() copy URL vào String riêng nên ghi đè sau đó vô hại.
+    char _url[FIREBASE_URL_MAX_LEN] = "";
 
     /// Đảm bảo có idToken còn hạn. Ưu tiên refresh token trong NVS (không phải
     /// gửi lại mật khẩu); chỉ đăng nhập bằng mật khẩu khi chưa có/refresh hỏng.
@@ -158,12 +166,14 @@ private:
     bool authWithPassword();
     bool authWithRefreshToken(const char* refreshToken);
 
-    /// Gắn header Authorization vào request (no-op khi còn dùng Database Secret)
-    void addAuthHeader(class HTTPClient& http);
+    /// Nối tham số auth vào cuối `_url`: `?auth=<secret>` ở chế độ cũ,
+    /// `?auth=<idToken>` ở chế độ mới. `sep` là '?' hoặc '&' tuỳ URL đã có
+    /// query chưa. KHÔNG có bản dùng header cho RTDB — RTDB từ chối cả
+    /// `Bearer` lẫn `Firebase` (MEMORY.md §17).
+    void appendAuth(char sep);
 
-    /// Như trên nhưng cho Firebase Storage — scheme KHÁC: "Firebase <idToken>",
-    /// KHÔNG phải "Bearer". Không dùng lại được `_authHeaderValue` vì nó giữ sẵn
-    /// dạng Bearer cho RTDB. Cũng no-op khi còn dùng Database Secret.
+    /// Firebase Storage thì NGƯỢC LẠI: nó nhận header `Authorization: Firebase
+    /// <idToken>`. Khác dịch vụ, khác scheme. No-op khi còn dùng Database Secret.
     void addStorageAuthHeader(class HTTPClient& http);
 
     /// Gọi sau mỗi request: 401 nghĩa là token chết -> ép lấy lại ở chu kỳ sau

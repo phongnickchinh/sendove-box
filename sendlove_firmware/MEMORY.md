@@ -1659,3 +1659,45 @@ chối cả hai. Nên lựa chọn `Firebase` trong `addStorageAuthHeader()` là
 Rules Simulator trong Console chỉ chạy thử biểu thức rule, **không** chứng minh hệ thống thật đã
 đổi. Bằng chứng là request HTTP thật tới bucket production, như bảng trên. Cùng loại sai lầm đã
 làm §11 kết luận sai về header RTDB.
+
+---
+
+## 20. Đầy slot không được làm ngừng heartbeat/cờ/báo thức (2026-09-05, `99091ab`)
+
+### Lỗi
+
+Cổng "hết slot" đặt sai tầng — nó chặn **cả chu kỳ sync** thay vì riêng bước tải tin:
+
+- `main.cpp` sync định kỳ 10s: `&& !isStorageFull` trong điều kiện
+- `main.cpp` sync sau wakeup: `if (isFull()) DLOG("post-wakeup sync skip: FULL")`
+
+Hậu quả khi 3 slot đầy: box **im hoàn toàn** — mất heartbeat, mất đọc cờ, mất đồng bộ báo thức,
+mất OTA và pairing flag. Nhìn từ ngoài trông như "phải có tin mới thì `sync_alarms_flag` mới về
+`false`", nhưng thật ra chẳng liên quan gì tới tin nhắn.
+
+Ý định ban đầu ("đầy rồi thì khỏi tải tin cho phí") đúng, chỉ là đặt điều kiện ở ngoài cùng.
+`checkFirebaseFlags()` là bước 4, `checkAndDownloadNewMessages()` là bước 5 — chỉ bước 5 cần nó.
+
+### Đã sửa
+
+Chuyển cổng vào đúng bước 5 trong `syncWakeup()`, kèm
+`DLOG("[NET] msg skip: het slot (cac buoc khac van chay)")`. Bỏ điều kiện khỏi cả 2 chỗ gọi.
+
+### ⚠️ Đánh đổi đã biết — ĐỪNG tối ưu ngược lại
+
+Box đầy slot giờ **vẫn sync mỗi 10 giây** (2 handshake TLS mỗi vòng) thay vì im lặng ⇒ **tốn pin
+hơn trước**. Đó là cái giá để báo thức và OTA còn hoạt động khi đầy. Nếu sau này muốn tiết kiệm
+thì **giãn chu kỳ** khi đầy, **không** được quay lại chặn cả chu kỳ.
+
+### Ghi chú: `a_flag` vs `sync_alarms_flag`
+
+User thiết kế `a_flag` ở backend cho đúng việc này (`/device/poll` trả `alarm_list` khi nó bật),
+nhưng firmware đi thẳng RTDB và đọc `sync_alarms_flag`. Hai tên cho cùng một mục đích. Không sai,
+nhưng là nợ nên thống nhất. Chưa đụng, ngoài phạm vi.
+
+### Đã rút lại: "không full cũng không sync"
+
+User có báo thêm triệu chứng "chỉ có 1 msg, không có tin mới trên cloud thì config cũng không
+sync", sau đó **tự rút lại**. Đã đọc hết đường đi và xác nhận không có cổng nào liên quan tin
+nhắn: `checkFirebaseFlags()` tự mở TLS riêng, tự GET `flags.json`, tự PATCH reset, không đụng gì
+tới messages; `triggerFirebaseSync` chỉ là alias của `triggerWakeupSync`. **Chỉ `isFull` là thật.**

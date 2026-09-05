@@ -242,8 +242,12 @@ void Task_UIController(void *pvParameters) {
     }
 
     // Periodic check if device is kept awake in Standby UI (every 10s)
-    bool isStorageFull = (appCtx.storage && appCtx.storage->isFull());
-    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
+    //
+    // KHÔNG còn điều kiện `!isStorageFull` ở đây: đầy slot chỉ có nghĩa là khỏi
+    // tải tin, không có nghĩa là ngừng heartbeat / đọc cờ / đồng bộ báo thức.
+    // Cổng đó đã chuyển xuống đúng bước tải tin trong syncWakeup(). Đánh đổi đã
+    // biết: box đầy slot giờ vẫn sync mỗi 10s nên tốn pin hơn trước.
+    if (now - lastIntervalSyncMs >= 10000 && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
         bool isCharging = appCtx.powerManager.isCharging();
@@ -335,14 +339,14 @@ void Task_UIController(void *pvParameters) {
       // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy.
       // Luôn check tin mới + tải đầy đủ vào slot trước khi cho phát — không còn
       // nhánh "có tin local sẵn thì hoãn sync" (dễ bỏ sót tin mới trên Cloud).
-      if (appCtx.storage && appCtx.storage->isFull()) {
-          DLOG("[SLP] post-wakeup sync skip: FULL");
-      } else {
-          // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
-          uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-          bool isCharging = appCtx.powerManager.isCharging();
-          appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
-      }
+      // Luôn sync, kể cả khi đầy slot. Trước 2026-09-05 chỗ này bỏ qua toàn bộ
+      // chu kỳ khi đầy ("post-wakeup sync skip: FULL"), làm box mất báo thức và
+      // OTA cho tới khi có slot trống. Cổng "đầy" giờ nằm trong syncWakeup(),
+      // chỉ chặn đúng bước tải tin.
+      // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
+      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+      bool isCharging = appCtx.powerManager.isCharging();
+      appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
       lastIntervalSyncMs = millis();
     }
 

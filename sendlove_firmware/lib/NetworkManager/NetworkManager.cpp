@@ -631,9 +631,20 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
 
     if (isPlaybackActive()) { _isSyncing = false; return false; }
 
-    // 5. Check and download new messages
+    // 5. Check and download new messages.
+    //
+    // Cong "het slot" nam O DAY chu khong o ngoai cung. Truoc 2026-09-05 no nam
+    // tren ca chu ky (main.cpp: `&& !isStorageFull` cho sync 10s, va nhanh
+    // "post-wakeup sync skip: FULL"), nen khi day slot thi box im hoan toan:
+    // mat heartbeat, mat doc co, mat dong bo bao thuc, mat OTA va pairing flag.
+    // Y dinh ban dau chi la "day roi thi khoi tai tin cho phi" — dung, nhung chi
+    // ap cho RIENG buoc nay.
     if (storage != nullptr) {
-        checkAndDownloadNewMessages(storage);
+        if (storage->isFull()) {
+            DLOG("[NET] msg skip: het slot (cac buoc khac van chay)");
+        } else {
+            checkAndDownloadNewMessages(storage);
+        }
     }
 
     _isSyncing = false;

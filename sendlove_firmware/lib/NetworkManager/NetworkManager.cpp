@@ -499,10 +499,15 @@ void NetworkManager::appendAuth(char sep) {
     if (len >= sizeof(_url)) return;
 #if FIREBASE_USE_IDTOKEN
     if (_idToken[0] == '\0') return;
-    snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, _idToken);
+    int n = snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, _idToken);
 #else
-    snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, FIREBASE_AUTH_SECRET);
+    int n = snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, FIREBASE_AUTH_SECRET);
 #endif
+    // Cat cut token cho ra 401 TRONG Y HET voi 401 do rule tu choi. Chinh su
+    // nhap nhang kieu nay da lam muc 11 ket luan sai mot vong. Phai keu len.
+    if (n < 0 || (size_t)n >= sizeof(_url) - len) {
+        DLOG("[NET] auth query BI CAT CUT (url %u)", (unsigned)strlen(_url));
+    }
 }
 
 // Bao lau khong nhan them byte nao thi coi la stream chet. http.setTimeout(30000)

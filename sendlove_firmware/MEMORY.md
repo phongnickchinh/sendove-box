@@ -1510,9 +1510,38 @@ Lập luận của §11 vẫn đúng: JWT ~945 byte, mà `authQ[64]` và `url[25
 Nới thẳng các biến cục bộ này sẽ thêm ~2.8KB **stack** cho mỗi hàm, trong khi
 `TASK_STACK_NETWORK` chỉ **6144** → rủi ro tràn stack.
 
-Hướng đề xuất (CHƯA làm, chờ chốt): dựng URL vào **một buffer thành viên dùng chung** (~1.6KB BSS)
-thay vì biến cục bộ. An toàn về reentrancy vì toàn bộ các lời gọi này chạy tuần tự trong cùng
-network task.
+**ĐÃ SỬA ở `274ef00`:** dựng URL vào **một buffer thành viên dùng chung**
+`_url[FIREBASE_URL_MAX_LEN = 1792]` thay vì biến cục bộ. An toàn về reentrancy vì toàn bộ các lời
+gọi này chạy tuần tự trong cùng network task, và `HTTPClient::begin()` copy URL vào String riêng.
+Bỏ hẳn `addAuthHeader()` và `fbAuthQuery()`, thay bằng `appendAuth(char sep)`. `_authHeaderValue`
+đổi thành `_idToken` giữ JWT thô — tiền tố `"Bearer "` chỉ tồn tại vì `addHeader()`.
+
+Kích thước thật: token 945 byte → URL messages 1105 byte. Xấu nhất theo
+`FIREBASE_ID_TOKEN_MAX_LEN = 1400` → 1566 byte, biên còn 226.
+
+### ✅ ĐÃ KIỂM CHỨNG ĐẦU-CUỐI BẰNG REST, KHÔNG TỐN LƯỢT FLASH NÀO
+
+Đăng nhập lấy idToken thật của box rồi gọi **cả 6 thao tác firmware sẽ làm**, đúng hình dạng URL
+mà code mới sinh ra:
+
+| Thao tác | URL | Kết quả |
+|---|---|---|
+| status GET | `?auth=` | **200** |
+| flags GET | `?auth=` | **200** |
+| alarm_list GET | `?auth=` | **200** |
+| messages GET | `?orderBy=...&startAt=...&auth=` | **200** |
+| flags PATCH | `?auth=` | **200** |
+| status PATCH | `?auth=` | **200** |
+
+Hai PATCH là quan trọng nhất — **quyền GHI chưa từng được thử bằng token của box**. Nếu nó 401
+thì `sync_alarms_flag` sẽ kẹt `true` vĩnh viễn, đúng kiểu hỏng mà §10 mục 4 nói là ẩn tới tận lần
+báo thức sau. Giờ đã chứng minh ghi được.
+
+PATCH chạy an toàn vì đúng lúc đó cả 3 trường firmware ghi (`sync_alarms_flag`, `emergency_ota`,
+`normal_ota`) đều đang là `false`, nên gửi đúng payload của firmware là **no-op thật sự** —
+đã đọc lại sau khi PATCH, dữ liệu y nguyên.
+
+**Nghĩa là §10 mục 1–4 giờ đã được xác minh NGOÀI phần cứng.** Flash chỉ còn để xác nhận.
 
 ### Chưa đụng tới: đường Storage
 

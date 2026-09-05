@@ -106,9 +106,11 @@ static constexpr uint8_t MAX_ALARMS = 10;
 static constexpr size_t FIREBASE_ID_TOKEN_MAX_LEN = 1400;
 static constexpr size_t FIREBASE_REFRESH_TOKEN_MAX_LEN = 400;
 
-// URL dai nhat: base ~160 byte (host + /messages/<BOX_ID>.json + orderBy +
-// startAt) cong "&auth=" cong ca idToken. Do RTDB CHI nhan token qua query
-// (do that 2026-09-05, xem MEMORY.md muc 17), khong cach nao tranh duoc.
+// URL dai nhat la cua messages: base ~160 byte (host + /messages/<BOX_ID>.json
+// + orderBy + startAt) cong "&auth=" (6) cong idToken.
+//   Do that 2026-09-05 voi token 945 byte -> URL 1105 byte.
+//   Xau nhat theo FIREBASE_ID_TOKEN_MAX_LEN = 1400 -> 1566 byte. Bien 226 byte.
+// Do RTDB CHI nhan token qua query (xem MEMORY.md muc 17), khong cach nao tranh.
 // Buffer nay la THANH VIEN cua NetworkManager, khong phai bien cuc bo: dat
 // tren stack thi moi ham ton them ~1.8KB trong khi TASK_STACK_NETWORK chi 6144.
 static constexpr size_t FIREBASE_URL_MAX_LEN = 1792;

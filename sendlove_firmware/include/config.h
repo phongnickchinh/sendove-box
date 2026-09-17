@@ -66,12 +66,54 @@ static constexpr uint8_t NAND_SLOT_COUNT = 3;
 static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
     0x010000, 0x560000, 0xAB0000};
 
+// Tran kich thuoc mot lan tai media. Khoang cach 2 slot dau la
+// 0x560000-0x010000 = 0x550000 = 5.570.560 byte, nen 5.500.000 nam vua duoi
+// mot slot.
+// Day KHONG phai lop chan tran bo nho — writeChunk() da chan o _slotCapacity
+// tu truoc. Day la thoat som + log ro ly do: truoc do mot URL tra ve stream
+// vo tan (hoac Content-Length noi doi) khien box tai vai phut roi moi chet o
+// cho khac, khong ai biet vi sao.
+static constexpr uint32_t MAX_MEDIA_BYTES = 5500000;
+
 // Firebase Configuration (Lưu trong config_secrets.h để chống lộ API trên Git)
 #include "config_secrets.h"
 
 static constexpr uint32_t FIREBASE_TIMEOUT_MS = 10000;
 static constexpr const char *NVS_KEY_LAST_DOWNLOAD_TS = "last_dl_ts";
 static constexpr uint8_t MAX_ALARMS = 10;
+
+// Bat xac thuc chung chi TLS cho moi ket noi Firebase (thay cho setInsecure()).
+// Root CA nam o include/firebase_root_ca.h.
+// Dat ve 0 = quay lai setInsecure() — DUONG LUI KHAN CAP, chi dung khi da xac
+// dinh loi la o tang TLS (doc dong log "[NET] tls: ..."). Chay o che do 0 nghia
+// la box lai ho MITM: bat ky ai trong cung mang doc/sua duoc tin nhan va lay
+// duoc FIREBASE_AUTH_SECRET.
+#define FIREBASE_TLS_VERIFY 1
+
+// Xac thuc voi Firebase bang idToken rieng cua box (Firebase Auth) thay vi
+// Database Secret quyen admin.
+//   1 = signInWithPassword -> idToken (han 1h) -> header Authorization: Bearer,
+//       refresh token luu NVS. Rules `auth.uid === $box_id` moi co hieu luc.
+//   0 = quay lai `?auth=<FIREBASE_AUTH_SECRET>` (DUONG LUI).
+// Dat 1 CHI KHI da du 3 dieu kien, neu khong box se mat ket noi hoan toan:
+//   (a) Firebase Console > Authentication > bat Email/Password
+//   (b) da chay `node scripts/provision_box_auth.js <BOX_ID>` va dien
+//       BOX_AUTH_EMAIL/BOX_AUTH_PASSWORD vao config_secrets.h
+//   (c) da deploy database.rules.json len dung instance `iot-app-839a2`
+#define FIREBASE_USE_IDTOKEN 1
+
+// Trong idToken JWT cua Firebase (~900-1100 byte). De du bien 1400.
+static constexpr size_t FIREBASE_ID_TOKEN_MAX_LEN = 1400;
+static constexpr size_t FIREBASE_REFRESH_TOKEN_MAX_LEN = 400;
+
+// URL dai nhat la cua messages: base ~160 byte (host + /messages/<BOX_ID>.json
+// + orderBy + startAt) cong "&auth=" (6) cong idToken.
+//   Do that 2026-09-05 voi token 945 byte -> URL 1105 byte.
+//   Xau nhat theo FIREBASE_ID_TOKEN_MAX_LEN = 1400 -> 1566 byte. Bien 226 byte.
+// Do RTDB CHI nhan token qua query (xem MEMORY.md muc 17), khong cach nao tranh.
+// Buffer nay la THANH VIEN cua NetworkManager, khong phai bien cuc bo: dat
+// tren stack thi moi ham ton them ~1.8KB trong khi TASK_STACK_NETWORK chi 6144.
+static constexpr size_t FIREBASE_URL_MAX_LEN = 1792;
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";

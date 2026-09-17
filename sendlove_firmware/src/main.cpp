@@ -13,6 +13,7 @@
 #include "config.h"
 #include <Arduino.h>
 #include <SPI.h>
+#include <atomic>
 
 // ============================================================================
 // SENDLOVE BOX — Main Firmware (Phase 3A: Storage Abstraction Layer)
@@ -49,7 +50,17 @@ static QueueHandle_t eventQueue = nullptr;
 
 enum class AppState { STATE_STANDBY, STATE_VIDEO };
 
-AppState currentAppState = AppState::STATE_STANDBY;
+// Đọc/ghi từ 3 task (MediaPlayer, UIController, vòng lặp chính) nên phải atomic.
+// 18 chỗ dùng đều là so sánh/gán trực tiếp (đã grep), không chỗ nào bind qua `auto`,
+// nên operator T() / operator= ngầm phủ hết, không cần sửa chỗ nào khác.
+//
+// KHÔNG lock-free: ESP32-C3 là RV32IMC, thiếu extension 'A' cho atomic sub-word.
+// Link được là nhờ ESP-IDF cấp sẵn bản emulation (đã verify bằng nm:
+// __atomic_load_1/store_1/exchange_1 đều là 'T' trong sdk/esp32c3/lib/libnewlib.a).
+// Emulation chạy bằng cách tắt ngắt — rẻ, nhưng đừng gọi từ ISR. Hiện không chỗ nào
+// gọi từ ISR: main.cpp không có IRAM_ATTR nào, chỗ duy nhất trông giống callback
+// (setPlaybackActiveCallback) chạy trong task context.
+std::atomic<AppState> currentAppState{AppState::STATE_STANDBY};
 
 const char *defaultLayoutJson = R"({
   "theme_name": "Default Card Theme",
@@ -231,8 +242,12 @@ void Task_UIController(void *pvParameters) {
     }
 
     // Periodic check if device is kept awake in Standby UI (every 10s)
-    bool isStorageFull = (appCtx.storage && appCtx.storage->isFull());
-    if (now - lastIntervalSyncMs >= 10000 && !isStorageFull && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
+    //
+    // KHÔNG còn điều kiện `!isStorageFull` ở đây: đầy slot chỉ có nghĩa là khỏi
+    // tải tin, không có nghĩa là ngừng heartbeat / đọc cờ / đồng bộ báo thức.
+    // Cổng đó đã chuyển xuống đúng bước tải tin trong syncWakeup(). Đánh đổi đã
+    // biết: box đầy slot giờ vẫn sync mỗi 10s nên tốn pin hơn trước.
+    if (now - lastIntervalSyncMs >= 10000 && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
         bool isCharging = appCtx.powerManager.isCharging();
@@ -292,15 +307,30 @@ void Task_UIController(void *pvParameters) {
         activeSleepTimeoutMs = 2000;
 
         // Nháy đèn xanh dương (GPIO 8 - Bản SuperMini, trùng chân NAND CS) để báo hiệu wakeup ngầm.
-        // Cực kì an toàn vì lúc này (vừa thức dậy) bus SPI hoàn toàn rảnh, chưa kích hoạt Sync.
-        pinMode(8, OUTPUT);
-        digitalWrite(8, LOW);  // Đèn sáng (Active LOW) / NAND CS ghim xuống
-        delay(30);
-        digitalWrite(8, HIGH); // Đèn tắt / NAND CS nhả ra
-        delay(70);
-        digitalWrite(8, LOW);
-        delay(30);
-        digitalWrite(8, HIGH);
+        // Đây là chỉ báo timer-wake DUY NHẤT còn lại: wakeupFlash() (DisplayDriver.cpp:171)
+        // giờ chỉ gọi gpio_hold_dis(), tên hàm đã lỗi thời, không nháy gì cả. User chốt giữ đèn.
+        //
+        // PHẢI giữ spiMutex suốt đoạn nháy. Comment cũ ghi "bus SPI hoàn toàn rảnh" là SAI:
+        // Task_MediaPlayer có thể đang đẩy pixel lên SCK/MOSI, mà GPIO 8 chính là CS của
+        // W25Q128. Ghim CS xuống LOW 30ms trong lúc có xung clock -> NAND chốt nhầm opcode.
+        // Giữ mutex triệt tiêu đúng cơ chế đó (CS LOW mà không có clock là vô hại).
+        // Chi phí: giữ mutex 160ms, cộng tối đa 1000ms chờ (timeout mặc định của
+        // acquireSPI) trong trường hợp xấu. Lúc vừa thức thì SPI thường rảnh.
+        if (appCtx.display.acquireSPI()) {
+          pinMode(8, OUTPUT);
+          digitalWrite(8, LOW);  // Đèn sáng (Active LOW) / NAND CS ghim xuống
+          delay(30);
+          digitalWrite(8, HIGH); // Đèn tắt / NAND CS nhả ra
+          delay(70);
+          digitalWrite(8, LOW);
+          delay(30);
+          digitalWrite(8, HIGH);
+          appCtx.display.releaseSPI();
+        } else {
+          // Bắt buộc phải log: đèn này là chỉ báo timer-wake duy nhất, nên "không
+          // nháy mà không nói gì" sẽ bị hiểu nhầm là B1 làm hỏng đèn.
+          DLOG("[WAKE] blink skip: spi busy");
+        }
       }
 
       // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm
@@ -309,14 +339,14 @@ void Task_UIController(void *pvParameters) {
       // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy.
       // Luôn check tin mới + tải đầy đủ vào slot trước khi cho phát — không còn
       // nhánh "có tin local sẵn thì hoãn sync" (dễ bỏ sót tin mới trên Cloud).
-      if (appCtx.storage && appCtx.storage->isFull()) {
-          DLOG("[SLP] post-wakeup sync skip: FULL");
-      } else {
-          // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
-          uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-          bool isCharging = appCtx.powerManager.isCharging();
-          appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
-      }
+      // Luôn sync, kể cả khi đầy slot. Trước 2026-09-05 chỗ này bỏ qua toàn bộ
+      // chu kỳ khi đầy ("post-wakeup sync skip: FULL"), làm box mất báo thức và
+      // OTA cho tới khi có slot trống. Cổng "đầy" giờ nằm trong syncWakeup(),
+      // chỉ chặn đúng bước tải tin.
+      // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
+      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+      bool isCharging = appCtx.powerManager.isCharging();
+      appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
       lastIntervalSyncMs = millis();
     }
 

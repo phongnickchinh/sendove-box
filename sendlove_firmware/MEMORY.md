@@ -1063,3 +1063,810 @@ sang `SDCardManager` là **tái tạo đúng cú lật CPOL đang muốn khử**
 
 
 
+---
+
+## 10. Vá bảo mật theo `code_review_2_9_gemini_38.md` — Phase A: bật xác thực TLS (2026-09-03)
+
+Kế hoạch đầy đủ (Phase A→D + phát hiện ngoài báo cáo) nằm ở
+`C:\Users\phamp\.claude\plans\t-i-c-n-b-n-c-sequential-treasure.md`.
+Phạm vi user chốt: **bỏ OTA** (VULN-02/12 — chỉ test local, chấp nhận rủi ro) và **bỏ VULN-04**
+(erase 5.5MB — đã fix ở vòng 2).
+
+### Báo cáo Gemini SAI ở 2 chỗ — đã verify bằng code, đừng "sửa" lại
+
+1. **VULN-08 "Captive Portal XSS qua SSID" — FALSE POSITIVE hoàn toàn.**
+   `captive_portal_html.h:172` dùng `nm.textContent = n.ssid` (DOM API, không hề parse HTML),
+   `:179` gán `.value`. **Không có `innerHTML` nào nhận dữ liệu SSID** — `:160` chỉ
+   `box.innerHTML = ""` để xoá danh sách. Tầng JSON cũng escape đúng (`jsonEscape()` trong
+   `NetworkManager.cpp`: xử lý `"`, `\`, ký tự < 0x20, ép `unsigned char` để byte UTF-8 > 127
+   không lọt nhánh ký tự điều khiển). **Không cần vá gì.**
+   *Nit tuỳ chọn duy nhất*: `seen[n.ssid]` (`:165`) dùng object thường làm map — SSID tên
+   `__proto__`/`constructor` sẽ bị coi là "đã thấy" và biến mất khỏi danh sách. Đó là "giấu 1
+   mạng", **không phải XSS**. Sửa bằng `Object.create(null)` nếu rảnh.
+2. **VULN-06 "markAsRead() làm mòn Sector 0" — SAI.**
+   `NandStorageProvider::markAsRead()` chỉ gọi `saveNvsState()` (NVS, ESP-IDF có wear-leveling
+   sẵn), **không đụng `writeSlotTable()`**. Số lần ghi Sector 0 thật = tối đa 3/message
+   (`closeWrite` → `closeAppend` → `setItemText`). 20 msg/ngày ⇒ ~4,5 năm mới chạm 100k chu kỳ.
+   Hạ ưu tiên xuống P3, **đề xuất hoãn**.
+
+Ngoài ra **VULN-05 bị nói quá**: với HTTPS thì `?auth=<secret>` nằm TRONG đường hầm TLS —
+proxy log / router cache / header Referer **không** đọc được (claim của báo cáo sai cho HTTPS).
+Rủi ro thật là secret nằm cứng trong flash (`esptool read_flash` lấy được) và là quyền admin.
+Lưu ý: **chuyển secret từ `config.h` sang NVS KHÔNG cứu được gì** — NVS nằm trong cùng bản dump flash.
+
+### Đã làm (Phase A) — CHƯA build/flash/test trên máy thật
+
+- **File mới `include/firebase_root_ca.h`** (commit bình thường, cert không phải secret): chứa
+  **GTS Root R1** (RSA) + **GTS Root R4** (ECC), bản self-signed tải từ `https://pki.goog/repo/certs/`,
+  hết hạn **2036-06-22**. Đã round-trip verify: trích ngược từ header ra PEM và `openssl x509`
+  cho đúng fingerprint SHA-256 `D9:47:43:2A:...:F4:CF` (R1) và `34:9D:FA:40:...:3C:7D` (R4).
+- **Vì sao phải có CẢ HAI root** — đo thật bằng `openssl s_client`, không suy đoán:
+  - `iot-app-839a2.asia-southeast1.firebasedatabase.app` → leaf → `GTS WR1` → **GTS Root R1**
+  - `firebasestorage.googleapis.com` → leaf → `GTS WE2` → **GTS Root R4**
+
+  Chỉ nhúng R1 thì Realtime DB chạy nhưng **đường tải media chết**. Root mà server gửi kèm trong
+  chain là bản cross-sign bởi GlobalSign (hết hạn **2028-01-28**) — không dùng bản đó.
+- **`setCACertBundle()` KHÔNG dùng được trên Arduino core 2.0.17** (cùng loại bẫy với
+  `setBufferSizes` ở §8 — verify source trước khi tin): đọc
+  `libraries/WiFiClientSecure/src/esp_crt_bundle.c:179-186`, `arduino_esp_crt_bundle_attach()`
+  return sớm với `log_e("Failed to attach bundle")` nếu chưa gọi `arduino_esp_crt_bundle_set()`
+  — **wrapper Arduino không nhúng sẵn bundle mặc định** dù `sdkconfig` có
+  `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y`. Muốn dùng phải tự sinh blob bằng `gen_crt_bundle.py`.
+  **Đừng đào lại hướng này.**
+- **`NetworkManager.cpp`**: thêm `configureTlsClient()` + `logTlsError()`, đặt SAU khối
+  `#include <WiFiClientSecure.h>` ở giữa file — **file này include WiFiClientSecure ở dòng ~461
+  chứ không phải đầu file**, đặt helper lên đầu sẽ lỗi incomplete type. Thay **cả 5** chỗ
+  `setInsecure()` (status / flags / patch flags / alarms / messages). `setCACert()` bật
+  `MBEDTLS_SSL_VERIFY_REQUIRED` + hostname verification (`ssl_client.cpp:180, 257, 292`).
+- **Cờ lùi `FIREBASE_TLS_VERIFY`** trong `config.h`: đặt 0 = quay lại `setInsecure()`. Có cờ này vì
+  theo Session Rule §8 agent không build được, mỗi vòng thử-sai tốn nguyên 1 lượt flash của User.
+- **KHÔNG đặt `setHandshakeTimeout()`** (mặc định 120s): siết ngắn không giúp gì cho bảo mật mà
+  link yếu (associate + DHCP đã tốn 3-8s, xem Fix vòng 4) sẽ đẻ ra một kiểu fail trông giống lỗi
+  cert nhưng không phải.
+- **Chốt chặn thời gian trong `syncWakeup()` — BẮT BUỘC, không phải phụ kiện.** Với `setInsecure()`
+  thì NTP hỏng vẫn chạy; với `VERIFY_REQUIRED` thì `time(nullptr)` gần 0 lúc boot nguội →
+  `BADCERT_FUTURE` → **mọi** handshake fail. Nếu giờ chưa hợp lệ: hạ `_isTimeSynced = false`
+  (bắt buộc — `syncNtpTime()` short-circuit 60s sẽ return true suông) rồi retry NTP 15s; vẫn sai
+  thì `DLOG("[NET] sync abort: time invalid")` và bỏ chu trình.
+- **Log chẩn đoán** (vì thay đổi này đẻ thêm một kiểu fail hình dạng `-1`):
+  `WiFiClientSecure::lastError(char*, size_t)` có thật trong core 2.0.17 → `[NET] tls <where>: ...`
+  ở cả 6 điểm fail (status/flags/alarms/msg/media/audio). Heap in ở `[NET] status OK heap=` và
+  `[NET] GET OK len=N heap=`.
+
+### Cần User xác minh trên máy thật (Phase A phải flash RIÊNG, chưa áp Phase B)
+
+1. `[NET] NTP OK` xuất hiện **trước** mọi lời gọi Firebase; không thấy `[NET] sync abort: time invalid`.
+2. `status` → `flags` → `messages` chạy trọn, không `-1`.
+3. **Tải được 1 message có media** — đây là bước chứng minh root R4 (Storage) đúng; các bước trên
+   chỉ chứng minh R1.
+4. **Bật tay `boxes/<BOX_ID>/flags/sync_alarms_flag = true` trên Firebase Console** rồi sync:
+   `syncFirebaseAlarms()` là 1 trong 5 client nhưng **chỉ chạy khi cờ này bật** — boot-and-sync
+   thường không hề chạm tới nó, lỗi ở đó sẽ ẩn tới tận lần báo thức sau rồi trông như bug mới.
+5. Heap: nhìn `[NET] GET OK len=N heap=` (phiên TLS sống lâu nhất, giữ qua cả đoạn tải audio lồng
+   bên trong, và là chỗ từng có tiền sử OOM). Kỳ vọng > ~60KB.
+6. Nếu hỏng: `[NET] tls ...` phân biệt lỗi cert với lỗi mạng. Đường lùi: `FIREBASE_TLS_VERIFY 0`.
+
+Rủi ro tồn dư đã biết: nếu Google đổi root thì box mất cloud và phải nạp lại firmware. Với hạn
+2036 thì rủi ro thấp. Dấu hiệu nhận biết trên log là `[NET] tls ...` báo lỗi verify.
+
+### Còn lại, chưa làm
+
+- **Phase B** (chờ Phase A xác minh xong): GPIO 8 bọc `spiMutex` (user đã chốt **giữ đèn**, không
+  xoá — vì `wakeupFlash()` giờ chỉ gọi `gpio_hold_dis()`, đây là chỉ báo timer-wake duy nhất còn
+  lại); `std::atomic<AppState> currentAppState`; trần `MAX_MEDIA_BYTES`; **đo**
+  `uxTaskGetStackHighWaterMark` (ESP-IDF trả về **bytes**, không phải words) trước khi động vào
+  `showWrappedText`.
+  → **Không đụng `isSyncing()`**: báo cáo nói quá. 4 cờ `volatile` nhưng `_isSyncing` một mình đã
+  phủ trọn chu trình (set trong `portENTER_CRITICAL` ở `triggerWakeupSync`, clear cuối
+  `syncWakeup`) — đọc gộp 4 cờ không tạo cửa sổ nào mà đọc 1 cờ không có.
+- **Phase C** (mòn Sector 0): đề xuất **hoãn**, xem số liệu 4,5 năm ở trên. Nếu làm thì thiết kế
+  đúng là dời điểm commit (`bool commit = true` cho `closeWrite`/`closeAppend`/`setItemText`),
+  đã verify an toàn vì `openForAppend()` chỉ đọc state RAM (`_lastWrittenOffset`), không đọc lại
+  bảng từ flash.
+- **Phase D**: user chọn hướng "custom token + rules `$box_id == auth.uid` + refresh idToken 1h".
+  **Nhưng khảo sát cho thấy `sendlove_backend` ĐÃ CÓ SẴN nguyên bộ device-auth chưa từng được
+  firmware dùng**: `POST /device/register` (bảo vệ bằng provisioning key) trả
+  `{box_id, device_secret, rcode, scode}`; middleware `requireDeviceAuth` đọc header
+  `X-Device-Id` + `X-Device-Secret`; `GET /device/poll?last_download_ts=&available_slots=` trả
+  `flags` + message mới — **trùng khít** việc `checkAndDownloadNewMessages()` đang tự làm bằng REST
+  thẳng lên RTDB. Đã nêu đề xuất đổi hướng cho user, **chờ user xác nhận**; đánh đổi thật là
+  `device_secret` **tĩnh** so với idToken **hết hạn 1h**.
+  Cần chốt trước khi code: backend đã deploy Cloud Functions chưa (URL production), lấy
+  `PROVISIONING_KEY` ở đâu, `/device/poll` trả media URL dạng signed URL hay path Storage.
+- **Phát hiện ngoài báo cáo**: AP `SendloveBox-Setup` là **AP MỞ** (`apPassword` mặc định `""`,
+  `main.cpp` gọi `startProvisioningAP("SendloveBox-Setup")`) và `/save` không có CSRF token → ai
+  trong tầm sóng cũng đổi được Wi-Fi của box rồi MitM nó. Đặt mật khẩu WPA2 là **quyết định sản
+  phẩm** (đánh đổi trải nghiệm setup) — chờ user quyết, không tự làm.
+
+---
+
+## 11. 🔴 DATABASE MỞ CÔNG KHAI + chuyển sang idToken (direct RTDB) — 2026-09-03
+
+### Phát hiện nghiêm trọng nhất từ trước tới nay (đã kiểm chứng bằng curl)
+
+RTDB `iot-app-839a2.asia-southeast1.firebasedatabase.app` **đọc VÀ ghi được mà không cần
+xác thực gì cả**:
+
+```
+GET  /boxes.json?shallow=true            -> 200 {"ESP32_A1B2C3D4E5F6":true}
+GET  /messages/ESP32_.../status.json     -> 200 (dữ liệu thật)
+PUT  /_sectest_probe_delete_me.json      -> 200   ← GHI ĐƯỢC, không auth
+Storage .../o/<bin_url>?alt=media        -> 200   ← tải media, không token
+```
+
+(Node ghi thử đã xoá ngay, xác nhận trả `null`.)
+
+**Nghĩa là `FIREBASE_AUTH_SECRET` chưa bao giờ là mắt xích yếu — không hề có ổ khoá nào.**
+Ai biết URL là đọc hết tin nhắn, tải hết video/voice của người dùng, ghi đè dữ liệu.
+So với việc này thì cả 12 mục trong `code_review_2_9_gemini_38.md` đều nhỏ.
+
+### 🔑 NGUYÊN NHÂN GỐC — sai instance, KHÔNG phải quên deploy
+
+`firebase database:instances:list` cho ra **2 instance**:
+
+| Instance | Trạng thái | Ai dùng |
+|---|---|---|
+| `iot-app-839a2-default-rtdb` | **DISABLED** (HTTP 423 "disabled by a database owner") | không ai |
+| `iot-app-839a2` | đang sống | firmware + backend (`firebase.ts:7`) |
+
+`firebase.json` cũ dùng dạng `"database": { "rules": ... }` (không có `instance`) → CLI deploy
+vào **instance mặc định**, tức cái đã bị disable. Nên mọi lần deploy trước đây đều "thành công"
+mà rules không bao giờ tới được instance thật. **Đây là bài học: có nhiều instance thì bắt buộc
+khai báo `instance` tường minh.**
+
+Đã sửa `firebase.json` thành dạng mảng có `instance: "iot-app-839a2"`.
+
+### Rules mới (`database.rules.json`) — ~~CHƯA DEPLOY~~ ✅ **ĐÃ DEPLOY 2026-09-04**
+
+> Tiêu đề gốc "CHƯA DEPLOY" giữ lại gạch ngang cho đúng lịch sử. User tự chạy lệnh lúc
+> 2026-09-04; CLI báo `rules for database iot-app-839a2 released successfully`.
+> **Đo lại bằng curl sau khi deploy — lỗ hổng đã đóng:**
+>
+> | Probe (không auth) | Trước | Sau |
+> |---|---|---|
+> | `GET /boxes.json?shallow=true` | 200 | **401** |
+> | `GET /messages.json?shallow=true` | 200 | **401** |
+> | `PUT /_sectest_probe.json` | 200 | **401** |
+>
+> Đây là lỗ hổng nghiêm trọng nhất của dự án và nó đã được vá thật, không phải "deploy xong
+> là xong" — số 401 ở trên mới là bằng chứng, vì chính lần deploy trước đây cũng báo
+> "thành công" mà rules rơi nhầm instance.
+
+Đổi từ `.read:false/.write:false` trống rỗng sang least-privilege theo `auth.uid === $box_id`:
+- `boxes/$box_id/status` — box đọc + ghi (heartbeat)
+- `boxes/$box_id/flags`  — box đọc + ghi (reset cờ)
+- `boxes/$box_id/config` — box CHỈ đọc (alarm_list)
+- `messages/$box_id`     — box CHỈ đọc, **giữ nguyên `.indexOn: ["timestamp"]`** (bắt buộc, nếu
+  mất thì query `orderBy="timestamp"&startAt=` của firmware gãy)
+- KHÔNG cấp quyền đọc `device_secret` / `code` / `pairing` — box không cần.
+
+**Deploy rules này AN TOÀN NGAY BÂY GIỜ, không hỏng gì** (đã verify từng đường):
+- Box vẫn chạy — Database Secret **bypass toàn bộ rules**
+- Backend vẫn chạy — Admin SDK bypass
+- Web vẫn chạy — đi qua axios `VITE_API_URL`; `sendlove_web/src/config/firebase.js` có export
+  `database` nhưng **grep toàn `sendlove_web/src` không nơi nào import dùng**
+
+Lệnh: `firebase deploy --only database --project iot-app-839a2` — **đã chạy 2026-09-04.**
+(Agent bị classifier của Claude Code chặn deploy production — xác nhận lại lần nữa ngày
+2026-09-04, không phải chuyện của riêng một phiên. User tự chạy. Có đường vòng kỹ thuật là ghi
+thẳng `.settings/rules.json` qua REST bằng Database Secret, nhưng đó là cùng một hành động
+deploy production qua cửa khác — **đừng làm**, hãy đưa lệnh cho user.)
+
+⚠️ **`firebase deploy --only storage` thì NGƯỢC LẠI — sẽ làm CHẾT đường tải media.** Firmware
+build URL `?alt=media` **không kèm token**, chạy được chỉ vì Storage đang mở. Muốn siết
+`storage.rules` thì box phải xác thực khi tải (xem "ẩn số" bên dưới).
+
+### Trạng thái provider Firebase Auth (đo thật bằng REST)
+
+| Cách | Kết quả | Kết luận |
+|---|---|---|
+| `accounts:signInWithPassword` | `PASSWORD_LOGIN_DISABLED` | Email/Password **CHƯA BẬT** |
+| `accounts:signUp` (anonymous) | `ADMIN_ONLY_OPERATION` | Anonymous **CHƯA BẬT** |
+| `accounts:signInWithCustomToken` | `INVALID_CUSTOM_TOKEN: 3 dot separated segments` | endpoint sống, nhưng cần backend ký |
+
+→ Hướng direct-RTDB cần **bật Email/Password trong Console** (1 toggle). Đó là điều kiện tiên quyết.
+
+### Đã code (CHƯA build/flash, CHƯA bật)
+
+- **`sendlove_backend/scripts/provision_box_auth.js`** — script admin SDK chạy OFFLINE, tạo user
+  Auth với `uid = BOX_ID` (để rule `auth.uid === $box_id` khớp mà không cần bảng tra cứu), email
+  `<boxid>@box.sendlove.invalid` (`.invalid` là TLD dành riêng RFC 2606), mật khẩu ngẫu nhiên 128
+  bit in ra MỘT LẦN. Có guard: box đã có tài khoản thì từ chối, phải `--reset-password` tường minh.
+- **`config_secrets.h`**: thêm `BOX_AUTH_EMAIL`/`BOX_AUTH_PASSWORD` (đang là `FILL_ME`).
+  `FIREBASE_API_KEY` **đã có sẵn từ trước và trùng khớp** `VITE_FIREBASE_API_KEY` của web — không
+  phải thêm gì. (Web API key không phải secret, nó nằm trong bundle web công khai.)
+- **`config.h`**: `#define FIREBASE_USE_IDTOKEN 0` — **MẶC ĐỊNH TẮT**, bật lên 1 CHỈ KHI đủ 3 điều
+  kiện: (a) bật Email/Password, (b) chạy script + điền config_secrets, (c) deploy rules. Bật sớm
+  = box mất kết nối hoàn toàn.
+- **`ConfigManager`**: `saveRefreshToken` / `loadRefreshToken` / `clearRefreshToken` (NVS key
+  `fb_refresh`).
+- **`NetworkManager`**:
+  - `ensureIdToken()` gọi 1 lần đầu mỗi chu kỳ sync, **đặt SAU chốt chặn thời gian** — hạn token so
+    bằng `time(nullptr)`, RTC sai thì token vừa lấy đã bị coi là hết hạn.
+  - Ưu tiên `securetoken.googleapis.com/v1/token` (refresh), chỉ `signInWithPassword` khi chưa có
+    refresh token hoặc refresh hỏng.
+  - **⚠️ Hai endpoint đặt tên trường KHÁC NHAU**: identitytoolkit trả `idToken`/`refreshToken`/
+    `expiresIn` (camelCase), securetoken trả `id_token`/`refresh_token`/`expires_in` (snake_case).
+    `parseAuthResponse(..., bool snakeCase)` xử lý cả hai. `expiresIn` là **CHUỖI** giây, không phải số.
+  - Dùng `DeserializationOption::Filter` chỉ cấp phát 3 trường cần — response còn kèm
+    email/localId/kind, cấp phát trọn gói là phí heap đúng lúc sắp cần ~45KB cho handshake kế tiếp.
+  - ~~**Token đi qua header `Authorization: Bearer`, KHÔNG qua `?auth=`**~~ 🔴 **SAI — xem §17.**
+    Lập luận về kích thước (`url[256]`/`url[384]` tràn) thì đúng, nhưng kết luận "RTDB có parse
+    header này" là **sai**, và cách kiểm chứng cũng sai: session đó thử bằng **token rác** lúc RTDB
+    còn mở toang, thấy không header → 200 còn header rác → 401, rồi suy ra header được chấp nhận.
+    Thực ra RTDB từ chối **mọi** `Bearer` không phải OAuth2 access token, hợp lệ hay rác đều 401.
+  - `_authHeaderValue` giữ sẵn dạng `"Bearer <jwt>"` để `addHeader()` khỏi nối chuỗi; bọc trong
+    `#if` để chế độ cũ không gánh 1.4KB BSS vô ích.
+  - `noteAuthFailure()` gọi sau mỗi request: 401/403 thì hạ `_idTokenExpiry` để chu kỳ sau lấy token
+    mới. **Không retry ngay** — token sống 1h còn chu kỳ sync vài giây, nên 401 gần như luôn là rule
+    từ chối chứ không phải hết hạn; retry ngay chỉ tốn thêm handshake mà vẫn 401.
+  - `fbAuthQuery(out, n, sep)` sinh phần `?auth=` (chế độ cũ) hoặc chuỗi rỗng (chế độ idToken).
+    Với URL messages, auth nối bằng `'&'` vì `orderBy` đã chiếm `'?'`.
+- Cert: `identitytoolkit` và `securetoken` **đều chain về GTS Root R4** (đo thật) — đã có sẵn
+  trong `firebase_root_ca.h` của Phase A, không phải nhúng thêm.
+
+### Ẩn số còn lại (chưa giải quyết được)
+
+Khi siết `storage.rules`, box phải xác thực lúc tải media. Về lý thuyết dùng cùng idToken với
+header `Authorization: Firebase <idToken>`, **nhưng KHÔNG verify được**: Storage đang mở nên gửi
+header token rác vẫn trả `200`. Phải thử lại **sau khi** siết rules. Đây là điểm duy nhất mà
+Phase D (signed URL từ backend) giải quyết gọn hơn hướng direct-RTDB.
+
+### Vẫn KHÔNG giải quyết được bằng hướng này
+
+Refresh token nằm trong NVS = cùng bản dump flash với firmware. `esptool read_flash` vẫn lấy được.
+Chỉ **Flash Encryption + Secure Boot** mới chống, chưa bàn tới.
+
+---
+
+## 13. Phase B — VULN-03/07/09/10 đã code (2026-09-04)
+
+> Cố ý bỏ trống số 12: nhánh `main` đã dùng `## 12` cho tầng lưu trữ thẻ SD. Hai nhánh **chưa
+> merge** (`security-hardening` rẽ tại `eb3c9b2`, main đi thêm 4 commit SD). Khi nào merge thì
+> đánh số lại, đừng để hai mục 12.
+
+**Tất cả CHƯA BUILD, CHƯA FLASH, CHƯA TEST TRÊN MÁY THẬT.** Mỗi món một commit riêng, cố ý:
+`7c1ac23` vẫn là "Phase A đứng một mình" để flash xác minh TLS mà không lẫn thứ gì khác.
+
+| Commit | Mục | Nội dung |
+|---|---|---|
+| `fb00498` | B1 / VULN-03 | Bọc đoạn nháy GPIO 8 trong `spiMutex` |
+| `07ba6d9` | B2 / VULN-07 | `currentAppState` → `std::atomic<AppState>` |
+| `1f18bf5` | B3 / VULN-09 | Trần `MAX_MEDIA_BYTES` ở **cả hai** vòng lặp tải |
+| `fe64a6b` | B4 bước 1 / VULN-10 | Đo stack high-water-mark, **chưa** refactor |
+
+### Điều đã đo, không phải suy đoán
+
+- **`std::atomic<AppState>` KHÔNG lock-free trên ESP32-C3.** Chip là RV32IMC, thiếu extension
+  `A` cho atomic sub-word. Link được là nhờ ESP-IDF cấp sẵn bản emulation — verify bằng
+  `riscv32-esp-elf-nm --defined-only tools/sdk/esp32c3/lib/libnewlib.a`, thấy
+  `__atomic_load_1` / `__atomic_store_1` / `__atomic_exchange_1` đều là `T`. Emulation chạy
+  bằng cách **tắt ngắt** ⇒ không được gọi từ ISR. Hiện an toàn: `main.cpp` không có `IRAM_ATTR`
+  nào, và chỗ duy nhất trông giống callback (`setPlaybackActiveCallback`) chạy trong task context.
+- **18 chỗ dùng `currentAppState`** (19 dòng grep ra, 1 là comment), **toàn bộ nằm trong
+  `main.cpp`**, đều là so sánh/gán trực tiếp. Không chỗ nào bind qua `auto` → `operator T()` /
+  `operator=` ngầm phủ hết. Đã grep `auto.*currentAppState` trên cả `src` và `lib`: rỗng.
+  Kiểm việc này *trước* khi sửa là bắt buộc — agent không build được, một lỗi compile tốn nguyên
+  một lượt flash của user.
+- **`showWrappedText()` dùng ~1196 B một khung stack**: `char lines[16][48]` = 768 B +
+  `buf[300]` + `currentLine[64]` + `trial[64]`. `TASK_STACK_MEDIA_PLAYER` = 6144.
+  Tỉ lệ đó *có vẻ* ổn nhưng chưa ai đo đường sâu nhất — nên bước 1 chỉ đặt
+  `DLOG("[PLAY] stack hwm=%u", uxTaskGetStackHighWaterMark(nullptr))`.
+  **Chỉ làm bước 2 (bỏ `lines[16][48]`, đổi sang 2 lượt) nếu con số đo được < ~1024.**
+  Đã verify hàm này biên dịch được: `INCLUDE_uxTaskGetStackHighWaterMark` = **1** ở
+  `tools/sdk/esp32c3/include/freertos/include/esp_additions/freertos/FreeRTOSConfig.h:186`
+  (số `0` ở `FreeRTOS.h:178` chỉ là fallback `#ifndef`, không áp dụng).
+  ⚠️ **Đọc con số cho đúng nghĩa**: hàm trả về mức trống thấp nhất trong **toàn bộ đời task**,
+  không phải của riêng khung `showWrappedText`. Nên `< 1024` có nghĩa "task này chật ở đâu đó",
+  chưa chứng minh `showWrappedText` là thủ phạm. Muốn quy trách nhiệm thì phải đo thêm một điểm
+  nữa ở nhánh không có caption rồi so.
+  ⚠️ **Dòng log chỉ xuất hiện khi tin nhắn CÓ caption** — cả hai lời gọi `showWrappedText` nằm
+  trong `if (_storage->getItemText(...))`. Test bằng video trơn sẽ không thấy gì và dễ tưởng là
+  bản build không ăn.
+- **Khoảng cách 2 slot NAND đầu** = `0x560000 - 0x010000` = `0x550000` = 5.570.560 B, nên
+  `MAX_MEDIA_BYTES = 5.500.000` nằm vừa dưới một slot.
+
+### Bẫy đã dính, ghi để khỏi dính lại
+
+- **Hai vòng lặp tải dùng hai cờ lỗi KHÁC NHAU.** Video: `totalRead` → `writeError`.
+  `downloadVoiceSegment()`: `aTotalRead` → `aWriteError` (rồi `ok = !aWriteError`). Đặt nhầm cờ
+  thì slot dở không bị loại ở bước kiểm tra của chính vòng đó.
+- **`core.autocrlf = true`, repo KHÔNG có `.gitattributes`.** Nghĩa là blob trong repo luôn là
+  LF, working tree là CRLF. Sửa `MediaPlayer.cpp` xong thì file trong working tree bị đổi sang
+  LF — *lịch sử không hỏng* (git normalize khi commit, diff vẫn đúng +7 dòng), nhưng file lệch
+  so với bản checkout sạch. Khôi phục bằng `rm <file> && git checkout -- <file>`.
+  Kiểm sau mỗi lần sửa: `file -b <path> | grep CRLF`.
+
+### Comment SAI đã sửa lại trong code
+
+`main.cpp` chỗ nháy GPIO 8 ghi *"Cực kì an toàn vì lúc này bus SPI hoàn toàn rảnh"* — **sai**.
+`Task_MediaPlayer` có thể đang đẩy pixel lên SCK/MOSI, mà GPIO 8 chính là CS của W25Q128; ghim CS
+LOW 30 ms trong lúc có xung clock thì NAND chốt nhầm opcode. Giữ `spiMutex` triệt tiêu đúng cơ chế
+đó (CS LOW mà không có clock là vô hại). Chi phí: giữ mutex ~160 ms lúc vừa thức, lúc SPI rảnh.
+
+Giữ đèn (không xoá) theo quyết định user: đây là chỉ báo timer-wake **duy nhất** còn lại, vì
+`wakeupFlash()` (`DisplayDriver.cpp:171`) giờ chỉ gọi `gpio_hold_dis()` — tên hàm và cả doc
+comment `/// Flash backlight 3x` đều đã lỗi thời, **không nháy gì cả**. Chưa sửa doc comment đó
+(ngoài phạm vi).
+
+### CỐ Ý KHÔNG LÀM
+
+- **`isSyncing()`** — báo cáo Gemini nói quá. 4 cờ `volatile`, nhưng `_isSyncing` một mình đã phủ
+  trọn chu trình (set trong `portENTER_CRITICAL` ở `triggerWakeupSync`, clear cuối `syncWakeup`),
+  nên đọc gộp 4 cờ không tạo cửa sổ nào mà đọc 1 cờ không có. **Không mở lại.**
+- **`Object.create(null)` cho `seen[n.ssid]`** (`captive_portal_html.h:165`) — hệ quả tối đa là
+  giấu 1 mạng tên `__proto__` khỏi danh sách, không phải XSS. Để đó.
+- **Phase C** (mòn Sector 0) — hoãn, số liệu ~4,5 năm ở §10.
+- **Mật khẩu WPA2 cho AP `SendloveBox-Setup` + CSRF cho `/save`** — là **quyết định sản phẩm**
+  (đánh đổi trải nghiệm setup), chờ user quyết. Hiện `startProvisioningAP()` mặc định
+  `apPassword = ""` (`NetworkManager.h:84`) và `main.cpp:445` gọi không truyền mật khẩu ⇒ **AP mở**.
+- **Phase D** — chờ user chốt hướng + 3 ẩn số ở §10.
+
+### Việc user phải làm
+
+1. ✅ **XONG 2026-09-04** — `firebase deploy --only database --project iot-app-839a2`.
+   RTDB giờ trả **401** cho cả đọc lẫn ghi khi không auth (bảng đo ở §11).
+   ⚠️ **Vẫn đừng chạy `--only storage`** — sẽ làm chết đường tải media (xem §11).
+2. ✅ **Phase A + Phase B đã chạy trên máy thật 2026-09-05** — nhưng theo đường khác kế hoạch:
+   user flash thẳng `31fdd1f` (chứa cả A lẫn B) thay vì flash `7c1ac23` riêng. Box **tải được
+   tin nhắn mới có media và phát bình thường** với `FIREBASE_TLS_VERIFY 1`.
+   → Suy ra được, không cần đo thêm: mục 1–3 của danh sách xác minh Phase A ở §10 **đã đạt**.
+   Đặc biệt **mục 3 — chứng minh GTS Root R4 cho Storage** — là mục quan trọng nhất, vì tải
+   được media nghĩa là chain Storage verify thành công. Mục 1–2 (NTP trước Firebase, status →
+   flags → messages không `-1`) cũng phải đã chạy trọn, nếu không thì không có tin nào về.
+3. **CÒN LẠI, chưa xác minh** (đừng coi Phase A là xong hẳn):
+   - §10 mục 4 — bật tay `sync_alarms_flag = true` trên Console rồi sync. `syncFirebaseAlarms()`
+     là client TLS **duy nhất không chạy trong chu trình boot-and-sync thường**, nên lỗi ở đó
+     vẫn đang ẩn và sẽ lộ ra vào lần báo thức sau, lúc đó trông như bug mới.
+   - §10 mục 5 — đọc số sau `[NET] GET OK len=N heap=`, kỳ vọng > ~60KB.
+   - B4 — đọc `[PLAY] stack hwm=` (nhớ: **phải gửi tin CÓ CHỮ**, cả 2 lời gọi nằm trong
+     `if getItemText`). Chỉ làm B4 bước 2 nếu số đó < ~1024.
+
+### Sau khi deploy rules: điều gì đổi, điều gì KHÔNG
+
+**Không đổi gì với đường chạy hiện tại** — và đây là lý do deploy được ngay mà không cần chờ
+firmware: box vẫn dùng `?auth=<FIREBASE_AUTH_SECRET>`, mà **Database Secret bypass toàn bộ rules**;
+backend đi qua Admin SDK cũng bypass; web không hề import `database` (đã verify lại 2026-09-04:
+`sendlove_web/src/config/firebase.js:22` có export nhưng không file nào import, chỉ `auth` được dùng).
+
+**Rules mới CHƯA có hiệu lực thật với box** cho tới khi bật `FIREBASE_USE_IDTOKEN 1`. Trước đó,
+`auth.uid === $box_id` chưa bao giờ được đánh giá vì box đang là admin. Nói cách khác: deploy này
+đóng cửa với **người ngoài**, chưa hạ quyền của **box**. Hạ quyền box là việc của Phase D.
+
+**Lỗ hổng còn lại, chưa đóng:** Firebase Storage vẫn mở — firmware build URL `?alt=media` không
+kèm token và vẫn tải được. Ai biết `bin_url` vẫn lấy được video/voice của người dùng. Siết chỗ này
+phải làm cùng lúc với việc cho box xác thực khi tải, nếu không là chết đường media (xem "ẩn số"
+ở §11).
+
+---
+
+## 14. ✅ ĐÃ TÌM RA & XÁC MINH: video + audio giật do SPI NAND chạy 20MHz (2026-09-05)
+
+> ### 🔴 KẾT LUẬN CUỐI — đã sửa lại một lần, đọc kỹ chỗ này
+>
+> **20MHz trên breadboard này CHẬP CHỜN ở CẢ đường đọc lẫn đường ghi. Cấu hình ổn định duy nhất
+> là 4MHz cho cả ba hằng số.**
+>
+> Kết luận ban đầu ("chỉ đường GHI là thủ phạm") **chưa đầy đủ**. Diễn biến thật:
+> 1. `31fdd1f` hạ ghi 20→4MHz, giữ đọc ở 20MHz → user test → **ổn**.
+> 2. Ít lâu sau **giật quay lại** dù không đổi gì.
+> 3. User hạ nốt **đọc** xuống 4MHz → **phát mượt trở lại**.
+>
+> Bài học quan trọng hơn con số: **lỗi này không tái hiện mỗi lần.** Đường đọc chạy 20MHz ổn từ
+> `8d9ef7d` suốt nhiều tuần nên ai cũng tưởng nó an toàn — kể cả tôi, đã viết vào comment rằng nó
+> "đã chạy lâu và ổn định". Một lần test đạt **không** chứng minh được gì với lỗi toàn vẹn tín
+> hiệu. Phải phát nhiều lần, nhiều tin.
+>
+> ### Điều bất ngờ đáng ghi nhớ
+>
+> §8 nói đọc chậm thì giữ `spiMutex` lâu, giành bus với render JPEG và **gây** giật. Thực tế
+> **ngược lại**: đọc chậm hơn 5 lần lại mượt hơn. Điều đó chứng minh vấn đề là **tính toàn vẹn dữ
+> liệu trên dây**, không phải tranh chấp bus. Khi hai giả thuyết đối nghịch, con số đo được trên
+> máy thật thắng lý thuyết kiến trúc.
+>
+> Cơ chế gây triệu chứng vẫn như mô tả bên dưới: dữ liệu hỏng âm thầm → frame JPEG decode trượt
+> (giật hình) + PCM lỗi (giật tiếng), trong khi thời lượng vẫn đúng vì playback chạy theo đồng hồ.
+>
+> **Đừng nâng lại bất kỳ đường nào trên breadboard.** Lên PCB thật trace ngắn thì thử lại được,
+> nhưng phải đo bằng tin tải MỚI và phát NHIỀU LẦN.
+>
+> Biến số được cô lập sạch: giữa bản giật (`4cc7651`) và bản chạy (`31fdd1f`) **chỉ khác đúng
+> tốc độ ghi**. Erase vốn đã là 4MHz ở `4cc7651` (con số 20MHz user sửa chỉ nằm trong working
+> tree, chưa từng được flash); đọc giữ 20MHz ở cả hai bản.
+>
+> **KHÔNG nâng lại đường ghi trên breadboard này.** Nếu sau này lên PCB thật trace ngắn thì có
+> thể thử lại, nhưng bắt buộc phải xác minh bằng **tin tải mới hoàn toàn** — tin cũ đã nằm sẵn
+> trên NAND nên không phản ánh gì.
+>
+> Ghi công đúng chỗ: session viết `eb3c9b2` đã tách riêng hằng số và ghi sẵn cảnh báo *"REVERT
+> 1 DÒNG nếu breadboard không chịu nổi"* kèm đúng dấu hiệu nhận biết. Thiết kế đó đã tiết kiệm
+> nguyên một vòng truy lỗi.
+
+### Triệu chứng chính xác (user báo trên máy thật)
+
+Video và âm thanh giật, ngắt quãng **liên tục và đều đặn**, bất kể tin nhắn ngắn hay dài, có chữ
+đi kèm hay không. **Nhưng tổng thời lượng phát vẫn kết thúc đúng bằng thời lượng video.**
+
+Chi tiết cuối cùng quan trọng hơn vẻ ngoài: thời lượng do `maxDisplayTime` trong metadata điều
+khiển (`main.cpp`, nhánh `STATE_VIDEO`), **không** do audio. Nên "thời lượng đúng" KHÔNG chứng
+minh audio khoẻ — nó chỉ nói playback chạy theo đồng hồ, frame nào hỏng thì bị bỏ qua chứ không
+làm lệch timeline.
+
+### ĐÃ LOẠI TRỪ — đừng test lại
+
+1. **Cả 4 thay đổi Phase B (B1–B4).** Từng cái một:
+   - B1 chỉ chạy ở nhánh **timer wakeup**, và `player.stop()` được gọi ngay trước đó → không có
+     gì đang phát lúc nháy đèn.
+   - B2: `loop()` chỉ `vTaskDelay(500ms)`; `Task_MediaPlayer` lặp ~20 lần/giây (mỗi vòng decode
+     một frame 40–60ms). Vài chục lần đọc atomic mỗi giây là không đáng kể.
+   - B3 chỉ nằm trong vòng lặp **tải**, và guard chỉ bắn khi vượt 5,5 MB.
+   - B4 nằm trong `playItem()` (dòng 130–323), chạy **một lần mỗi tin**; `update()` mãi dòng 324
+     mới bắt đầu. Hơn nữa nó ở nhánh ảnh tĩnh nên video không bao giờ chạm tới.
+2. **Bug I2S sample rate ở §9** (`stop()` không reset rate phần cứng). **User đã tắt nguồn hẳn
+   rồi bật lại — KHÔNG hết giật.** Bug đó có đặc trưng "reset là hết" vì `init()` mở lại I2S ở
+   rate mặc định; reset không cứu được nghĩa là không phải nó. (Bug vẫn còn nguyên trong code,
+   vẫn cần sửa, nhưng **không phải** thủ phạm của lần này.)
+3. **"Revert về flash 1 vẫn lỗi" KHÔNG loại được đường ghi.** Hai lý do, cả hai đều bị bỏ sót lúc
+   đầu: (a) `7c1ac23` là **con** của `eb3c9b2` nên flash 1 CŨNG chứa bản ghi 20MHz; (b) byte hỏng
+   đã nằm sẵn trên NAND, lùi firmware không sửa dữ liệu đã ghi. Phát lại đúng những tin đó thì
+   bản nào cũng giật y hệt.
+
+### Phép thử hỏng — ghi lại để không dùng lại
+
+"Nhìn overlay log lúc phát để tìm `Bad jpegSize`" là **vô dụng**: video đẩy frame lên màn hình
+~20 lần/giây nên dòng log bị vẽ đè ngay. Không thấy overlay **không** có nghĩa là không có lỗi.
+Và dự án không dùng Serial (`Serial.begin()` đã bỏ, xem đầu `main.cpp`) nên không có đường đọc
+log nào khác trong lúc phát.
+
+### Giả thuyết đang thử (commit `31fdd1f`)
+
+`eb3c9b2` là commit gốc mà `security-hardening` rẽ ra — **có trước toàn bộ việc bảo mật, không
+phải của Phase A hay Phase B**. Nó làm 2 việc lớn ở tầng NAND, chưa cái nào được xác minh trên
+máy thật:
+- Nâng SPI **đường ghi** 4MHz → 20MHz. Chính commit đó ghi sẵn cảnh báo và cách lùi.
+- Đổi chiến lược erase sang **erase-as-you-write** (erase 1 block 64KB rồi erase tiếp khi con trỏ
+  ghi sắp chạm vùng chưa erase), thay cho erase nguyên slot 5,3MB. Đây là thay đổi rủi ro hơn
+  tốc độ, và **chưa được soi kỹ** — bất biến `_erasedUpToAddr` phải luôn đúng, sai một nhịp là
+  xoá đè lên dữ liệu vừa ghi.
+
+`31fdd1f` hạ đường ghi về 4MHz. **User đã build, flash, tải tin mới → chạy ổn.** Đóng hồ sơ.
+
+### Được minh oan luôn trong cùng lần test
+
+Bản chạy ổn (`31fdd1f`) **chứa toàn bộ** Phase A + Phase B, và chỉ khác bản giật đúng tốc độ ghi.
+Nên cùng lúc cũng loại được:
+- **erase-as-you-write** của `eb3c9b2` — giữ nguyên, không đụng, mà hết lỗi.
+- **`SPI.writeBytes()` bulk** của `eb3c9b2` — giữ nguyên, không đụng, mà hết lỗi.
+- `NandStorageProvider.cpp` (+59 dòng) — vẫn chưa ai đọc kỹ, nhưng không còn là nghi can.
+
+### Cách test cho đúng (ghi lại cho lần sau)
+
+Đổi tốc độ ghi **chỉ ảnh hưởng tin tải về SAU khi flash**. Phải tải tin **mới hoàn toàn** rồi mới
+đánh giá. Phát lại tin cũ sẽ vẫn giật và dễ kết luận nhầm là "sửa không ăn". Đây là bẫy đã suýt
+làm hỏng chẩn đoán: user revert về flash 1 rồi phát lại tin cũ, thấy vẫn lỗi, và điều đó KHÔNG
+loại được đường ghi như tưởng — vì `7c1ac23` cũng là con của `eb3c9b2` nên cũng ghi ở 20MHz, và
+byte hỏng thì đã nằm sẵn trên NAND rồi.
+
+---
+
+## 15. Phase D — CHỐT hướng **direct RTDB (idToken)**, 2026-09-05
+
+### Quyết định của user
+
+User cân nhắc cả hai rồi **chốt direct-RTDB**. Trong cùng phiên user có nói "dùng device-auth
+backend" trước, sau đó **đổi lại**. Bản chốt là **direct-RTDB**. Đừng mở lại tranh luận này.
+
+### Ba ẩn số của §10 — ĐÃ CÓ ĐÁP ÁN (đọc code thật, không suy đoán)
+
+Khảo sát trước khi user chốt, ghi lại vì vẫn có giá trị nếu sau này quay xe:
+
+1. **Backend ĐÃ deploy.** `firebase functions:list` → `api | v1 | https | us-central1 | nodejs20`.
+   URL: `https://us-central1-iot-app-839a2.cloudfunctions.net/api`, device routes ở `/device`.
+2. **`PROVISIONING_KEY`** = biến môi trường `DEVICE_PROVISIONING_KEY`, so với header
+   `X-Provisioning-Key` ở `POST /device/register`. **Hiện CHƯA đặt** — không có `.env` nào trong
+   `sendlove_backend`, và middleware từ chối MỌI đăng ký kèm 500 khi biến trống.
+3. **`/device/poll` trả SIGNED URL**, không phải path Storage:
+   `generateDownloadUrl(m.bin_url, 15)` → GCS signed URL **v4**, hạn **15 phút**, `action: 'read'`.
+
+### Lỗ Storage: ĐÓNG ĐƯỢC bằng hướng này — đính chính "ẩn số" của §11
+
+§11 ghi đây là "ẩn số còn lại" và ngụ ý direct-RTDB không giải được. **Nói vậy là quá bi quan.**
+Cái §11 không làm được là *kiểm chứng*, không phải *thiết kế* — và lý do không kiểm chứng được
+chính là vì Storage đang mở, nên token rác cũng trả 200. Siết rules xong thì kiểm chứng được ngay.
+
+Khảo sát 2026-09-05 cho thấy đủ mảnh ghép, đo bằng đọc code:
+
+1. **Đường dẫn Storage**: `media/{boxId}/{messageId}/video.bin`
+   (`message.service.ts:23` — `const basePath = \`media/${boxId}/${messageId}\``).
+2. **`boxId` trong path ĐÚNG BẰNG `auth.uid`** — cả hai đều là `ESP32_A1B2C3D4E5F6`. Nên rule
+   viết thẳng được, không cần bảng tra cứu:
+   `match /media/{boxId}/{allPaths=**} { allow read: if request.auth.uid == boxId; }`
+3. **Không ai khác đọc Storage trực tiếp**: web export `storage` ở `config/firebase.js:23` nhưng
+   **không file nào import** (y hệt trường hợp `database` ở §11). Upload của web đi qua **signed
+   POST policy** do backend cấp, mà signed POST **bypass rules**. Nên deny-all cho `write` không
+   làm hỏng gì.
+4. **Firmware gắn được header**: nó đã dùng `http.addHeader()` ở 5 chỗ. Media URL dựng ở
+   `NetworkManager.cpp:1028` (voice) và `:1388` (video).
+
+⚠️ **Scheme header KHÁC với RTDB**: Firebase Storage nhận `Authorization: Firebase <idToken>`,
+**không phải** `Bearer`. `_authHeaderValue` hiện giữ sẵn dạng `"Bearer <jwt>"` cho RTDB nên
+**không dùng lại được** cho Storage — phải dựng chuỗi riêng.
+
+⚠️ **Bucket**: firmware trỏ `iot-app-839a2.firebasestorage.app` (không phải `.appspot.com` —
+curl thử `.appspot.com` trả 404). `firebase.json` khai `"storage": { "rules": "storage.rules" }`
+không kèm bucket → deploy vào bucket mặc định. Xác minh bucket mặc định đúng là cái firmware
+đang gọi trước khi deploy.
+
+Đổi lại, direct-RTDB được: code đã viết xong ở `7c1ac23`; không phải deploy lại backend; không
+cần provisioning key; và **né được cái bẫy tiền tố `box_`** (xem dưới).
+
+### Cái bẫy `box_` — chỉ ảnh hưởng hướng device-auth, ghi lại phòng khi quay xe
+
+`device-auth.middleware.ts` tra box bằng `` `box_${req.deviceId}` ``, nhưng RTDB thật có khoá là
+`ESP32_A1B2C3D4E5F6` (đo ở §11), **không có tiền tố**. Đi hướng device-auth mà không xử lý chỗ
+này thì mọi request trả 401. Hướng direct-RTDB không dính, vì `BOX_ID` trong `config_secrets.h`
+**đúng bằng** `ESP32_A1B2C3D4E5F6` → rule `auth.uid === $box_id` khớp thẳng.
+
+### Ba điều kiện để bật `FIREBASE_USE_IDTOKEN 1` — còn 2
+
+- (a) Bật Email/Password trên Console — **CHƯA**. REST hiện trả `PASSWORD_LOGIN_DISABLED`.
+- (b) Chạy `provision_box_auth.js` + điền 2 trường vào `config_secrets.h` — **CHƯA**, vẫn `FILL_ME`.
+      Điều kiện chạy đã đủ: `serviceAccountKey.json` có, `firebase-admin` đã cài.
+      **Hai giá trị đó do script IN RA, không tự nghĩ.** Mật khẩu chỉ hiện MỘT LẦN.
+- (c) Deploy `database.rules.json` — ✅ **XONG 2026-09-04** (xem §11).
+
+Bật cờ khi chưa đủ (a) và (b) = box **mất kết nối hoàn toàn**.
+
+**Cập nhật 2026-09-05:** điều kiện (a) **ĐÃ XONG** — user bật Email/Password trên Console. Đo
+lại bằng REST: `PASSWORD_LOGIN_DISABLED` → `INVALID_LOGIN_CREDENTIALS`, nghĩa là provider đã
+xử lý yêu cầu, chỉ từ chối vì chưa có tài khoản đó. Còn lại mỗi (b).
+
+---
+
+## 16. Cấp danh tính cho box khi SẢN XUẤT HÀNG LOẠT — CHƯA LÀM (2026-09-05)
+
+### Vấn đề (chưa gây hại lúc này, nhưng chặn sản xuất)
+
+`BOX_ID`, `BOX_AUTH_EMAIL`, `BOX_AUTH_PASSWORD` đều là **hằng số biên dịch** trong
+`config_secrets.h`. `BOX_ID` dùng ở 7 chỗ trong `NetworkManager.cpp`, **không nơi nào suy ra từ
+MAC**. Nên mỗi box cần một bản firmware riêng → 1000 box = 1000 lần build + 1000 ảnh khác nhau.
+`provision_box_auth.js` cũng chỉ chạy một box mỗi lần và in mật khẩu đúng một lần.
+
+Vấn đề này có **trước** và **độc lập với** chuyện email/password — nó là chuyện danh tính nằm
+trong binary.
+
+### Quyết định của user: **phương án A — jig nạp tại xưởng**
+
+Lý do user nêu: **không muốn backend gánh thêm việc.**
+
+Đưa danh tính ra khỏi binary vào **NVS**, để mọi box dùng chung một ảnh firmware. Công cụ tại
+xưởng ghi `BOX_ID` + credentials vào NVS qua serial sau khi flash; script tạo hàng loạt tài khoản
+Auth và xuất ra file. Xác định, chạy offline, không phụ thuộc backend lúc sản xuất.
+
+### Phương án ĐÃ LOẠI: B — tự đăng ký ở lần boot đầu
+
+Box tự suy `BOX_ID` từ efuse MAC, gọi `POST /device/register` kèm provisioning key, backend tạo
+tài khoản rồi trả credentials, box lưu NVS. Backend đã dựng sẵn một nửa (`requireProvisioningKey`,
+sinh `device_secret`/`rcode`/`scode`), và làm hướng này thì **bỏ hẳn được email/password** — backend
+ký custom token cho `uid = BOX_ID`, không mật khẩu nào nằm trên thiết bị.
+
+**User bác vì không muốn backend làm quá nhiều.** Đừng đề xuất lại trừ khi user mở lại.
+
+### Trạng thái: CHƯA XỬ LÝ, cố ý
+
+Không nằm trong phạm vi hiện tại. Việc đang làm (bật Email/Password + chạy script cho **một** box)
+vẫn là đường ngắn nhất để kiểm chứng rules và luồng idToken trên máy thật. Bài toán sản xuất giải
+sau khi luồng này chạy được.
+
+Khi quay lại làm, việc thật sự phải làm là: bỏ 3 hằng số biên dịch, đọc từ NVS, và viết công cụ jig.
+
+---
+
+## 17. 🔴 LỖI CHẶN: RTDB KHÔNG nhận idToken qua header — chỉ qua `?auth=` (2026-09-05)
+
+### Đo thật, bằng token HỢP LỆ của chính box
+
+Sau khi tạo xong tài khoản Auth cho box, đăng nhập lấy idToken thật (945 byte,
+`localId = ESP32_A1B2C3D4E5F6` đúng bằng `BOX_ID`) rồi gọi
+`/boxes/ESP32_A1B2C3D4E5F6/status.json`:
+
+| Cách gửi | Kết quả |
+|---|---|
+| `Authorization: Bearer <idToken>` | **401** `"Unauthorized request."` |
+| `Authorization: Firebase <idToken>` | **401** |
+| `?auth=<idToken>` | **200** ✅ |
+| không gửi gì | 401 |
+
+**Kết luận: RTDB REST chỉ nhận idToken qua query `?auth=`.** Không scheme header nào chạy.
+`Bearer` ở RTDB dành cho **OAuth2 access token** của service account, không phải Firebase idToken.
+
+### Hệ quả: code trong `7c1ac23` bật lên là hỏng
+
+`fbAuthQuery()` ở chế độ idToken trả về **chuỗi rỗng** (vì token lẽ ra đi qua header), còn
+`addAuthHeader()` gắn `Bearer`. Nên bật `FIREBASE_USE_IDTOKEN 1` = **mọi request RTDB trả 401**.
+Chưa flash nên chưa ai thấy.
+
+Tin tốt: **rules thì ĐÚNG.** `?auth=` trả 200 chứng minh `auth.uid === $box_id` khớp và phân
+quyền chạy chuẩn. Chỉ sai chỗ vận chuyển token.
+
+### Vì sao không phát hiện sớm hơn
+
+Không phải lỗi bất cẩn đơn thuần — nó là bẫy đo lường: **không thể phân biệt "header bị từ chối"
+với "header được chấp nhận" khi cơ sở dữ liệu đang mở**, vì lúc đó thiếu header vẫn 200. Phải có
+rules siết + token thật mới đo được. Bài học: **đừng kiểm chứng cơ chế xác thực trên một hệ thống
+chưa bật xác thực.**
+
+### Vấn đề kích thước — có thật, phải giải cùng lúc
+
+Lập luận của §11 vẫn đúng: JWT ~945 byte, mà `authQ[64]` và `url[256]`/`url[384]` đều quá nhỏ.
+Nới thẳng các biến cục bộ này sẽ thêm ~2.8KB **stack** cho mỗi hàm, trong khi
+`TASK_STACK_NETWORK` chỉ **6144** → rủi ro tràn stack.
+
+**ĐÃ SỬA ở `274ef00`:** dựng URL vào **một buffer thành viên dùng chung**
+`_url[FIREBASE_URL_MAX_LEN = 1792]` thay vì biến cục bộ. An toàn về reentrancy vì toàn bộ các lời
+gọi này chạy tuần tự trong cùng network task, và `HTTPClient::begin()` copy URL vào String riêng.
+Bỏ hẳn `addAuthHeader()` và `fbAuthQuery()`, thay bằng `appendAuth(char sep)`. `_authHeaderValue`
+đổi thành `_idToken` giữ JWT thô — tiền tố `"Bearer "` chỉ tồn tại vì `addHeader()`.
+
+Kích thước thật: token 945 byte → URL messages 1105 byte. Xấu nhất theo
+`FIREBASE_ID_TOKEN_MAX_LEN = 1400` → 1566 byte, biên còn 226.
+
+### ✅ ĐÃ KIỂM CHỨNG ĐẦU-CUỐI BẰNG REST, KHÔNG TỐN LƯỢT FLASH NÀO
+
+Đăng nhập lấy idToken thật của box rồi gọi **cả 6 thao tác firmware sẽ làm**, đúng hình dạng URL
+mà code mới sinh ra:
+
+| Thao tác | URL | Kết quả |
+|---|---|---|
+| status GET | `?auth=` | **200** |
+| flags GET | `?auth=` | **200** |
+| alarm_list GET | `?auth=` | **200** |
+| messages GET | `?orderBy=...&startAt=...&auth=` | **200** |
+| flags PATCH | `?auth=` | **200** |
+| status PATCH | `?auth=` | **200** |
+
+Hai PATCH là quan trọng nhất — **quyền GHI chưa từng được thử bằng token của box**. Nếu nó 401
+thì `sync_alarms_flag` sẽ kẹt `true` vĩnh viễn, đúng kiểu hỏng mà §10 mục 4 nói là ẩn tới tận lần
+báo thức sau. Giờ đã chứng minh ghi được.
+
+PATCH chạy an toàn vì đúng lúc đó cả 3 trường firmware ghi (`sync_alarms_flag`, `emergency_ota`,
+`normal_ota`) đều đang là `false`, nên gửi đúng payload của firmware là **no-op thật sự** —
+đã đọc lại sau khi PATCH, dữ liệu y nguyên.
+
+**Nghĩa là §10 mục 1–4 giờ đã được xác minh NGOÀI phần cứng.** Flash chỉ còn để xác nhận.
+
+### Chưa đụng tới: đường Storage
+
+`addStorageAuthHeader()` dùng `Authorization: Firebase <idToken>` — đó là scheme **Storage** ghi
+trong tài liệu, khác dịch vụ nên kết quả của RTDB ở trên **không bác bỏ nó**. Vẫn chưa verify được
+vì Storage đang mở (token rác cũng 200), đúng như §11 đã ghi. Verify sau khi deploy storage.rules.
+
+---
+
+## 18. Endpoint auth của Google trả **chunked** — không đọc bằng stream thô (2026-09-05)
+
+### Triệu chứng trên máy thật
+
+```
+[NET] auth: thieu idToken
+[NET] sync abort: khong lay duoc idToken
+```
+
+Không kèm `signIn fail` (nên POST đã trả **200**) và không kèm `auth JSON err` (nên parse **không
+hề lỗi**). Nghĩa là parse thành công nhưng `doc["idToken"]` rỗng — nghe vô lý, và đó chính là manh mối.
+
+### Nguyên nhân gốc
+
+`parseAuthResponse()` đọc qua `http.getStreamPtr()` — **stream thô, chưa giải mã chunked**. Đo thật:
+
+| Endpoint | Encoding |
+|---|---|
+| `identitytoolkit.googleapis.com` (signInWithPassword) | **chunked**, không Content-Length |
+| `securetoken.googleapis.com` (refresh) | **chunked** |
+| RTDB `...firebasedatabase.app` | `Content-Length` ✅ |
+
+Với chunked, stream thô chứa nguyên dòng kích thước chunk dạng hex trước JSON:
+`4a1\r\n{"kind":...`. ArduinoJson đọc phải `4a1`, **parse `4` thành một SỐ, kết thúc THÀNH CÔNG**,
+rồi `doc["idToken"]` trên một số thì trả null → báo "thiếu idToken" mà không có lỗi JSON nào.
+
+Chỉ `http.getString()` mới giải mã chunked. Đã đổi cả **hai** đường auth sang `getString()`.
+
+### Vì sao đường messages KHÔNG dính
+
+`checkAndDownloadNewMessages()` cũng parse bằng stream thô (`deserializeJson(doc, *stream)`),
+nhưng **RTDB gửi `Content-Length`** nên không có chunk header. Đó là lý do nó luôn chạy đúng.
+**Đừng "sửa" chỗ đó** — zero-copy stream parse ở đó là cố ý, tránh cấp phát String lớn.
+Nếu ngày nào RTDB đổi sang chunked thì nó sẽ hỏng đúng kiểu này.
+
+### Bài học
+
+Hai lần liên tiếp (§17 và §18) đều là **cùng một kiểu lỗi**: một tầng im lặng trả về thứ trông
+như thành công. §17 là header bị từ chối mà không phân biệt được; §18 là parse "thành công" ra
+sai kiểu. Cả hai đều chỉ lộ ra khi có **log nói rõ đã nhận được gì**.
+
+Nên đã thêm vào nhánh lỗi: `DLOG("[NET] auth: thieu idToken; body=%s", body.substring(0,60))`.
+60 ký tự đầu chỉ chứa `kind`/`error`, chưa tới chỗ có token nên không lộ bí mật.
+
+---
+
+## 19. ✅ LỖ HỔNG STORAGE ĐÃ ĐÓNG — đo trên bucket thật (2026-09-05)
+
+User đã chạy `firebase deploy --only storage --project iot-app-839a2`, CLI báo
+`released rules storage.rules to firebase.storage`.
+
+### Đo thật, đúng URL mà firmware dựng
+
+`https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/media%2FESP32_A1B2C3D4E5F6%2Fmsg_...%2Fvideo.bin?alt=media`
+
+| Cách gọi | Trước deploy | Sau deploy |
+|---|---|---|
+| không auth | 200 | **403** ✅ |
+| `Authorization: Firebase <idToken>` | 200 | **206** ✅ |
+| `Authorization: Bearer <idToken>` | 200 | **206** |
+
+206 = Partial Content, đúng vì probe dùng `-r 0-0` xin 1 byte; đó là **thành công**.
+
+### Ẩn số của §11 đã giải xong
+
+§11 ghi "gửi `Authorization: Firebase <idToken>` là giả thuyết chưa verify được, vì Storage đang
+mở nên token rác cũng trả 200". Giờ Storage đã siết nên đo được, và **scheme đó đúng**.
+
+Phát hiện phụ: Storage nhận **cả hai** scheme `Firebase` và `Bearer`. Khác hẳn RTDB (§17) vốn từ
+chối cả hai. Nên lựa chọn `Firebase` trong `addStorageAuthHeader()` là an toàn, không phải sửa.
+
+### Trạng thái bảo mật hiện tại
+
+- ✅ RTDB: đóng với người ngoài (§11), và box đã hạ quyền xuống `auth.uid === $box_id` thật sự
+  vì `FIREBASE_USE_IDTOKEN 1` đã chạy trên máy thật.
+- ✅ Storage: đóng, chỉ box đọc được media của chính nó.
+- ⚠️ Còn lại: AP `SendloveBox-Setup` vẫn mở + `/save` không CSRF (quyết định sản phẩm, chờ user).
+- ⚠️ Còn lại: refresh token nằm trong NVS = cùng bản dump flash. Chỉ Flash Encryption +
+  Secure Boot mới chống, chưa bàn tới.
+
+### Lưu ý cho phiên sau: Simulator KHÔNG phải bằng chứng
+
+Rules Simulator trong Console chỉ chạy thử biểu thức rule, **không** chứng minh hệ thống thật đã
+đổi. Bằng chứng là request HTTP thật tới bucket production, như bảng trên. Cùng loại sai lầm đã
+làm §11 kết luận sai về header RTDB.
+
+---
+
+## 20. Đầy slot không được làm ngừng heartbeat/cờ/báo thức (2026-09-05, `99091ab`)
+
+### Lỗi
+
+Cổng "hết slot" đặt sai tầng — nó chặn **cả chu kỳ sync** thay vì riêng bước tải tin:
+
+- `main.cpp` sync định kỳ 10s: `&& !isStorageFull` trong điều kiện
+- `main.cpp` sync sau wakeup: `if (isFull()) DLOG("post-wakeup sync skip: FULL")`
+
+Hậu quả khi 3 slot đầy: box **im hoàn toàn** — mất heartbeat, mất đọc cờ, mất đồng bộ báo thức,
+mất OTA và pairing flag. Nhìn từ ngoài trông như "phải có tin mới thì `sync_alarms_flag` mới về
+`false`", nhưng thật ra chẳng liên quan gì tới tin nhắn.
+
+Ý định ban đầu ("đầy rồi thì khỏi tải tin cho phí") đúng, chỉ là đặt điều kiện ở ngoài cùng.
+`checkFirebaseFlags()` là bước 4, `checkAndDownloadNewMessages()` là bước 5 — chỉ bước 5 cần nó.
+
+### Đã sửa
+
+Chuyển cổng vào đúng bước 5 trong `syncWakeup()`, kèm
+`DLOG("[NET] msg skip: het slot (cac buoc khac van chay)")`. Bỏ điều kiện khỏi cả 2 chỗ gọi.
+
+### ⚠️ Đánh đổi đã biết — ĐỪNG tối ưu ngược lại
+
+Box đầy slot giờ **vẫn sync mỗi 10 giây** (2 handshake TLS mỗi vòng) thay vì im lặng ⇒ **tốn pin
+hơn trước**. Đó là cái giá để báo thức và OTA còn hoạt động khi đầy. Nếu sau này muốn tiết kiệm
+thì **giãn chu kỳ** khi đầy, **không** được quay lại chặn cả chu kỳ.
+
+### Ghi chú: `a_flag` vs `sync_alarms_flag`
+
+User thiết kế `a_flag` ở backend cho đúng việc này (`/device/poll` trả `alarm_list` khi nó bật),
+nhưng firmware đi thẳng RTDB và đọc `sync_alarms_flag`. Hai tên cho cùng một mục đích. Không sai,
+nhưng là nợ nên thống nhất. Chưa đụng, ngoài phạm vi.
+
+### Đã rút lại: "không full cũng không sync"
+
+User có báo thêm triệu chứng "chỉ có 1 msg, không có tin mới trên cloud thì config cũng không
+sync", sau đó **tự rút lại**. Đã đọc hết đường đi và xác nhận không có cổng nào liên quan tin
+nhắn: `checkFirebaseFlags()` tự mở TLS riêng, tự GET `flags.json`, tự PATCH reset, không đụng gì
+tới messages; `triggerFirebaseSync` chỉ là alias của `triggerWakeupSync`. **Chỉ `isFull` là thật.**

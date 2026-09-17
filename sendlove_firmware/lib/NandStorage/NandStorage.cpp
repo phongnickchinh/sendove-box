@@ -9,26 +9,46 @@
 static constexpr uint8_t W25Q_READ_DATA      = 0x03;
 static constexpr uint8_t W25Q_READ_STATUS_1  = 0x05;
 
-// SPI transaction settings cho NAND
-// 4MHz: phù hợp cho breadboard, đảm bảo MISO đủ thời gian drive signal ổn định.
-// Tăng lên 20-33MHz chỉ khi dùng PCB chính thức với đường trace ngắn.
+// SPI transaction settings cho NAND. Ba hằng số cho ba luồng khác nhau — đừng gộp.
+//
+// Trần phần cứng (đo/tra datasheet, không phải phỏng đoán): chân 4/5/6 không trùng
+// IOMUX của FSPI trên ESP32-C3 nên SPI đi qua GPIO matrix, trần thực tế quanh 40MHz.
+// Về phía chip W25Q128JV: opcode đọc 0x03 chịu ~50MHz, Page Program 0x02 chịu 133MHz.
+// Nghĩa là giới hạn thật nằm ở DÂY trên breadboard, không nằm ở chip.
+
+// XOÁ (eraseSector / eraseRange / formatAll). Giữ 4MHz và đừng nâng.
+// Nâng lên 20MHz tiết kiệm khoảng 6 MICRO giây: lệnh erase chỉ dài 4 byte
+// (opcode + 3 byte địa chỉ), còn 150-2000ms xoá thật diễn ra BÊN TRONG chip,
+// không liên quan clock SPI. Đổi lại, một byte địa chỉ lỗi trên dây = xoá nhầm
+// sector khác, mất dữ liệu im lặng. Canh bạc tệ nhất trong ba đường.
 static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
-// Riêng đường ĐỌC chạy 20MHz. Không phải phỏng đoán: acquireSPI() bên dưới đã
-// mở transaction 20MHz trên đúng bộ dây này trước mỗi lần truy cập flash, nên
-// bus vốn đã chạy ở tốc độ đó. Opcode 0x03 của W25Q128JV chịu tới ~50MHz.
-// Không đẩy cao hơn: chân 4/5/6 không trùng IOMUX của FSPI trên ESP32-C3 nên
-// SPI đi qua GPIO matrix, trần thực tế quanh 40MHz.
-// Đường GHI/XOÁ vẫn giữ nguyên 4MHz vì không nằm trong luồng phát.
-static const SPISettings NAND_READ_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE3);
+// ĐỌC (readRaw) — HẠ 20MHz -> 4MHz ngày 2026-09-05, sau khi giật QUAY LẠI dù
+// đường ghi đã ở 4MHz. Hạ nốt đường đọc thì phát mượt trở lại (user xác nhận).
+//
+// Lý thuyết ở §8 nói ngược: đọc chậm thì giữ spiMutex lâu, giành bus với render
+// JPEG và gây giật. Thực tế bác lại — đọc CHẬM HƠN 5 lần lại MƯỢT HƠN. Điều đó
+// chứng minh vấn đề là TÍNH TOÀN VẸN DỮ LIỆU trên dây, không phải tranh chấp
+// bus. 20MHz trên breadboard này chập chờn, không phải hỏng hẳn: nó từng chạy
+// ổn suốt từ 8d9ef7d nên rất dễ tưởng là an toàn.
+//
+// Đừng nâng lại trên breadboard. Lên PCB thật trace ngắn thì thử lại được,
+// nhưng phải đo bằng tin tải MỚI và phát nhiều lần — lỗi này không tái hiện
+// mỗi lần.
+static const SPISettings NAND_READ_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
-// Đường GHI cũng 20MHz, cùng lập luận với đường đọc ở trên (acquireSPI() vốn đã mở
-// transaction 20MHz trên đúng bộ dây này). Opcode Page Program 0x02 của W25Q128JV
-// chịu tới 133MHz nên 20MHz rất dư an toàn về phía chip.
-// Tách hằng số riêng (không dùng chung NAND_SPI_SETTINGS 4MHz của lệnh erase) để
-// REVERT 1 DÒNG nếu breadboard không chịu nổi: dấu hiệu là dữ liệu tải về bị hỏng
-// (ảnh nhiễu / "Bad jpegSize" / audio rè bất thường).
-static const SPISettings NAND_WRITE_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE3);
+// GHI (writeRaw) — HẠ 20MHz -> 4MHz (2026-09-05). Ban đầu là để chẩn đoán, giờ
+// đã thành kết luận: cả ba đường đều chạy 4MHz và đó là cấu hình duy nhất phát
+// mượt ổn định trên breadboard này.
+// eb3c9b2 nâng đường này 4->20MHz và chính commit đó ghi sẵn: "REVERT 1 DÒNG nếu
+// breadboard không chịu nổi: dấu hiệu là dữ liệu tải về bị hỏng (ảnh nhiễu /
+// Bad jpegSize / audio rè bất thường)". User gặp đúng lớp triệu chứng đó.
+// Mất mát tốc độ nhỏ hơn vẻ ngoài: phần tăng tốc chính của eb3c9b2 là chuyển
+// SPI.transfer() từng byte sang SPI.writeBytes() bulk — thay đổi đó ĐỘC LẬP với
+// clock và vẫn giữ nguyên. 4MHz bulk ~500KB/s, vẫn nhanh hơn tốc độ tải Wi-Fi.
+// LƯU Ý: đổi giá trị này KHÔNG chữa được tin đã tải về từ trước — byte hỏng đã
+// nằm trên NAND. Phải tải tin MỚI HOÀN TOÀN mới đánh giá được.
+static const SPISettings NAND_WRITE_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
 bool NandStorage::init(SemaphoreHandle_t spiMutex) {
     _spiMutex = spiMutex;

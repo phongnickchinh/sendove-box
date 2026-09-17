@@ -29,9 +29,12 @@
       }
     ]
   },
-  "database": {
-    "rules": "database.rules.json"
-  },
+  "database": [
+    {
+      "instance": "iot-app-839a2",
+      "rules": "database.rules.json"
+    }
+  ],
   "storage": {
     "rules": "storage.rules"
   },

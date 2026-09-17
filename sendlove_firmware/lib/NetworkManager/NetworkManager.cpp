@@ -1,5 +1,6 @@
 #include "NetworkManager.h"
 #include "captive_portal_html.h"
+#include "firebase_root_ca.h"
 #include <DNSServer.h>
 #include <time.h>
 #include <vector>
@@ -432,6 +433,83 @@ bool NetworkManager::isWebServerRunning() const {
 // Bao ve buoc gianh quyen co _isSyncing giua cac task khac do uu tien.
 static portMUX_TYPE s_syncMux = portMUX_INITIALIZER_UNLOCKED;
 
+// Moc Unix hop le toi thieu (2020-09-13). Duoi moc nay nghia la RTC chua tung
+// duoc set — mbedTLS se tu choi chung chi voi BADCERT_FUTURE.
+static constexpr time_t MIN_VALID_EPOCH = 1600000000;
+
+// Moi WiFiClientSecure toi Firebase deu phai di qua day. Truoc kia moi cho tu
+// goi setInsecure() -> tat hoan toan viec kiem tra chung chi, ai dung giua mang
+// cung doc/sua duoc noi dung va lay duoc FIREBASE_AUTH_SECRET.
+//
+// Dung setCACert() chu KHONG phai setCACertBundle(): da doc source Arduino core
+// 2.0.17, arduino_esp_crt_bundle_attach() return som voi log_e("Failed to attach
+// bundle") neu chua goi arduino_esp_crt_bundle_set() truoc — wrapper Arduino
+// KHONG nhung san bundle mac dinh, muon dung phai tu sinh blob bang
+// gen_crt_bundle.py. setCACert voi PEM tuong minh la duong chac chan.
+//
+// KHONG dat setHandshakeTimeout() o day (mac dinh 120s). Siet ngan lai khong
+// giup gi cho bao mat, ma link Wi-Fi yeu (associate + DHCP da ton 3-8s, xem
+// MEMORY.md Fix vong 4) se de ra mot kieu fail trong giong loi cert nhung
+// khong phai.
+#ifndef FIREBASE_TLS_VERIFY
+// Fail-closed: neu co bi mat (doi ten, thieu include config.h) thi `#if` cua mot
+// macro chua dinh nghia am tham thanh 0 -> tu dong quay ve setInsecure() ma
+// khong ai biet. Bat loi luc bien dich thay vi im lang ho MITM.
+#error "FIREBASE_TLS_VERIFY chua duoc dinh nghia (xem include/config.h)"
+#endif
+
+static void configureTlsClient(WiFiClientSecure& client) {
+#if FIREBASE_TLS_VERIFY
+    client.setCACert(FIREBASE_ROOT_CA);
+#else
+    client.setInsecure();
+#endif
+}
+
+// Loi mbedTLS that su, doc tu client sau khi HTTPClient chi tra ve -1 chung
+// chung. Phan biet duoc "chung chi khong hop le" voi "khong noi duoc toi server".
+static void logTlsError(WiFiClientSecure& client, const char* where) {
+    char buf[100] = "";
+    int err = client.lastError(buf, sizeof(buf));
+    if (err != 0) {
+        DLOG("[NET] tls %s: %s", where, buf);
+    }
+}
+
+// Chuoi xac thuc noi vao cuoi URL.
+// - Che do idToken: RONG. Token di qua header Authorization: Bearer. Bat buoc
+//   phai lam vay vi idToken JWT dai ~900-1100 byte, nhet vao `?auth=` se tran
+//   cac buffer url[256]/url[384] dang dung.  (Da kiem chung 2026-09-03: RTDB
+//   REST co parse header nay — token rac tra ve 401 "Unauthorized request.",
+//   khac han 200 khi khong gui header.)
+// - Che do cu: `?auth=<Database Secret>` nhu truoc.
+// `sep` la ky tu ngan cach dung cho URL do: '?' neu chua co query nao, '&' neu
+// da co san tham so khac.
+// Noi tham so auth vao CUOI _url.
+//
+// Vi sao khong dung header: da do that 2026-09-05 bang idToken hop le cua chinh
+// box (945 byte, localId khop BOX_ID) tren /boxes/<BOX_ID>/status.json:
+//     Authorization: Bearer <idToken>    -> 401 "Unauthorized request."
+//     Authorization: Firebase <idToken>  -> 401
+//     ?auth=<idToken>                    -> 200
+// RTDB chi nhan `Bearer` cho OAuth2 access token cua service account, khong phai
+// Firebase idToken. Xem MEMORY.md muc 17. Dung sua nguoc lai.
+void NetworkManager::appendAuth(char sep) {
+    size_t len = strlen(_url);
+    if (len >= sizeof(_url)) return;
+#if FIREBASE_USE_IDTOKEN
+    if (_idToken[0] == '\0') return;
+    int n = snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, _idToken);
+#else
+    int n = snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, FIREBASE_AUTH_SECRET);
+#endif
+    // Cat cut token cho ra 401 TRONG Y HET voi 401 do rule tu choi. Chinh su
+    // nhap nhang kieu nay da lam muc 11 ket luan sai mot vong. Phai keu len.
+    if (n < 0 || (size_t)n >= sizeof(_url) - len) {
+        DLOG("[NET] auth query BI CAT CUT (url %u)", (unsigned)strlen(_url));
+    }
+}
+
 // Bao lau khong nhan them byte nao thi coi la stream chet. http.setTimeout(30000)
 // chi ap cho mot lan doc, khong chot duoc ca vong lap.
 static const uint32_t DOWNLOAD_STALL_TIMEOUT_MS = 30000;
@@ -510,7 +588,36 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     // 2. Đồng bộ thời gian NTP trước để các mốc timestamp phía sau luôn chính xác
     syncNtpTime(5000);
 
+    // Chốt chặn thời gian — BẮT BUỘC đi kèm setCACert(), không phải tuỳ chọn.
+    // Với setInsecure() thì NTP hỏng vẫn chạy được. Với VERIFY_REQUIRED thì
+    // time(nullptr) ≈ 0 lúc boot nguội -> mbedTLS trả BADCERT_FUTURE -> MỌI
+    // handshake fail. Bỏ bước này là biến "NTP chập chờn" thành "mất hẳn cloud".
+    if (time(nullptr) < MIN_VALID_EPOCH) {
+        // Phải hạ cờ: syncNtpTime() short-circuit 60s nếu _isTimeSynced đang bật,
+        // gọi lại suông sẽ return true ngay mà không hề xin lại gói NTP nào.
+        _isTimeSynced = false;
+        DLOG("[NET] time invalid -> NTP retry 15s");
+        syncNtpTime(15000);
+    }
+    if (time(nullptr) < MIN_VALID_EPOCH) {
+        // Marker RIÊNG, không lẫn với http.GET() = -1: ở đây chưa hề mở kết nối
+        // nào cả. Thấy dòng này nghĩa là lỗi NTP, không phải lỗi TLS/mạng.
+        DLOG("[NET] sync abort: time invalid");
+        _isSyncing = false;
+        return false;
+    }
+
     if (isPlaybackActive()) { _isSyncing = false; return false; }
+
+    // 2b. Lấy/gia hạn idToken TRƯỚC mọi lời gọi Firebase. Đặt sau chốt chặn thời
+    // gian vì hạn token so bằng time(nullptr) — RTC sai thì token vừa lấy về đã
+    // bị coi là hết hạn ngay. Token sống 1 giờ nên hầu hết chu kỳ sync chỉ đọc
+    // lại biến trong RAM, không tốn request nào.
+    if (!ensureIdToken()) {
+        DLOG("[NET] sync abort: khong lay duoc idToken");
+        _isSyncing = false;
+        return false;
+    }
 
     // 3. Update Status (Heartbeat)
     updateFirebaseStatus(batteryPercent, isCharging);
@@ -524,25 +631,287 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
 
     if (isPlaybackActive()) { _isSyncing = false; return false; }
 
-    // 5. Check and download new messages
+    // 5. Check and download new messages.
+    //
+    // Cong "het slot" nam O DAY chu khong o ngoai cung. Truoc 2026-09-05 no nam
+    // tren ca chu ky (main.cpp: `&& !isStorageFull` cho sync 10s, va nhanh
+    // "post-wakeup sync skip: FULL"), nen khi day slot thi box im hoan toan:
+    // mat heartbeat, mat doc co, mat dong bo bao thuc, mat OTA va pairing flag.
+    // Y dinh ban dau chi la "day roi thi khoi tai tin cho phi" — dung, nhung chi
+    // ap cho RIENG buoc nay.
     if (storage != nullptr) {
-        checkAndDownloadNewMessages(storage);
+        if (storage->isFull()) {
+            DLOG("[NET] msg skip: het slot (cac buoc khac van chay)");
+        } else {
+            checkAndDownloadNewMessages(storage);
+        }
     }
 
     _isSyncing = false;
     return true;
 }
 
-bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isCharging) {
+// ============================================================================
+// Firebase Auth — idToken riêng của box thay cho Database Secret quyền admin
+// ============================================================================
+// Cả hai endpoint dưới đây đã đo chain thật (2026-09-03): identitytoolkit và
+// securetoken đều về GTS Root R4 — đã có sẵn trong firebase_root_ca.h, không
+// phải nhúng thêm chứng chỉ nào.
+
+// Firebase Storage NGUOC voi RTDB: no CO nhan header, va scheme la
+// "Firebase <idToken>" (khong phai "Bearer"). Khac dich vu, khac quy uoc.
+//
+// CHUA VERIFY DUOC tren may that: Storage hien dang mo nen gui token rac cung
+// tra 200, khong phan biet duoc "duoc chap nhan" voi "khong can thiet". Chi do
+// duoc sau khi deploy storage.rules. Day chinh la cai bay da lam muc 11 ket luan
+// sai ve header cua RTDB — dung lap lai kieu suy luan do.
+//
+// Dung String thay vi buffer stack ~1.4KB: TASK_STACK_NETWORK chi 6144 va cho nay
+// da nam sau trong call-chain. addHeader() nhan const String& nen dang nao cung
+// sinh String tam — khai bao tuong minh khong ton them gi.
+void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
+#if FIREBASE_USE_IDTOKEN
+    if (_idToken[0] != '\0') {
+        String h = "Firebase ";
+        h += _idToken;
+        http.addHeader("Authorization", h);
+    }
+#else
+    (void)http;
+#endif
+}
+
+void NetworkManager::noteAuthFailure(int httpCode, const char* where) {
+#if FIREBASE_USE_IDTOKEN
+    if (httpCode == 401 || httpCode == 403) {
+        // Token chết hoặc rule từ chối. Hạ hạn để chu kỳ sync sau lấy token mới.
+        // Không tự retry ngay tại đây: token sống 1 giờ còn 1 chu kỳ sync chỉ vài
+        // giây, nên 401 gần như luôn nghĩa là RULE từ chối chứ không phải hết hạn
+        // — retry ngay chỉ tốn thêm một handshake TLS mà vẫn 401.
+        DLOG("[NET] auth %d @ %s -> se lay token moi", httpCode, where);
+        _idTokenExpiry = 0;
+    }
+#else
+    (void)httpCode; (void)where;
+#endif
+}
+
+bool NetworkManager::ensureIdToken(bool force) {
+#if !FIREBASE_USE_IDTOKEN
+    (void)force;
+    return true;   // vẫn dùng Database Secret, không cần token
+#else
+    // Trừ hao 60s: token còn hạn dưới 1 phút thì coi như hết, tránh trường hợp
+    // hết hạn ngay giữa chu trình sync.
+    if (!force && _idToken[0] != '\0' && time(nullptr) < _idTokenExpiry - 60) {
+        return true;
+    }
+
+    // Refresh token không hết hạn theo thời gian -> ưu tiên dùng, đỡ phải gửi
+    // lại mật khẩu qua đường truyền mỗi lần.
+    char refresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
+    bool haveRefresh = false;
+    {
+        ConfigManager cfg;
+        if (cfg.init(NVS_NAMESPACE)) {
+            haveRefresh = cfg.loadRefreshToken(refresh, sizeof(refresh));
+            cfg.end();
+        }
+    }
+
+    if (haveRefresh && authWithRefreshToken(refresh)) return true;
+
+    if (haveRefresh) {
+        // Refresh hỏng (bị thu hồi / đổi mật khẩu) -> vứt đi, đăng nhập lại từ đầu.
+        DLOG("[NET] refresh token hong -> dang nhap lai");
+        ConfigManager cfg;
+        if (cfg.init(NVS_NAMESPACE)) {
+            cfg.clearRefreshToken();
+            cfg.end();
+        }
+    }
+
+    return authWithPassword();
+#endif
+}
+
+#if FIREBASE_USE_IDTOKEN
+// Đọc idToken/refreshToken/expiresIn từ response rồi cất vào RAM + NVS.
+// Dùng filter của ArduinoJson để CHỈ cấp phát 3 trường cần thiết — response
+// signInWithPassword còn kèm email/localId/kind..., cấp phát trọn gói là phí
+// heap đúng lúc sắp cần ~45KB cho handshake TLS kế tiếp.
+// Nhan String chu KHONG phai Stream. Ly do (do that 2026-09-05, MEMORY.md muc 18):
+// ca identitytoolkit lan securetoken tra "Transfer-Encoding: chunked", khong co
+// Content-Length. http.getStreamPtr() cho ra stream THO con nguyen dong kich thuoc
+// chunk dang hex, vi du "4a1\r\n{...}". ArduinoJson doc phai "4a1" -> parse "4"
+// thanh mot SO, ket thuc THANH CONG, roi doc["idToken"] = null -> bao
+// "thieu idToken" ma khong he co loi JSON. Chi http.getString() moi giai ma chunked.
+static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLen,
+                              time_t& outExpiry, char* outRefresh, size_t refreshLen,
+                              bool snakeCase) {
+    JsonDocument filter;
+    filter[snakeCase ? "id_token"      : "idToken"]      = true;
+    filter[snakeCase ? "refresh_token" : "refreshToken"] = true;
+    filter[snakeCase ? "expires_in"    : "expiresIn"]    = true;
+
+    JsonDocument doc;
+    DeserializationError err =
+        deserializeJson(doc, body, DeserializationOption::Filter(filter));
+    if (err) {
+        DLOG("[NET] auth JSON err: %s", err.c_str());
+        return false;
+    }
+
+    const char* idTok   = doc[snakeCase ? "id_token"      : "idToken"];
+    const char* refTok  = doc[snakeCase ? "refresh_token" : "refreshToken"];
+    const char* expires = doc[snakeCase ? "expires_in"    : "expiresIn"];
+
+    if (idTok == nullptr || idTok[0] == '\0') {
+        // In dau response: khong co dong nay thi "thieu idToken" khong noi len
+        // duoc gi ca — da tung ton mot vong flash vi vay. 60 ky tu dau chi chua
+        // phan "kind"/"error", chua toi cho co token.
+        DLOG("[NET] auth: thieu idToken; body=%s", body.substring(0, 60).c_str());
+        return false;
+    }
+    // Firebase trả expiresIn dạng CHUỖI giây ("3600"), không phải số.
+    long ttl = (expires != nullptr) ? atol(expires) : 3600;
+    if (ttl <= 0) ttl = 3600;
+
+    // Luu JWT THO. Truoc day luu "Bearer <jwt>" cho addHeader(), nhung RTDB
+    // khong nhan header — token phai di vao query `?auth=` (MEMORY.md muc 17).
+    int n = snprintf(outToken, tokenLen, "%s", idTok);
+    if (n < 0 || (size_t)n >= tokenLen) {
+        // Cắt cụt token = mọi request sau đó 401 mà không rõ lý do. Thà báo hỏng.
+        DLOG("[NET] auth: idToken qua dai (%d)", n);
+        outToken[0] = '\0';
+        return false;
+    }
+    outExpiry = time(nullptr) + ttl;
+
+    if (refTok != nullptr && refTok[0] != '\0') {
+        strncpy(outRefresh, refTok, refreshLen - 1);
+        outRefresh[refreshLen - 1] = '\0';
+    } else {
+        outRefresh[0] = '\0';
+    }
+    return true;
+}
+
+// Gửi request auth và xử lý response. Gom chung vì 2 endpoint chỉ khác URL,
+// content-type và cách đặt tên trường (camelCase vs snake_case).
+bool NetworkManager::authWithRefreshToken(const char* refreshToken) {
     WiFiClientSecure client;
-    client.setInsecure();
+    configureTlsClient(client);
     HTTPClient http;
 
-    char url[256];
-    snprintf(url, sizeof(url), "https://%s/boxes/%s/status.json?auth=%s",
-             FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+    char url[160];
+    snprintf(url, sizeof(url),
+             "https://securetoken.googleapis.com/v1/token?key=%s", FIREBASE_API_KEY);
 
     if (!http.begin(client, url)) return false;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    char body[FIREBASE_REFRESH_TOKEN_MAX_LEN + 64];
+    snprintf(body, sizeof(body), "grant_type=refresh_token&refresh_token=%s", refreshToken);
+
+    int code = http.POST((uint8_t*)body, strlen(body));
+    if (code != HTTP_CODE_OK) {
+        DLOG("[NET] token refresh fail: %d", code);
+        if (code < 0) logTlsError(client, "refresh");
+        http.end();
+        return false;
+    }
+
+    char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
+    // getString() (KHONG phai getStreamPtr) vi response la chunked — xem ghi chu
+    // o parseAuthResponse. Doc xong roi end() ngay de tra connection som.
+    String resp = http.getString();
+    http.end();
+
+    // snakeCase = true: endpoint securetoken dùng id_token/refresh_token/expires_in
+    bool ok = parseAuthResponse(resp, _idToken,
+                                sizeof(_idToken), _idTokenExpiry,
+                                newRefresh, sizeof(newRefresh), true);
+
+    if (ok && newRefresh[0] != '\0') {
+        ConfigManager cfg;
+        if (cfg.init(NVS_NAMESPACE)) {
+            cfg.saveRefreshToken(newRefresh);
+            cfg.end();
+        }
+    }
+    if (ok) DLOG("[NET] token refreshed");
+    return ok;
+}
+
+bool NetworkManager::authWithPassword() {
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+
+    char url[190];
+    snprintf(url, sizeof(url),
+             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s",
+             FIREBASE_API_KEY);
+
+    if (!http.begin(client, url)) return false;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    http.addHeader("Content-Type", "application/json");
+
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"email\":\"%s\",\"password\":\"%s\",\"returnSecureToken\":true}",
+             BOX_AUTH_EMAIL, BOX_AUTH_PASSWORD);
+
+    int code = http.POST((uint8_t*)body, strlen(body));
+    if (code != HTTP_CODE_OK) {
+        // 400 kèm PASSWORD_LOGIN_DISABLED = chưa bật Email/Password trong Console.
+        // 400 kèm EMAIL_NOT_FOUND / INVALID_PASSWORD = chưa chạy provision script
+        // hoặc điền sai config_secrets.h.
+        DLOG("[NET] signIn fail: %d", code);
+        if (code < 0) logTlsError(client, "signin");
+        else DLOG("[NET] signIn: %s", http.getString().substring(0, 80).c_str());
+        http.end();
+        return false;
+    }
+
+    char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
+    // getString() (KHONG phai getStreamPtr) vi response la chunked — xem ghi chu
+    // o parseAuthResponse. Doc xong roi end() ngay de tra connection som.
+    String resp = http.getString();
+    http.end();
+
+    // snakeCase = false: endpoint identitytoolkit dùng idToken/refreshToken/expiresIn
+    bool ok = parseAuthResponse(resp, _idToken,
+                                sizeof(_idToken), _idTokenExpiry,
+                                newRefresh, sizeof(newRefresh), false);
+
+    if (ok && newRefresh[0] != '\0') {
+        ConfigManager cfg;
+        if (cfg.init(NVS_NAMESPACE)) {
+            cfg.saveRefreshToken(newRefresh);
+            cfg.end();
+        }
+    }
+    if (ok) DLOG("[NET] signIn OK");
+    return ok;
+}
+#else
+bool NetworkManager::authWithRefreshToken(const char*) { return false; }
+bool NetworkManager::authWithPassword() { return false; }
+#endif
+
+bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isCharging) {
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/status.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
+
+    if (!http.begin(client, _url)) return false;
 
     http.setTimeout(FIREBASE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
@@ -554,6 +923,17 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
              batteryPercent, isCharging ? "true" : "false", now);
 
     int httpCode = http.PATCH((uint8_t*)payload, strlen(payload));
+    noteAuthFailure(httpCode, "status");
+    if (httpCode < 0) {
+        // Day la phien TLS DAU TIEN cua moi chu trinh sync -> cung la cho re
+        // nhat de biet handshake co qua duoc khong sau khi bat setCACert().
+        DLOG("[NET] status PATCH %d, heap=%u", httpCode, (unsigned)ESP.getFreeHeap());
+        logTlsError(client, "status");
+    } else {
+        // DEBUG_SCREEN: dong nay chi de xac minh Phase A (handshake qua duoc,
+        // heap con lai bao nhieu sau khi parse 2 root). Go bo sau khi da chot.
+        DLOG("[NET] status OK heap=%u", (unsigned)ESP.getFreeHeap());
+    }
     http.end();
 
     return (httpCode == HTTP_CODE_OK);
@@ -561,19 +941,21 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
 
 bool NetworkManager::checkFirebaseFlags() {
     WiFiClientSecure client;
-    client.setInsecure();
+    configureTlsClient(client);
     HTTPClient http;
 
-    char url[256];
-    snprintf(url, sizeof(url), "https://%s/boxes/%s/flags.json?auth=%s",
-             FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
 
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, _url)) return false;
     http.setTimeout(FIREBASE_TIMEOUT_MS);
 
     int httpCode = http.GET();
+    noteAuthFailure(httpCode, "flags");
     if (httpCode != HTTP_CODE_OK) {
         DLOG("[NET] flags GET fail: %d", httpCode);
+        if (httpCode < 0) logTlsError(client, "flags");
         http.end();
         return false;
     }
@@ -598,17 +980,19 @@ bool NetworkManager::checkFirebaseFlags() {
 
     // Reset cờ sau khi đọc
     WiFiClientSecure patchClient;
-    patchClient.setInsecure();
+    configureTlsClient(patchClient);
     HTTPClient patchHttp;
 
-    char patchUrl[256];
-    snprintf(patchUrl, sizeof(patchUrl), "https://%s/boxes/%s/flags.json?auth=%s",
-             FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+    // Dung lai _url an toan: GET flags o tren da http.end() xong truoc khi toi day.
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
 
-    if (patchHttp.begin(patchClient, patchUrl)) {
+    if (patchHttp.begin(patchClient, _url)) {
         patchHttp.setTimeout(FIREBASE_TIMEOUT_MS);
         patchHttp.addHeader("Content-Type", "application/json");
-        patchHttp.PATCH("{\"sync_alarms_flag\":false,\"emergency_ota\":false,\"normal_ota\":false}");
+        int pc = patchHttp.PATCH("{\"sync_alarms_flag\":false,\"emergency_ota\":false,\"normal_ota\":false}");
+        noteAuthFailure(pc, "flags reset");
         patchHttp.end();
     }
 
@@ -617,19 +1001,21 @@ bool NetworkManager::checkFirebaseFlags() {
 
 bool NetworkManager::syncFirebaseAlarms() {
     WiFiClientSecure client;
-    client.setInsecure();
+    configureTlsClient(client);
     HTTPClient http;
 
-    char url[256];
-    snprintf(url, sizeof(url), "https://%s/boxes/%s/config/alarm_list.json?auth=%s",
-             FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/config/alarm_list.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
 
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, _url)) return false;
     http.setTimeout(FIREBASE_TIMEOUT_MS);
 
     int httpCode = http.GET();
+    noteAuthFailure(httpCode, "alarms");
     if (httpCode != HTTP_CODE_OK) {
         DLOG("[NET] alarms GET fail: %d", httpCode);
+        if (httpCode < 0) logTlsError(client, "alarms");
         http.end();
         return false;
     }
@@ -693,7 +1079,10 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
     bool ok = false;
     if (httpAudio.begin(client, voiceUrl.c_str())) {
         httpAudio.setTimeout(30000);
+        // Bat buoc khi storage.rules da siet: khong co header nay thi Storage tra 403.
+        addStorageAuthHeader(httpAudio);
         int aCode = httpAudio.GET();
+        noteAuthFailure(aCode, "voice");
         if (aCode == HTTP_CODE_OK) {
             int aLen = httpAudio.getSize();
             WiFiClient* aStream = httpAudio.getStreamPtr();
@@ -741,6 +1130,13 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                             aTotalRead += c;
                             if (aLen > 0) aLen -= c;
                             aLastProgressMs = millis();
+                            // Tran cung — dat aWriteError (khong phai writeError) de
+                            // slot dang do bi loai o buoc kiem tra cua chinh vong nay.
+                            if (aTotalRead > (int)MAX_MEDIA_BYTES) {
+                                DLOG("[NET] audio dl ABORT: over cap %d", aTotalRead);
+                                aWriteError = true;
+                                break;
+                            }
                         }
                     }
                     // Cung dang treo vo han nhu vong lap video.
@@ -771,6 +1167,7 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
             }
         } else {
             DLOG("[NET] Audio DL fail: %d", aCode);
+            if (aCode < 0) logTlsError(client, "audio");
         }
         httpAudio.end();
     }
@@ -788,34 +1185,41 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     }
 
     WiFiClientSecure client;
-    client.setInsecure();
+    configureTlsClient(client);
     HTTPClient http;
 
-    char url[384];
     uint64_t nextTs = (lastTs > 0) ? (lastTs + 1) : 0;
     if (nextTs > 0) {
-        snprintf(url, sizeof(url),
-                 "https://%s/messages/%s.json?auth=%s&orderBy=%%22timestamp%%22&startAt=%llu",
-                 FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET, (unsigned long long)nextTs);
+        // auth nam CUOI: orderBy/startAt da chiem '?' nen tham so auth phai noi
+        // bang '&'. Dung o ca 2 che do — Database Secret lan idToken.
+        snprintf(_url, sizeof(_url),
+                 "https://%s/messages/%s.json?orderBy=%%22timestamp%%22&startAt=%llu",
+                 FIREBASE_HOST, BOX_ID, (unsigned long long)nextTs);
+        appendAuth('&');
     } else {
-        snprintf(url, sizeof(url),
-                 "https://%s/messages/%s.json?auth=%s",
-                 FIREBASE_HOST, BOX_ID, FIREBASE_AUTH_SECRET);
+        snprintf(_url, sizeof(_url),
+                 "https://%s/messages/%s.json",
+                 FIREBASE_HOST, BOX_ID);
+        appendAuth('?');
     }
 
-    if (!http.begin(client, url)) {
+    if (!http.begin(client, _url)) {
         DLOG("[NET] HTTP msg init fail");
         return false;
     }
     http.setTimeout(FIREBASE_TIMEOUT_MS);
 
     int httpCode = http.GET();
+    noteAuthFailure(httpCode, "msg");
     if (httpCode < 0) {
         // -1 = HTTPC_ERROR_CONNECTION_REFUSED: TCP/TLS connect thất bại. Thử lại
         // suông trên cùng client (cách cũ) gần như vô ích khi nguyên nhân là link
         // Wi-Fi đã chết hoặc DNS cũ — phải ÉP tái lập association trước, việc này
         // cũng xin lại DNS server mới từ DHCP.
         DLOG("[NET] msg GET %d, heap=%u -> re-assoc", httpCode, (unsigned)ESP.getFreeHeap());
+        // Phan biet "chung chi khong hop le" voi "khong noi duoc toi server":
+        // ca hai deu ra -1 o tang HTTPClient, doc lastError moi biet duoc.
+        logTlsError(client, "msg");
         _forceReassociate = true;
         if (ensureConnected(12000)) {
             httpCode = http.GET();
@@ -1034,12 +1438,19 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             
             if (http.begin(client, fullUrl.c_str())) {
                 http.setTimeout(30000);
+                // Bat buoc khi storage.rules da siet: khong co header nay thi Storage tra 403.
+                addStorageAuthHeader(http);
                 int code = http.GET();
+                if (code < 0) logTlsError(client, "media");
+                noteAuthFailure(code, "media");
                 if (code == HTTP_CODE_OK) {
                     int len = http.getSize();
                     int initialLen = len;
                     int totalRead = 0;
-                    DLOG("[NET] GET OK len=%d", len);
+                    // Heap o day la con so dang nhin nhat sau khi bat setCACert():
+                    // phien TLS nay song lau nhat (giu qua ca doan tai audio long
+                    // ben trong) va la cho tung co tien su OOM.
+                    DLOG("[NET] GET OK len=%d heap=%u", len, (unsigned)ESP.getFreeHeap());
                     char writeSlotId[16] = "";
                     if (!storage->getNextWriteSlotIdentifier(writeSlotId, sizeof(writeSlotId))) {
                         DLOG("[NET] skip dl: FULL");
@@ -1086,6 +1497,12 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                     totalRead += c;
                                     if (len > 0) len -= c;
                                     lastProgressMs = millis();
+                                    // Tran cung: dung ngay thay vi tai vai phut roi chet cho khac.
+                                    if (totalRead > (int)MAX_MEDIA_BYTES) {
+                                        DLOG("[NET] dl ABORT: over cap %d", totalRead);
+                                        writeError = true;
+                                        break;
+                                    }
                                     // Log thua tay (moi 16KB) de khong doi nhip vong lap.
                                     if (totalRead - lastLoggedRead >= 16384) {
                                         lastLoggedRead = totalRead;

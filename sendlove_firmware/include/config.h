@@ -107,7 +107,7 @@ static constexpr const char *NVS_NAMESPACE = "sendlove";
 // Storage Provider Configuration
 #define STORAGE_TYPE_NAND 0
 #define STORAGE_TYPE_SD 1
-#define ACTIVE_STORAGE_TYPE STORAGE_TYPE_NAND
+#define ACTIVE_STORAGE_TYPE STORAGE_TYPE_SD
 
 // Bật tạm thời để xóa sạch dữ liệu trên NOR/W25Q128 lúc boot kế tiếp.
 // Sau khi nạp xong và xác nhận dữ liệu đã được xóa, đổi về 0 rồi build lại.

@@ -1870,3 +1870,29 @@ User có báo thêm triệu chứng "chỉ có 1 msg, không có tin mới trên
 sync", sau đó **tự rút lại**. Đã đọc hết đường đi và xác nhận không có cổng nào liên quan tin
 nhắn: `checkFirebaseFlags()` tự mở TLS riêng, tự GET `flags.json`, tự PATCH reset, không đụng gì
 tới messages; `triggerFirebaseSync` chỉ là alias của `triggerWakeupSync`. **Chỉ `isFull` là thật.**
+
+## 21. ⏸️ TẠM GÁC: `tls media: SSL - Memory allocation` / `DL HTTP err: -1` sau khi merge 3 nhánh (2026-09-17)
+
+### Triệu chứng (user báo, bản SD, sau merge `security-hardening` + `fe-apply-design` vào main)
+
+Lúc lấy tin mới: `[NET] tls media: SSL - Memory allocation` rồi `DL -1`. **Retry vài vòng sync thì
+tải được.** Chưa đo, chưa sửa — user ưu tiên hoàn thiện báo thức trước.
+
+### Chẩn đoán (SUY LUẬN từ code, CHƯA đo trên máy)
+
+`MBEDTLS_ERR_SSL_ALLOC_FAILED` lúc handshake = không xin được khối liền ~16KB (in buffer).
+Tự khỏi sau retry ⇒ **phân mảnh heap**, không phải rò rỉ. Ba nguồn dồn vào cùng lúc sau merge:
+
+1. `setCACert()` (nhánh bảo mật) — handshake phải parse/verify chuỗi cert ⇒ đỉnh heap cao hơn `setInsecure()`.
+2. `JsonDocument doc` + `std::vector<JsonObject> msgList` (`NetworkManager.cpp` ~dòng 1244) **sống suốt
+   vòng tải media**. ArduinoJson 7 cấp phát nhiều mảnh nhỏ trong lúc phiên TLS `msg` còn giữ buffer
+   16KB → `http.end()` để lại lỗ xen giữa các mảnh JSON. Nhiều tin chờ ⇒ doc to ⇒ dễ lỗi hơn.
+3. Bản SD: FATFS giữ buffer sector ~4KB thường trú + mỗi `File` mở cấp buffer riêng, mở/đóng xen
+   kẽ các phiên TLS khi tải nhiều tin trong một lần sync.
+
+### Việc cần làm khi quay lại
+
+1. Đo trước: thêm `ESP.getMaxAllocHeap()` cạnh `getFreeHeap()` ở `[NET] sync start` và ngay khi GET media
+   fail. Khối lớn nhất < ~16–20KB trong khi free còn vài chục KB ⇒ xác nhận phân mảnh.
+2. Hướng sửa rẻ nhất: rút URL/text/timestamp của **tin sắp tải** ra buffer tĩnh rồi giải phóng `doc`
+   **trước** khi mở phiên TLS media.

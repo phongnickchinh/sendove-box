@@ -164,18 +164,13 @@ static constexpr const char *SD_MANIFEST_PATH = "/media/index.bin";
 // để hai bản hiển thị giống hệt nhau.
 static constexpr uint16_t SD_TEXT_MAX_LEN = 256;
 
-// MODE SPI DÙNG CHUNG CHO CẢ BUS (LovyanGFX + storage).
-// ST7789 không có chân CS nên thấy mọi byte trên bus. Đổi CPOL giữa hai chủ bus
-// làm chân SCK nhảy mức lúc idle -> sinh 1 sườn LÊN giả -> ST7789 chốt nhầm 1 bit
-// -> lệch khung byte (chính là "lệch bit do SCK Idle nhảy" ở MEMORY.md mục 2).
-// Thư viện SD của Arduino-ESP32 HARDCODE SPI_MODE0 (sd_diskio.cpp, struct
-// AcquireSPI) và SD.begin() không có tham số mode -> phía SD KHÔNG dời được.
-// Vậy khi chạy thẻ SD phải kéo cả bus về MODE0. Panel_ST7789 của LovyanGFX vốn
-// mặc định mode 0 nên đây không phải hạ cấp. Bản NAND giữ nguyên MODE3.
-#if ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD
-static constexpr uint8_t SPI_BUS_MODE = 0;
-#else
+// MODE SPI DÙNG CHUNG CHO CẢ BUS (LovyanGFX + storage) — BẮT BUỘC MODE3.
+// ST7789 không có chân CS: đã thử thực tế 2026-09-17, chạy MODE0 thì màn hình
+// đen hoàn toàn. Mọi chủ bus khác cũng phải MODE3, vì đổi CPOL giữa hai chủ bus
+// làm SCK nhảy mức lúc idle -> 1 sườn lên giả -> ST7789 lệch khung byte
+// (MEMORY.md mục 2). Thư viện SD gốc hardcode MODE0 nên đã chép vào lib/SD và
+// đổi sang MODE3 (lib/SD/src/sd_diskio.cpp, struct AcquireSPI) — hằng số này
+// không điều khiển được thư viện đó, sửa thì sửa cả hai chỗ.
 static constexpr uint8_t SPI_BUS_MODE = 3;
-#endif
 
 #endif // CONFIG_H

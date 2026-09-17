@@ -30,6 +30,11 @@
 >     chỉ vì driver flash dùng nó. Từ nay mode nằm ở `SPI_BUS_MODE` (`config.h`), đổi theo
 >     `ACTIVE_STORAGE_TYPE`: **MODE3 cho NAND (không đổi), MODE0 cho thẻ SD** — vì thư viện `SD`
 >     của Arduino-ESP32 hardcode `SPI_MODE0` và `SD.begin()` không có tham số mode. Xem mục 12.
+>   - ❌ **ĐÍNH CHÍNH TRÊN LÀ SAI — kiểm chứng máy thật 2026-09-17**: nạp bản SD chạy MODE0 thì
+>     **màn hình đen hoàn toàn** (đèn nền, touch, tiếng bíp vẫn chạy). Ép lại MODE3 thì hiển thị bình
+>     thường. Panel ST7789 không CS này **BẮT BUỘC MODE3** — comment gốc "Mode 3 (obligatory)" ở
+>     `DisplayDriver.h` là đúng từ thực nghiệm. Hướng đã chọn: chép thư viện SD vào `lib/SD` và đổi
+>     sang MODE3 (xem mục 12).
 > - Lệnh Hack NOP (`0x00`) với TFT_DC=0 rồi kéo TFT_DC=1 trước mỗi phiên lấy SPI Mutex của NAND, giúp màn hình ST7789 bỏ qua dữ liệu giao tiếp với Flash.
 
 ---
@@ -939,6 +944,21 @@ Comment `Mode 3 (obligatory)` ở `DisplayDriver.h:9` là **SAI**, đã sửa (x
 
 **Bẫy đã tránh:** NOP hack ở `NandStorage::acquireSPI()` mở `SPISettings(..., SPI_MODE3)`. Copy nguyên
 sang `SDCardManager` là **tái tạo đúng cú lật CPOL đang muốn khử**. Bản SD dùng `SPI_BUS_MODE`.
+
+> ❌ **HƯỚNG "KÉO CẢ BUS VỀ MODE0" Ở TRÊN ĐÃ THẤT BẠI trên máy thật (2026-09-17).**
+> Nạp bản SD MODE0 → màn hình đen hoàn toàn (đèn nền/touch/bíp vẫn chạy); ép MODE3 → hiển thị lại.
+> Giả định "Panel_ST7789 mặc định mode 0 nên không phải hạ cấp" là SAI cho panel CS-less này: nó
+> **bắt buộc MODE3**. Với màn hình MODE3 mà thư viện SD vẫn MODE0 thì box đứng hình ở "Booting..."
+> (lệch khung byte khi truy cập thẻ).
+> **Hướng thay thế đã làm:** chép thư viện SD của framework (6 file, Apache 2.0) vào `lib/SD`, đổi đúng
+> 2 dòng `SPI_MODE0` → `SPI_MODE3` trong struct `AcquireSPI` (`lib/SD/src/sd_diskio.cpp`) — mọi lưu
+> lượng SPI của thư viện đi qua đó. Xác nhận bằng `pio run -v`: LDF resolve `SD @ 2.0.0` về
+> `lib\SD`, không dùng bản framework. `SPI_BUS_MODE` giờ là `3` cố định, bỏ cổng `#if`.
+> ✅ **Đã kiểm chứng máy thật 2026-09-17** (bo vẫn còn NOR, chưa cắm thẻ): bản SD với `lib/SD` MODE3
+> boot vào tới màn hình chờ bình thường — xác nhận việc đứng ở "Booting..." trước đó là do thư viện SD
+> MODE0 làm lệch khung byte màn hình, không phải treo.
+> **Chưa kiểm chứng thẻ SD thật chạy được MODE3** (cả hai mode đều lấy mẫu sườn lên nên thường
+> được, nhưng phải thử). Nếu nâng cấp framework-arduinoespressif32, phải so lại `lib/SD` với bản mới.
 
 ### Tổ chức thư mục trên thẻ
 ```

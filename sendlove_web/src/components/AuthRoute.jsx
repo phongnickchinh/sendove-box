@@ -1,37 +1,27 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import Navbar from './Navbar';
+import { Screen, Body } from './ui/Screen';
 
 /**
- * bare = route tự dựng toàn bộ màn hình (luồng gửi theo thiết kế mới có
- * appbar riêng và chạy tràn viền). Vẫn chặn khách chưa đăng nhập, chỉ bỏ
- * Navbar và khung <main> có padding.
+ * Chặn khách chưa đăng nhập. Không còn dựng khung chung nữa: mọi trang tự dựng
+ * <Screen> của mình (cột 430 theo thiết kế), nên Navbar và khung <main> 1200px
+ * của bản cũ đã bị gỡ — hai paradigm layout song song là thứ làm giao diện lệch.
+ * Đăng xuất giờ nằm ở AppBar của Dashboard.
  */
-export default function AuthRoute({ bare = false }) {
+export default function AuthRoute() {
   const { user, loading } = useAuth();
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center' }}>
-        <div className="text-gradient" style={{ fontSize: '1.2rem', fontWeight: 600 }}>Đang tải...</div>
-      </div>
+      <Screen>
+        <Body center>
+          <span className="sl-heading">Đang tải…</span>
+        </Body>
+      </Screen>
     );
   }
 
-  // Nếu chưa đăng nhập, đá về trang Login
-  if (!user) {
-    return <Navigate to="/" replace />;
-  }
+  if (!user) return <Navigate to="/" replace />;
 
-  if (bare) return <Outlet />;
-
-  // Nếu đã đăng nhập, render Navbar và các child routes (Outlet)
-  return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <Navbar user={user} />
-      <main style={{ flex: 1, padding: '24px', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
-        <Outlet />
-      </main>
-    </div>
-  );
+  return <Outlet />;
 }

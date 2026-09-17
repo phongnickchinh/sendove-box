@@ -80,7 +80,6 @@ export const uploadMessage = async (boxId, data, onProgress) => {
   const { message_id, upload_urls } = initRes.data;
 
   // 2. Upload parallel
-  let totalUploadedBytes = 0;
   const totalBytes = blobsToUpload.reduce((acc, item) => acc + item.blob.size, 0);
   
   // Track progress per file

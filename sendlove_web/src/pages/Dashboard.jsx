@@ -1,88 +1,165 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Package, LogOut, Plus } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 import { logOut } from '../api/auth';
+import Icon from '../components/ui/Icon';
+import { Screen, AppBar, Body, CircleIcon } from '../components/ui/Screen';
+
+const ROLE_LABEL = { sender: 'Người gửi', receiver: 'Người nhận' };
+
+/** Ảnh đại diện 44px viền, hoặc chữ cái đầu tên nếu không có ảnh. */
+function Avatar({ user }) {
+  if (user?.photoURL) return <span className="sl-avatar"><img src={user.photoURL} alt="" /></span>;
+  const initial = (user?.displayName || '?').trim().charAt(0).toUpperCase();
+  return <span className="sl-avatar">{initial}</span>;
+}
 
 export default function Dashboard() {
   const { user, profile } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
 
+  const closeAll = () => { setNotifOpen(false); setAccountOpen(false); };
   const handleLogout = async () => {
     await logOut();
     navigate('/');
   };
 
-  return (
-    <div className="fade-in">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-        <div>
-          <h1 className="text-gradient" style={{ fontSize: '2.5rem' }}>Xin chào, {user?.displayName?.split(' ')[0] || 'bạn'}!</h1>
-          <p style={{ color: 'var(--color-text-muted)' }}>Hãy chọn một hộp quà để tiếp tục.</p>
-        </div>
-        <button onClick={handleLogout} className="glass-button" style={{ padding: '8px 16px', fontSize: '0.9rem' }}>
-          <LogOut size={18} strokeWidth={1.5} /> Đăng xuất
-        </button>
-      </div>
+  const boxes = Object.entries(profile?.boxes_list || {});
+  const firstName = user?.displayName?.split(' ').slice(-1)[0] || 'bạn';
+  const popoverOpen = notifOpen || accountOpen;
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '24px' }}>
-        {/* Placeholder for Box List */}
-        {profile?.boxes_list && Object.keys(profile.boxes_list).length > 0 ? (
-          Object.entries(profile.boxes_list).map(([boxId, box]) => (
-            <div 
-              key={boxId} 
-              className="glass-panel slide-up" 
-              style={{ padding: '24px', cursor: 'pointer', transition: 'var(--transition-smooth)' }}
-              onClick={() => navigate(`/box/${boxId}/${box.role === 'sender' ? 'sender' : 'receiver'}`)}
+  return (
+    <Screen>
+      <AppBar
+        title={`Chào, ${firstName}!`}
+        subtitle="Chọn hộp và gửi tin nhắn"
+        right={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-5)' }}>
+            <button
+              type="button" className="sl-iconbtn" aria-label="Thông báo"
+              onClick={() => { setNotifOpen((v) => !v); setAccountOpen(false); }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <div style={{ padding: '12px', background: 'var(--color-primary-light)', borderRadius: '16px', color: 'white' }}>
-                  <Package size={32} strokeWidth={1.5} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '1.2rem', marginBottom: '4px' }}>{box.box_name}</h3>
-                  <span style={{ 
-                    fontSize: '0.8rem', 
-                    padding: '4px 12px', 
-                    borderRadius: '12px', 
-                    background: 'rgba(255,255,255,0.8)',
-                    color: box.role === 'sender' ? 'var(--color-primary)' : 'var(--color-secondary)',
-                    fontWeight: 600
-                  }}>
-                    {box.role === 'sender' ? 'Người Gửi' : 'Người Nhận'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', gridColumn: '1 / -1' }}>
-            <p style={{ color: 'var(--color-text-muted)', marginBottom: '16px' }}>Bạn chưa có hộp quà nào.</p>
+              <Icon name="bell" size={20} style={{ color: 'var(--rose-500)' }} />
+            </button>
+            <button
+              type="button" onClick={() => { setAccountOpen((v) => !v); setNotifOpen(false); }}
+              style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}
+              aria-label="Tài khoản"
+            >
+              <Avatar user={user} />
+            </button>
           </div>
+        }
+      />
+      <Body>
+        {boxes.length === 0 ? (
+          <>
+            <span className="sl-section-label">Hộp của bạn</span>
+            {/* Màu caramel-700 xác nhận từ Figma (#83513E) — riêng câu này,
+                không dùng màu neutral-500 mặc định của .sl-body. */}
+            <p className="sl-body" style={{ margin: 0, color: 'var(--caramel-700)' }}>
+              Kết nối một hộp mới để bắt đầu gửi tin nhắn.
+            </p>
+          </>
+        ) : (
+          <>
+            <span className="sl-section-label">Hộp của bạn</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {boxes.map(([boxId, box]) => {
+                const role = box.role === 'sender' ? 'sender' : 'receiver';
+                return (
+                  <button
+                    key={boxId}
+                    type="button"
+                    className={`sl-boxcard sl-boxcard--${role}`}
+                    onClick={() => navigate(`/box/${boxId}/${role}`)}
+                  >
+                    {/* Nhóm trái: avatar + tên + hàng trạng thái. */}
+                    <div className="sl-boxcard__left">
+                      <span className={`sl-boxcard__avatar sl-boxcard__avatar--${role}`}>
+                        <Icon name={role === 'sender' ? 'chat' : 'mailbox'} size={24} />
+                      </span>
+                      <div className="sl-boxcard__mid">
+                        <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.3, color: 'var(--caramel-800)' }}>
+                          {box.box_name}
+                        </span>
+                        {/* Chưa có API trạng thái/pin cho danh sách hộp (gọi riêng từng hộp
+                            tốn N request) — mặc định cứng, xem sendlove-api-con-thieu.md. */}
+                        <div className="sl-boxcard__status">
+                          <span className="sl-boxcard__statusitem">
+                            <span className="sl-boxcard__dot" style={{ background: 'var(--success-fill)' }} />
+                            Online
+                          </span>
+                          <span className="sl-boxcard__statusitem">
+                            <Icon name="battery" size={13} />
+                            100%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Nhóm phải: pill vai trò + chevron GỘP CHUNG, neo phải. */}
+                    <div className="sl-boxcard__right">
+                      <span className={`sl-rolepill sl-rolepill--${role}`}>
+                        {ROLE_LABEL[box.role] || ROLE_LABEL.receiver}
+                      </span>
+                      <Icon name="chevron" size={20} className={`sl-boxcard__chevron--${role}`} />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
         )}
 
-        {/* Add New Box Card */}
-        <div 
-          className="glass-panel slide-up" 
-          style={{ 
-            padding: '24px', 
-            cursor: 'pointer', 
-            display: 'flex', 
-            flexDirection: 'column', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            border: '2px dashed var(--color-primary-light)',
-            background: 'rgba(255, 255, 255, 0.3)',
-            minHeight: '120px'
-          }}
-          onClick={() => navigate('/pair')}
-        >
-          <div style={{ color: 'var(--color-primary)', marginBottom: '8px' }}>
-            <Plus size={32} strokeWidth={1.5} />
-          </div>
-          <p style={{ fontWeight: 600, color: 'var(--color-primary)' }}>Kết nối Box mới</p>
+        <button type="button" className="sl-addbox" onClick={() => navigate('/pair')}>
+          <span className="sl-addbox__dot"><Icon name="plus" size={24} /></span>
+          <span className="sl-addbox__label">Hộp mới</span>
+        </button>
+      </Body>
+
+      {popoverOpen && (
+        <div className="sl-popover-anchor" onClick={closeAll}>
+          {notifOpen && (
+            <div className="sl-popover" onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '8px 0' }}>
+                <CircleIcon size={40} bg="var(--rose-50)" color="var(--rose-400)" icon="bell" iconSize={18} />
+                <span className="sl-caption">Chưa có thông báo nào.</span>
+              </div>
+            </div>
+          )}
+          {accountOpen && (
+            <div className="sl-popover" onClick={(e) => e.stopPropagation()}>
+              {/* Chưa có trang cài đặt nào để trỏ tới — hiện nhưng vô hiệu hoá,
+                  không tự bịa một route trống. */}
+              <div className="sl-popover__row sl-popover__row--muted">
+                <Icon name="gear" size={20} />
+                Cài đặt
+              </div>
+              <div className="sl-popover__row">
+                <Icon name="palette" size={21} style={{ flex: '0 0 auto' }} />
+                <span style={{ flex: 1 }}>Giao diện tối</span>
+                <button
+                  type="button" className="sl-toggle sl-toggle--accent" role="switch"
+                  aria-checked={theme === 'dark'} aria-label="Bật giao diện tối"
+                  onClick={toggleTheme}
+                >
+                  <span className="sl-toggle__knob" />
+                </button>
+              </div>
+              <hr className="sl-popover__divider" />
+              <button type="button" className="sl-popover__row sl-popover__row--rose" onClick={handleLogout}>
+                <Icon name="power" size={16} />
+                Đăng xuất
+              </button>
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+    </Screen>
   );
 }

@@ -6,7 +6,18 @@
 // ============================================================================
 // Trang HTML cho SoftAP Captive Portal Wi-Fi Setup
 // ============================================================================
-// Lưu trữ trong Flash memory (PROGMEM) để tiết kiệm RAM.
+// Luu trong Flash (PROGMEM) de tiet kiem RAM.
+//
+// Giao dien theo he thiet ke "Warm Minimalism" cua file Figma — cung bang mau,
+// cung thang chu, cung ban kinh bo goc voi web (sendlove_web/src/styles).
+// Khong dung web font: luc mo trang nay hop CHUA co Internet, font ngoai se
+// tai hong va chu nhay sang font du phong.
+//
+// Phan <script> ben duoi GIU NGUYEN khong doi mot ky tu:
+//   - vong poll /scan (scanning -> done, 10 lan, 1200ms)
+//   - textContent khi in ten mang (SSID la chuoi khong tin duoc)
+//   - hop dong POST /save voi hai field ssid / password
+// Doi CSS thi khong sao; doi mach nay la co the lam hop khong len duoc mang.
 // ============================================================================
 
 const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
@@ -15,108 +26,101 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sendlove Box - Wi-Fi Setup</title>
+  <title>Sendlove Box — Kết nối Wi-Fi</title>
   <style>
+    :root {
+      --rose-50:#FDF0EF; --rose-300:#F4A3AF; --rose-400:#F28AA1; --rose-700:#9E3A52;
+      --car-50:#FDF8F3; --car-300:#E7AE75; --car-700:#83513E; --car-800:#603A2C; --car-900:#3D2A20;
+      --n-0:#FFFFFF; --n-100:#EAE0D6; --n-400:#A89689; --n-500:#8A7767; --n-700:#5C4A3E;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #121214;
-      color: #e1e1e6;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      padding: 20px;
+      font-family: "Quicksand", "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--car-50);
+      color: var(--car-900);
+      display: flex; justify-content: center;
+      min-height: 100vh; padding: 24px 16px;
+      -webkit-font-smoothing: antialiased;
     }
     .card {
-      background: #202024;
-      border-radius: 16px;
-      padding: 32px 24px;
-      width: 100%;
-      max-width: 360px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-      text-align: center;
-      border: 1px solid #29292e;
+      background: var(--n-0);
+      border: 1px solid var(--car-300);
+      border-radius: 20px;
+      padding: 24px 20px;
+      width: 100%; max-width: 390px;
+      align-self: flex-start;
     }
-    .logo {
-      font-size: 24px;
-      font-weight: bold;
-      color: #ff4081;
-      margin-bottom: 8px;
-    }
-    .subtitle {
-      font-size: 14px;
-      color: #a8a8b3;
-      margin-bottom: 24px;
-    }
-    .input-group {
-      margin-bottom: 16px;
-      text-align: left;
-    }
+    .logo { font-size: 22px; font-weight: 700; line-height: 1.2; color: var(--car-900); }
+    .subtitle { font-size: 15px; line-height: 1.6; color: var(--n-500); margin: 4px 0 20px; }
+    .input-group { margin-bottom: 16px; }
     label {
-      display: block;
-      font-size: 12px;
-      color: #a8a8b3;
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      display: block; font-size: 14px; font-weight: 500; line-height: 1.4;
+      color: var(--n-700); margin-bottom: 6px;
     }
     input[type=text], input[type=password] {
-      width: 100%;
-      padding: 12px 14px;
-      background: #121214;
-      border: 1px solid #323238;
+      width: 100%; padding: 12px 16px;
+      background: var(--n-0);
+      border: 1px solid var(--car-300);
       border-radius: 8px;
-      color: #fff;
-      font-size: 15px;
-      outline: none;
-      transition: border-color 0.2s;
+      color: var(--car-900);
+      font-family: inherit; font-size: 15px; line-height: 1.4;
+      outline: none; transition: border-color .18s, box-shadow .18s;
     }
+    input[type=text]::placeholder, input[type=password]::placeholder { color: var(--n-500); }
     input[type=text]:focus, input[type=password]:focus {
-      border-color: #ff4081;
+      border-color: var(--rose-400);
+      box-shadow: 0 0 0 3px var(--rose-50);
     }
+    /* Nut chinh: nen hong, chu caramel/900. Chu trang tren nen nay chi dat
+       ~2:1 do tuong phan; caramel/900 dat ~7:1. */
     input[type=submit] {
-      width: 100%;
-      background: linear-gradient(90deg, #ff4081, #f50057);
-      color: #fff;
-      border: none;
-      padding: 14px;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: bold;
-      cursor: pointer;
-      margin-top: 12px;
-      box-shadow: 0 4px 12px rgba(255, 64, 129, 0.3);
-      transition: opacity 0.2s;
+      width: 100%; min-height: 44px;
+      background: var(--rose-400);
+      color: var(--car-900);
+      border: none; border-radius: 8px;
+      font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.4;
+      cursor: pointer; margin-top: 8px;
+      transition: filter .18s;
     }
-    input[type=submit]:hover {
-      opacity: 0.9;
-    }
+    input[type=submit]:hover { filter: brightness(.96); }
     .rescan {
-      float: right; background: none; border: none; color: #ff4081;
-      font-size: 13px; cursor: pointer; padding: 0;
+      float: right; background: none; border: none; color: var(--rose-700);
+      font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; padding: 0;
     }
     .netlist {
       max-height: 186px; overflow-y: auto; text-align: left;
-      background: #121214; border: 1px solid #29292e; border-radius: 8px;
+      background: var(--n-0); border: 1px solid var(--car-300); border-radius: 8px;
     }
-    .netlist .msg { padding: 12px; color: #a8a8b3; font-size: 13px; }
+    .netlist .msg { padding: 12px; color: var(--n-500); font-size: 12px; line-height: 1.4; }
     .net {
       display: flex; align-items: center; gap: 8px; width: 100%;
       padding: 11px 12px; background: none; border: none;
-      border-bottom: 1px solid #29292e; color: #e1e1e6;
-      font-size: 14px; text-align: left; cursor: pointer;
+      border-bottom: 1px solid var(--n-100); color: var(--car-900);
+      font-family: inherit; font-size: 14px; font-weight: 500;
+      text-align: left; cursor: pointer;
     }
     .net:last-child { border-bottom: none; }
-    .net:hover, .net.sel { background: #29292e; }
+    .net:hover { background: var(--car-50); }
+    .net.sel { background: var(--rose-50); }
     .net .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .net .meta { color: #a8a8b3; font-size: 12px; }
+    .net .meta { color: var(--n-500); font-size: 12px; }
+    .eye {
+      position: absolute; right: 6px; background: none; border: none;
+      color: var(--n-500); cursor: pointer; font-size: 16px; padding: 6px;
+      line-height: 1;
+    }
+    .tips {
+      display: flex; gap: 6px; align-items: flex-start;
+      font-size: 12px; line-height: 1.4; color: var(--car-700);
+      background: var(--car-50); border-radius: 12px;
+      padding: 12px; margin-top: 16px;
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="logo">❤️ Sendlove Box</div>
-    <div class="subtitle">Cấu hình kết nối Wi-Fi cho thiết bị</div>
+    <div class="logo">Kết nối Wi-Fi</div>
+    <div class="subtitle">Chọn mạng để chiếc hộp lên mạng và nhận tin nhắn.</div>
     <form action="/save" method="POST">
       <div class="input-group">
         <label>Mạng xung quanh
@@ -126,17 +130,20 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
       </div>
       <div class="input-group">
         <label for="ssid">Tên Wi-Fi (SSID)</label>
-        <input type="text" id="ssid" name="ssid" placeholder="Nhập tên mạng Wi-Fi" required autocomplete="off">
+        <input type="text" id="ssid" name="ssid" placeholder="Chọn ở trên hoặc tự nhập" required autocomplete="off">
       </div>
       <div class="input-group">
         <label for="password">Mật khẩu Wi-Fi</label>
         <div style="position: relative; display: flex; align-items: center;">
-          <input type="password" id="password" name="password" placeholder="Nhập mật khẩu Wi-Fi" style="padding-right: 40px;">
-          <button type="button" onclick="togglePass()" style="position: absolute; right: 10px; background: none; border: none; color: #a8a8b3; cursor: pointer; font-size: 16px; outline: none;">👁️</button>
+          <input type="password" id="password" name="password" placeholder="Để trống nếu mạng không có mật khẩu" style="padding-right: 44px;">
+          <button type="button" class="eye" onclick="togglePass()" aria-label="Hiện mật khẩu">&#128065;</button>
         </div>
       </div>
-      <input type="submit" value="LƯU & KẾT NỐI">
+      <input type="submit" value="Lưu và kết nối">
     </form>
+    <!-- ESP32-C3 chi co radio 2.4 GHz: mang 5 GHz khong bao gio hien trong danh
+         sach tren. Day la ly do hong hay gap nhat, phai noi truoc. -->
+    <div class="tips">Hộp chỉ thấy được mạng 2.4 GHz. Mạng 5 GHz sẽ không hiện trong danh sách.</div>
   </div>
   <script>
     // Poll /scan: box quet bat dong bo nen lan dau tra "scanning", phai hoi lai.

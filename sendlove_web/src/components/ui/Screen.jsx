@@ -21,14 +21,25 @@ export function Screen({ children }) {
   );
 }
 
-/** chrome(frame, stepLabel) — appbar. step = null thì bỏ pill bước. */
-export function AppBar({ onBack, step, right }) {
+/**
+ * chrome(frame, stepLabel) — appbar. step = null thì bỏ pill bước.
+ * title/subtitle: biến thể Dashboard — "Hi, {name}!" + phụ đề nằm NGAY TRONG
+ * appbar (đúng frame maindashboard-share-page), không phải trong Body.
+ * onBack và title loại trừ nhau ở hai đầu trái của thanh — chỉ dùng một.
+ */
+export function AppBar({ onBack, title, subtitle, step, right }) {
   return (
     <div className="sl-appbar">
       {onBack && (
-        <button type="button" className="sl-iconbtn" onClick={onBack} aria-label="Quay lại">
-          <Icon name="back" size={24} />
+        <button type="button" className="sl-back" onClick={onBack} aria-label="Quay lại">
+          <Icon name="back" size={22} sw={2} />
         </button>
+      )}
+      {title && (
+        <div className="sl-appbar__title">
+          <span className="sl-title" style={{ fontSize: 22 }}>{title}</span>
+          {subtitle && <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>{subtitle}</span>}
+        </div>
       )}
       <span className="sl-appbar__spacer" />
       {step && <span className="sl-step">{step}</span>}
@@ -49,14 +60,14 @@ export function Actions({ children }) {
   return <div className="sl-acts">{children}</div>;
 }
 
-/** hdr(title, to) */
+/** hdr(title, to) — icon 12px, khớp solar:mailbox-linear trong Figma (không phải 16px). */
 export function Header({ title, to }) {
   return (
     <div className="sl-hdr">
       <h1 className="sl-title">{title}</h1>
       {to && (
         <div className="sl-hdr__to">
-          <Icon name="heart" size={16} />
+          <Icon name="mailbox" size={12} />
           <span className="sl-caption">{to}</span>
         </div>
       )}
@@ -64,11 +75,11 @@ export function Header({ title, to }) {
   );
 }
 
-/** tips(text) */
+/** tips(text) — icon 12px, khớp material-symbols:privacy-tip-outline-rounded. */
 export function Tips({ children }) {
   return (
     <div className="sl-tips">
-      <Icon name="shield" size={16} />
+      <Icon name="shield" size={12} />
       <span>{children}</span>
     </div>
   );

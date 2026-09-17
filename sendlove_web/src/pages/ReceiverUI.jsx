@@ -1,99 +1,185 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { getMessages } from '../api/message';
-import apiClient from '../api/client';
+import { getBoxDetails } from '../api/box';
+import { useAuth } from '../context/AuthContext';
+import Icon from '../components/ui/Icon';
+import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Screen';
+
+/**
+ * Màn 09 "box status + history-part" trong file Figma.
+ *
+ * Hai trường có trong BoxStatus nhưng CỐ Ý không hiện:
+ *   online   — hộp ngủ và chỉ thức 5 phút một lần, nên online = false gần như
+ *              suốt thời gian hộp vẫn khoẻ. Hiện nó ra là báo hỏng nhầm.
+ *              Trạng thái ở đây suy từ last_seen.
+ *   charging — PowerManager::isCharging() hardcode return false, không có mạch
+ *              báo sạc. Chỉ hiện phần trăm pin.
+ */
+
+const MINUTE = 60 * 1000;
+
+/** Khoảng cách thời gian, đọc được bằng tiếng Việt. */
+function timeAgo(ts) {
+  const diff = Date.now() - ts;
+  if (diff < MINUTE) return 'vừa xong';
+  const mins = Math.floor(diff / MINUTE);
+  if (mins < 60) return `${mins} phút trước`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+  return `${Math.floor(hours / 24)} ngày trước`;
+}
+
+/**
+ * Hộp thức mỗi 5 phút. Trễ tới 15 phút vẫn là bình thường (lỡ một hai nhịp);
+ * quá 2 tiếng thì mới đáng gọi là mất liên lạc.
+ */
+function syncTone(lastSeen) {
+  if (!lastSeen) return 'unknown';
+  const diff = Date.now() - lastSeen;
+  if (diff < 15 * MINUTE) return 'ok';
+  if (diff < 2 * 60 * MINUTE) return 'late';
+  return 'lost';
+}
+
+const TONE = {
+  ok:      { bg: 'var(--success-bg)', fg: 'var(--success-fill)', icon: 'sync' },
+  late:    { bg: 'var(--warning-bg)', fg: 'var(--warning-fill)', icon: 'sync' },
+  lost:    { bg: 'var(--error-bg)',   fg: 'var(--error-fill)',   icon: 'alert' },
+  unknown: { bg: 'var(--neutral-100)', fg: 'var(--neutral-500)', icon: 'sync' },
+};
+
+const MSG_ICON = { video: 'video', image: 'image', gif: 'image', voice: 'mic', text: 'text' };
+const MSG_LABEL = { video: 'Video', image: 'Ảnh', gif: 'Ảnh động', voice: 'Lời nhắn', text: 'Dòng chữ' };
 
 export default function ReceiverUI() {
   const { boxId } = useParams();
+  const navigate = useNavigate();
+  const { profile } = useAuth();
   const [messages, setMessages] = useState([]);
-  const [boxStatus, setBoxStatus] = useState(null);
+  const [box, setBox] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const fetchData = async () => {
+    let alive = true;
+    const load = async () => {
       try {
-        // Fetch message history
-        const msgRes = await getMessages(boxId);
-        if (msgRes.success) {
-          setMessages(msgRes.data);
+        // Hai lời gọi độc lập nhau: tin nhắn hỏng thì vẫn xem được trạng thái
+        // hộp và ngược lại, nên allSettled chứ không phải all.
+        const [msgRes, boxRes] = await Promise.allSettled([
+          getMessages(boxId),
+          getBoxDetails(boxId),
+        ]);
+        if (!alive) return;
+        if (msgRes.status === 'fulfilled' && msgRes.value.success) setMessages(msgRes.value.data);
+        if (boxRes.status === 'fulfilled' && boxRes.value.success) setBox(boxRes.value.data);
+        if (msgRes.status === 'rejected' && boxRes.status === 'rejected') {
+          setError('Không đọc được dữ liệu hộp. Kiểm tra kết nối rồi thử lại.');
         }
-        
-        // Fetch box status (if you have an API for this, for now just an assumption)
-        const boxRes = await apiClient.get(`/boxes/${boxId}`);
-        if (boxRes.data.success) {
-          setBoxStatus(boxRes.data.data.status);
-        }
-      } catch (err) {
-        console.error('Failed to fetch receiver data', err);
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
     };
-    fetchData();
+    load();
+    return () => { alive = false; };
   }, [boxId]);
 
-  return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ fontSize: '2rem' }}>Hộp quà của tôi</h1>
-          <p style={{ color: 'var(--color-text-muted)' }}>Mã Box: {boxId}</p>
-        </div>
-      </div>
+  const status = box?.status;
+  const tone = TONE[syncTone(status?.last_seen)];
 
-      <div className="glass-panel" style={{ padding: '20px', display: 'flex', gap: '20px', alignItems: 'center' }}>
-        <div style={{ fontSize: '3rem' }}>🎁</div>
-        <div style={{ flex: 1 }}>
-          <h3 style={{ marginBottom: '8px' }}>Trạng thái Box</h3>
-          {boxStatus ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '14px' }}>
-              <div>Trạng thái: <strong style={{ color: boxStatus.online ? 'green' : 'red' }}>{boxStatus.online ? 'Online' : 'Offline'}</strong></div>
-              <div>Pin: <strong>{boxStatus.battery}% {boxStatus.charging ? '⚡' : ''}</strong></div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                Cập nhật lần cuối: {new Date(boxStatus.last_seen).toLocaleString('vi-VN')}
-              </div>
+  return (
+    <Screen>
+      <AppBar onBack={() => navigate('/dashboard')} />
+      <Body>
+        <Header title="Hộp của tôi" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
+
+        {/* --- thẻ đồng bộ --- */}
+        <div className="sl-card" style={{ gap: 'var(--sp-3)', padding: 'var(--sp-4)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+            <CircleIcon size={44} bg={tone.bg} color={tone.fg} icon={tone.icon} iconSize={20} />
+            <div className="sl-listcard__mid">
+              <span className="sl-label-s" style={{ fontSize: 15 }}>
+                {status?.last_seen
+                  ? `Đồng bộ ${timeAgo(status.last_seen)}`
+                  : loading ? 'Đang đọc trạng thái…' : 'Chưa rõ lần đồng bộ gần nhất'}
+              </span>
+              <span className="sl-caption">Hộp thức dậy mỗi 5 phút để tìm tin mới.</span>
             </div>
-          ) : (
-            <p style={{ color: 'var(--color-text-muted)' }}>Đang tải trạng thái...</p>
+          </div>
+
+          {status && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--neutral-500)' }}>
+                  <Icon name="battery" size={16} />
+                  <span className="sl-caption" style={{ fontWeight: 500, color: 'var(--caramel-800)' }}>
+                    {status.battery}%
+                  </span>
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--neutral-500)' }}>
+                  <Icon name="gear" size={16} />
+                  <span className="sl-caption" style={{ fontWeight: 500, color: 'var(--caramel-800)' }}>
+                    Firmware {status.fw_version}
+                  </span>
+                </span>
+              </div>
+              {/* Con số trên là của lần hộp thức gần nhất, không phải đo trực tiếp. */}
+              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
+                Ghi nhận ở lần đồng bộ đó — không phải số đo ngay lúc này.
+              </span>
+            </>
           )}
         </div>
-      </div>
 
-      <div>
-        <h2 style={{ fontSize: '1.5rem', marginBottom: '16px' }}>Tin nhắn nhận được</h2>
-        
+        {error && <div className="sl-reason">{error}</div>}
+
+        {/* --- hai lối đi --- */}
+        <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+          <NavTile icon="bell" label="Báo thức" onClick={() => navigate(`/box/${boxId}/receiver/alarm`)} />
+          <NavTile icon="gear" label="Cài đặt" onClick={() => navigate(`/box/${boxId}/receiver/config`)} />
+        </div>
+
+        {/* --- tin đã nhận --- */}
+        <span className="sl-label">Tin nhắn</span>
+
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>Đang tải...</div>
+          <span className="sl-body">Đang tải…</span>
         ) : messages.length === 0 ? (
-          <div className="glass-panel" style={{ padding: '32px', textAlign: 'center' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>📭</div>
-            <h3>Chưa có tin nhắn nào</h3>
-            <p style={{ color: 'var(--color-text-muted)', marginTop: '8px' }}>Người ấy chưa gửi tin nhắn nào cho bạn.</p>
+          <div className="sl-card sl-card--center">
+            <CircleIcon size={56} bg="var(--rose-50)" color="var(--rose-400)" icon="chat" iconSize={24} />
+            <span className="sl-heading">Chưa có tin nào</span>
+            <span className="sl-body">Khi người ấy gửi, tin sẽ hiện ở đây rồi mới tới hộp.</span>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '16px' }}>
-            {messages.map(msg => (
-              <div key={msg.id} className="glass-panel" style={{ padding: '10px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                <div style={{ width: '100px', height: '100px', borderRadius: '8px', overflow: 'hidden', background: '#eee', marginBottom: '10px' }}>
-                  {msg.thumbnail_url ? (
-                    <img src={msg.thumbnail_url} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px' }}>
-                      {msg.type === 'voice' ? '🎤' : msg.type === 'text' ? '✍️' : '📁'}
-                    </div>
-                  )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {messages.map((msg) => (
+              <div className="sl-listcard" key={msg.id}>
+                <span className="sl-chip">
+                  <Icon name={MSG_ICON[msg.type] || 'chat'} size={20} />
+                </span>
+                <div className="sl-listcard__mid">
+                  <span className="sl-label-s">{MSG_LABEL[msg.type] || 'Tin nhắn'}</span>
+                  <span className="sl-caption">{timeAgo(msg.timestamp)}</span>
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
-                  {new Date(msg.timestamp).toLocaleDateString('vi-VN')}
-                </div>
-                <div style={{ fontWeight: 'bold', fontSize: '14px', textTransform: 'capitalize' }}>
-                  {msg.type}
-                </div>
+                <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
               </div>
             ))}
           </div>
         )}
-      </div>
-    </div>
+      </Body>
+    </Screen>
+  );
+}
+
+/** Ô điều hướng cao 64, viền mảnh — tile() ở màn 09. */
+function NavTile({ icon, label, onClick }) {
+  return (
+    <button type="button" className="sl-listcard" onClick={onClick}
+      style={{ height: 64, padding: '0 var(--sp-3)', gap: 10, cursor: 'pointer', flex: 1 }}>
+      <Icon name={icon} size={20} style={{ color: 'var(--rose-800)' }} />
+      <span className="sl-label-s" style={{ flex: 1, textAlign: 'left' }}>{label}</span>
+      <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
+    </button>
   );
 }

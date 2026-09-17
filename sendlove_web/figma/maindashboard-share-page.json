@@ -1,0 +1,857 @@
+{
+ "_note": "Ghep tu 2 luot goi use_figma khac nhau trong cung phien — khong luot nao dump duoc nguyen frame nay mot lan, nhung gop lai la du 100%: appbar (schema day du, khong bi cat) + box-list (schema chi tiet nhat, co dash pattern + ca 2 nhanh online/offline). Con thieu limit-dynamic-island + Status Bar top-level cua chinh frame nay, nhung pattern giong het cac frame khac trong login-signup.json (khong mat thong tin thuc chat).",
+ "frame": {
+  "id": "280:690",
+  "name": "maindashboard-share-page",
+  "x": 1238,
+  "y": 483,
+  "w": 430,
+  "h": 932,
+  "fill": "#fdf8f3"
+ },
+ "appbar": {
+  "type": "FRAME",
+  "name": "appbar",
+  "x": 0,
+  "y": 61,
+  "w": 430,
+  "h": 76,
+  "layout": {
+   "dir": "HORIZONTAL",
+   "gap": 12,
+   "pad": [
+    16,
+    20,
+    16,
+    20
+   ],
+   "main": "SPACE_BETWEEN",
+   "cross": "CENTER",
+   "mainSizing": "FIXED",
+   "crossSizing": "AUTO"
+  },
+  "fill": "#787878",
+  "children": [
+   {
+    "type": "FRAME",
+    "name": "wellcome-text",
+    "x": 20,
+    "y": 17,
+    "w": 179,
+    "h": 43,
+    "layout": {
+     "dir": "VERTICAL",
+     "gap": 0,
+     "pad": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "main": "MIN",
+     "cross": "MIN",
+     "mainSizing": "AUTO",
+     "crossSizing": "FIXED"
+    },
+    "sizing": "FIXED/HUG",
+    "children": [
+     {
+      "type": "TEXT",
+      "name": "Hi, Phong!",
+      "x": 0,
+      "y": 0,
+      "w": 179,
+      "h": 26,
+      "characters": "Hi, Phong!",
+      "fontSize": 22,
+      "fontStyle": "Bold",
+      "fontFamily": "Quicksand",
+      "textAlign": "LEFT",
+      "lineHeight": "120%",
+      "sizing": "FILL/HUG",
+      "fill": "#3d2a20"
+     },
+     {
+      "type": "TEXT",
+      "name": "Select a box and send your msg",
+      "x": 0,
+      "y": 26,
+      "w": 179,
+      "h": 17,
+      "characters": "Select a box and send your msg",
+      "fontSize": 12,
+      "fontStyle": "Regular",
+      "fontFamily": "Quicksand",
+      "textAlign": "LEFT",
+      "lineHeight": "140%",
+      "sizing": "FILL/HUG",
+      "fill": "#a89689"
+     }
+    ]
+   },
+   {
+    "type": "FRAME",
+    "name": "noty-avatar",
+    "x": 318,
+    "y": 16,
+    "w": 92,
+    "h": 44,
+    "layout": {
+     "dir": "HORIZONTAL",
+     "gap": 22,
+     "pad": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "main": "MAX",
+     "cross": "CENTER",
+     "mainSizing": "AUTO",
+     "crossSizing": "AUTO"
+    },
+    "sizing": "HUG/HUG",
+    "children": [
+     {
+      "type": "FRAME",
+      "name": "ph:notification-fill",
+      "x": 0,
+      "y": 9,
+      "w": 26,
+      "h": 26,
+      "sizing": "FIXED/FIXED",
+      "fill": "#ffffff",
+      "children": [
+       {
+        "type": "VECTOR",
+        "name": "Vector",
+        "x": 3,
+        "y": 2,
+        "w": 20,
+        "h": 20,
+        "fill": "#e0758e"
+       }
+      ]
+     },
+     {
+      "type": "ELLIPSE",
+      "name": "avatar",
+      "x": 48,
+      "y": 0,
+      "w": 44,
+      "h": 44,
+      "sizing": "FIXED/FIXED",
+      "stroke": {
+       "weight": 0.5,
+       "color": "#d4915a"
+      },
+      "fill": "IMAGE"
+     }
+    ]
+   }
+  ]
+ },
+ "box_list": {
+  "t": "FRAME",
+  "n": "box-list",
+  "b": [
+   0,
+   137,
+   430,
+   350
+  ],
+  "al": "V g16 p8,20,10,20 CENTER/MIN",
+  "bg": "#fdf8f3",
+  "k": [
+   {
+    "t": "TEXT",
+    "n": "YOUR BOX",
+    "b": [
+     20,
+     8,
+     86,
+     22
+    ],
+    "s": "YOUR BOX",
+    "f": "17/SemiBold",
+    "c": "#8a7767",
+    "al": null
+   },
+   {
+    "t": "FRAME",
+    "n": "box-card",
+    "b": [
+     20,
+     46,
+     390,
+     77
+    ],
+    "al": "H g10 p16,16,16,16 SPACE_BETWEEN/CENTER",
+    "r": 12,
+    "sw": 0.5,
+    "sc": "#f4a3af",
+    "bg": "#ffffff",
+    "k": [
+     {
+      "t": "FRAME",
+      "n": "right-box-card",
+      "b": [
+       17,
+       17,
+       173,
+       44
+      ],
+      "al": null,
+      "k": [
+       {
+        "t": "RECTANGLE",
+        "n": "Rectangle 11",
+        "b": [
+         0,
+         0,
+         44,
+         44
+        ],
+        "al": null,
+        "r": 8,
+        "bg": "IMAGE"
+       },
+       {
+        "t": "GROUP",
+        "n": "boxx-status",
+        "b": [
+         54,
+         0,
+         119,
+         38
+        ],
+        "al": null,
+        "k": [
+         {
+          "t": "TEXT",
+          "n": "Love to Duyen",
+          "b": [
+           55,
+           0,
+           118,
+           22
+          ],
+          "s": "Love to Duyen",
+          "f": "17/SemiBold",
+          "c": "#603a2c",
+          "al": null
+         },
+         {
+          "t": "FRAME",
+          "n": "Frame 41",
+          "b": [
+           54,
+           21,
+           90,
+           17
+          ],
+          "al": "H g11 p0,0,0,0 MIN/MIN",
+          "k": [
+           {
+            "t": "FRAME",
+            "n": "Frame 40",
+            "b": [
+             0,
+             0,
+             40,
+             14
+            ],
+            "al": null,
+            "k": [
+             {
+              "t": "VECTOR",
+              "n": "Vector",
+              "b": [
+               2,
+               8,
+               4,
+               4
+              ],
+              "al": null,
+              "bg": "#4a7c59"
+             },
+             {
+              "t": "TEXT",
+              "n": "online",
+              "b": [
+               9,
+               0,
+               34,
+               17
+              ],
+              "s": "online",
+              "f": "12/Regular",
+              "c": "#8a7767",
+              "al": null
+             }
+            ]
+           },
+           {
+            "t": "GROUP",
+            "n": "Group 40",
+            "b": [
+             51,
+             0,
+             39,
+             17
+            ],
+            "al": null,
+            "k": [
+             {
+              "t": "FRAME",
+              "n": "basil:battery-most-outline",
+              "b": [
+               51,
+               4,
+               12,
+               11
+              ],
+              "al": null,
+              "bg": "#ffffff",
+              "k": [
+               {
+                "t": "VECTOR",
+                "n": "Vector",
+                "b": [
+                 2,
+                 4,
+                 5,
+                 3
+                ],
+                "al": null,
+                "bg": "#8a7767"
+               },
+               {
+                "t": "VECTOR",
+                "n": "Vector",
+                "b": [
+                 1,
+                 3,
+                 10,
+                 6
+                ],
+                "al": null,
+                "bg": "#8a7767"
+               }
+              ]
+             },
+             {
+              "t": "TEXT",
+              "n": "82%",
+              "b": [
+               67,
+               0,
+               23,
+               17
+              ],
+              "s": "82%",
+              "f": "12/Regular",
+              "c": "#8a7767",
+              "al": null
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": "FRAME",
+      "n": "left_box-card",
+      "b": [
+       287,
+       26,
+       87,
+       26
+      ],
+      "al": null,
+      "k": [
+       {
+        "t": "FRAME",
+        "n": "humbleicons:chevron-right",
+        "b": [
+         63,
+         1,
+         24,
+         24
+        ],
+        "al": null,
+        "bg": "#ffffff",
+        "k": [
+         {
+          "t": "VECTOR",
+          "n": "Vector",
+          "b": [
+           10,
+           5,
+           7,
+           14
+          ],
+          "al": null,
+          "sw": 2,
+          "sc": "#e0758e"
+         }
+        ]
+       },
+       {
+        "t": "GROUP",
+        "n": "sender",
+        "b": [
+         1,
+         -6,
+         56,
+         20
+        ],
+        "al": null,
+        "k": [
+         {
+          "t": "RECTANGLE",
+          "n": "Rectangle 12",
+          "b": [
+           1,
+           -4,
+           56,
+           16
+          ],
+          "al": null,
+          "r": 57,
+          "bg": "#f28aa1"
+         },
+         {
+          "t": "TEXT",
+          "n": "Sender",
+          "b": [
+           5,
+           -6,
+           48,
+           20
+          ],
+          "s": "Sender",
+          "f": "14/SemiBold",
+          "c": "#ffffff",
+          "al": null
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "t": "FRAME",
+    "n": "box-card",
+    "b": [
+     20,
+     139,
+     390,
+     77
+    ],
+    "al": "H g10 p16,16,16,16 SPACE_BETWEEN/CENTER",
+    "r": 12,
+    "sw": 0.5,
+    "sc": "#e7ae75",
+    "bg": "#ffffff",
+    "k": [
+     {
+      "t": "FRAME",
+      "n": "right-box-card",
+      "b": [
+       17,
+       17,
+       173,
+       44
+      ],
+      "al": null,
+      "k": [
+       {
+        "t": "GROUP",
+        "n": "boxx-status",
+        "b": [
+         55,
+         0,
+         124,
+         38
+        ],
+        "al": null,
+        "k": [
+         {
+          "t": "TEXT",
+          "n": "Mailbox from D",
+          "b": [
+           55,
+           0,
+           124,
+           22
+          ],
+          "s": "Mailbox from D",
+          "f": "17/SemiBold",
+          "c": "#603a2c",
+          "al": null
+         },
+         {
+          "t": "FRAME",
+          "n": "Frame 41",
+          "b": [
+           56,
+           21,
+           89,
+           17
+          ],
+          "al": "H g10 p0,0,0,0 MIN/MIN",
+          "k": [
+           {
+            "t": "FRAME",
+            "n": "Frame 40",
+            "b": [
+             0,
+             0,
+             43,
+             17
+            ],
+            "al": null,
+            "k": [
+             {
+              "t": "VECTOR",
+              "n": "Vector",
+              "b": [
+               2,
+               8,
+               4,
+               4
+              ],
+              "al": null,
+              "bg": "#8a7767"
+             },
+             {
+              "t": "TEXT",
+              "n": "offline",
+              "b": [
+               9,
+               0,
+               36,
+               17
+              ],
+              "s": "offline",
+              "f": "12/Regular",
+              "c": "#8a7767",
+              "al": null
+             }
+            ]
+           },
+           {
+            "t": "GROUP",
+            "n": "Group 40",
+            "b": [
+             53,
+             0,
+             130,
+             17
+            ],
+            "al": null,
+            "k": [
+             {
+              "t": "TEXT",
+              "n": "Last sync 12hours ago...",
+              "b": [
+               53,
+               0,
+               130,
+               17
+              ],
+              "s": "Last sync 12hours ago...",
+              "f": "12/Regular",
+              "c": "#8a7767",
+              "al": null
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "t": "GROUP",
+        "n": "box-avatar",
+        "b": [
+         0,
+         1,
+         44,
+         44
+        ],
+        "al": null,
+        "k": [
+         {
+          "t": "RECTANGLE",
+          "n": "Rectangle 11",
+          "b": [
+           0,
+           1,
+           44,
+           44
+          ],
+          "al": null,
+          "r": 8,
+          "bg": "#efcb93"
+         },
+         {
+          "t": "INSTANCE",
+          "n": "solar:mailbox-linear",
+          "b": [
+           10,
+           10,
+           24,
+           24
+          ],
+          "al": null,
+          "bg": "#ffffff",
+          "k": [
+           {
+            "t": "GROUP",
+            "n": "Group",
+            "b": [
+             2,
+             2,
+             20,
+             20
+            ],
+            "al": null,
+            "k": [
+             {
+              "t": "VECTOR",
+              "n": "Vector",
+              "b": [
+               11,
+               20,
+               4,
+               2
+              ],
+              "al": null,
+              "sw": 1.5,
+              "sc": "#603a2c"
+             },
+             {
+              "t": "VECTOR",
+              "n": "Vector",
+              "b": [
+               2,
+               6,
+               20,
+               14
+              ],
+              "al": null,
+              "sw": 1.5,
+              "sc": "#603a2c"
+             },
+             {
+              "t": "VECTOR",
+              "n": "Vector",
+              "b": [
+               5,
+               16,
+               3,
+               0
+              ],
+              "al": null,
+              "sw": 1.5,
+              "sc": "#603a2c"
+             },
+             {
+              "t": "VECTOR",
+              "n": "Vector",
+              "b": [
+               16,
+               2,
+               5,
+               8
+              ],
+              "al": null,
+              "sw": 1.5,
+              "sc": "#603a2c"
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": "FRAME",
+      "n": "left_box-card",
+      "b": [
+       287,
+       26,
+       87,
+       26
+      ],
+      "al": null,
+      "k": [
+       {
+        "t": "FRAME",
+        "n": "humbleicons:chevron-right",
+        "b": [
+         63,
+         1,
+         24,
+         24
+        ],
+        "al": null,
+        "bg": "#ffffff",
+        "k": [
+         {
+          "t": "VECTOR",
+          "n": "Vector",
+          "b": [
+           10,
+           5,
+           7,
+           14
+          ],
+          "al": null,
+          "sw": 2,
+          "sc": "#b87548"
+         }
+        ]
+       },
+       {
+        "t": "GROUP",
+        "n": "sender",
+        "b": [
+         -13,
+         -7,
+         67,
+         20
+        ],
+        "al": null,
+        "k": [
+         {
+          "t": "RECTANGLE",
+          "n": "Rectangle 12",
+          "b": [
+           -13,
+           -5,
+           67,
+           16
+          ],
+          "al": null,
+          "r": 52,
+          "bg": "#d4915a"
+         },
+         {
+          "t": "TEXT",
+          "n": "Reciever",
+          "b": [
+           -8,
+           -7,
+           58,
+           20
+          ],
+          "s": "Reciever",
+          "f": "14/SemiBold",
+          "c": "#ffffff",
+          "al": null
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "t": "FRAME",
+    "n": "add-box-card",
+    "b": [
+     20,
+     232,
+     390,
+     108
+    ],
+    "al": "V g0 p24,160,24,160 MIN/CENTER",
+    "r": 16,
+    "sw": 1,
+    "sc": "#f4a3af",
+    "dash": [
+     4,
+     4
+    ],
+    "bg": "#ffffff@0.00",
+    "k": [
+     {
+      "t": "GROUP",
+      "n": "add-button",
+      "b": [
+       175,
+       24,
+       40,
+       40
+      ],
+      "al": null,
+      "k": [
+       {
+        "t": "ELLIPSE",
+        "n": "Ellipse 2",
+        "b": [
+         175,
+         24,
+         40,
+         40
+        ],
+        "al": null,
+        "bg": "#fad6d3"
+       },
+       {
+        "t": "FRAME",
+        "n": "lets-icons:add-round",
+        "b": [
+         183,
+         32,
+         24,
+         24
+        ],
+        "al": null,
+        "bg": "#ffffff",
+        "k": [
+         {
+          "t": "VECTOR",
+          "n": "Vector",
+          "b": [
+           6,
+           6,
+           12,
+           12
+          ],
+          "al": null,
+          "sw": 2,
+          "sc": "#7a2a3d"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": "TEXT",
+      "n": "New box",
+      "b": [
+       166,
+       64,
+       58,
+       20
+      ],
+      "s": "New box",
+      "f": "14/SemiBold",
+      "c": "#9e3a52",
+      "al": null
+     }
+    ]
+   }
+  ]
+ }
+}

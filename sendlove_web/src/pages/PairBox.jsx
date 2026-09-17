@@ -1,118 +1,122 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, KeySquare, Tag, Loader2 } from 'lucide-react';
 import apiClient from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import Icon from '../components/ui/Icon';
+import { Screen, Body, Button, Tips } from '../components/ui/Screen';
 
+/**
+ * Frame "new-box" trong Figma — ở đó đây là một modal đè lên Dashboard.
+ * Giữ route /pair độc lập (không refactor thành modal-trên-Dashboard — đổi
+ * kiến trúc điều hướng để có lớp nền mờ hiện Dashboard phía sau tốn công
+ * không tương xứng), chỉ dựng đúng phong cách CARD của dialog đó.
+ */
 export default function PairBox() {
   const [pairingCode, setPairingCode] = useState('');
   const [boxName, setBoxName] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
+
   const navigate = useNavigate();
   const { refreshProfile } = useAuth();
 
   const handlePair = async (e) => {
     e.preventDefault();
-    if (!pairingCode.trim()) {
-      setError('Vui lòng nhập mã kết nối');
-      return;
-    }
-    if (!boxName.trim()) {
-      setError('Vui lòng đặt tên cho hộp quà của bạn');
-      return;
-    }
-    
+    if (!pairingCode.trim()) { setError('Vui lòng nhập mã kết nối'); return; }
+    if (!boxName.trim()) { setError('Vui lòng đặt tên cho hộp quà của bạn'); return; }
+
     setIsLoading(true);
     setError('');
-    
     try {
       const res = await apiClient.post('/boxes/pair', {
         pairingCode: pairingCode.trim().toUpperCase(),
-        boxName: boxName.trim()
+        boxName: boxName.trim(),
       });
-      
       if (res.data.success) {
-        // Tải lại thông tin user để cập nhật danh sách Box
+        // Tải lại profile để danh sách box ở Dashboard có hộp vừa ghép.
         await refreshProfile();
         navigate('/dashboard');
       }
     } catch (err) {
-      console.error(err);
-      setError(err.response?.data?.error?.message || err.response?.data?.message || 'Có lỗi xảy ra khi kết nối Box. Vui lòng thử lại.');
+      setError(
+        err.response?.data?.error?.message ||
+        err.response?.data?.message ||
+        'Có lỗi xảy ra khi kết nối Box. Vui lòng thử lại.'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: '40px' }}>
-      <div style={{ width: '100%', maxWidth: '480px' }}>
-        <button 
-          onClick={() => navigate('/dashboard')}
-          style={{
-            background: 'none', border: 'none', color: 'var(--color-primary)',
-            display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
-            fontSize: '1rem', fontWeight: 600, marginBottom: '24px'
-          }}
-        >
-          <ArrowLeft size={20} strokeWidth={1.5} /> Quay lại
-        </button>
+    <Screen>
+      <Body center>
+        <form onSubmit={handlePair} className="sl-pair-card" style={{ position: 'relative', textAlign: 'left' }}>
+          {/* Màu #9E6244 xác nhận từ Figma (carbon:close-outline) — cùng màu chữ
+              nút đăng nhập ở Login, không có trong thang token nên dùng literal. */}
+          <button
+            type="button" className="sl-iconbtn" onClick={() => navigate('/dashboard')}
+            aria-label="Đóng" style={{ position: 'absolute', top: -4, right: -4, color: '#9E6244' }}
+          >
+            <Icon name="x" size={24} />
+          </button>
 
-        <div className="glass-panel slide-up" style={{ padding: '32px' }}>
-          <h2 className="text-gradient" style={{ fontSize: '2rem', marginBottom: '8px', textAlign: 'center' }}>Kết nối Box mới</h2>
-          <p style={{ color: 'var(--color-text-muted)', textAlign: 'center', marginBottom: '24px', fontSize: '0.9rem' }}>
-            Nhập mã kết nối trên màn hình Box để ghép đôi. Mã bắt đầu bằng <b style={{color: 'var(--color-primary)'}}>S</b> (Người gửi) hoặc <b style={{color: 'var(--color-secondary)'}}>R</b> (Người nhận).
-          </p>
-
-          {error && (
-            <div style={{ padding: '12px', background: 'rgba(255, 59, 48, 0.1)', color: '#ff3b30', borderRadius: '12px', marginBottom: '20px', fontSize: '0.9rem', textAlign: 'center' }}>
-              {error}
+          <div>
+            <div className="sl-label" style={{ textTransform: 'uppercase', letterSpacing: .4, fontSize: 17, fontWeight: 600, color: 'var(--neutral-700)' }}>
+              Ghép hộp mới
             </div>
-          )}
+            <p className="sl-body" style={{ marginTop: 6 }}>
+              Nhập mã hiện trên màn hình hộp. Mã bắt đầu bằng <b>S</b> nếu bạn là người gửi,
+              hoặc <b>R</b> nếu bạn là người nhận.
+            </p>
+          </div>
 
-          <form onSubmit={handlePair} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontWeight: 500, color: 'var(--color-text-main)' }}>
-                <KeySquare size={18} strokeWidth={1.5} color="var(--color-primary)" />
-                Mã kết nối (Pairing Code)
-              </label>
-              <input 
-                type="text" 
-                className="glass-input" 
-                placeholder="Ví dụ: SABC12DEF9" 
-                value={pairingCode}
-                onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
-                style={{ textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 600 }}
-              />
-            </div>
+          {error && <div className="sl-reason">{error}</div>}
 
-            <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontWeight: 500, color: 'var(--color-text-main)' }}>
-                <Tag size={18} strokeWidth={1.5} color="var(--color-primary)" />
-                Tên hiển thị cho Box
-              </label>
-              <input 
-                type="text" 
-                className="glass-input" 
-                placeholder="Ví dụ: Hộp quà của Vợ Yêu" 
-                value={boxName}
-                onChange={(e) => setBoxName(e.target.value)}
-              />
-            </div>
+          {/* fontWeight 600 xác nhận Figma (14/SemiBold) — .sl-label mặc định 500. */}
+          <label className="sl-field">
+            <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', fontWeight: 600 }}>
+              <Icon name="key" size={12} style={{ color: 'var(--neutral-700)' }} />
+              Mã kết nối
+            </span>
+            <input
+              className="sl-input sl-input--accent"
+              value={pairingCode}
+              onChange={(e) => setPairingCode(e.target.value.toUpperCase())}
+              placeholder="Ví dụ: SABC12DEF9"
+              autoComplete="off"
+              autoCapitalize="characters"
+              style={{ textTransform: pairingCode ? 'uppercase' : 'none', letterSpacing: 2, fontWeight: 700 }}
+            />
+            <Tips>Mã gồm đúng 10 ký tự.</Tips>
+          </label>
 
-            <button 
-              type="submit" 
-              className="glass-button" 
-              disabled={isLoading}
-              style={{ marginTop: '12px', width: '100%', opacity: isLoading ? 0.7 : 1 }}
+          <label className="sl-field">
+            <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', fontWeight: 600 }}>
+              <Icon name="text" size={12} style={{ color: 'var(--neutral-700)' }} />
+              Tên hiển thị cho hộp
+            </span>
+            <input
+              className="sl-input sl-input--accent"
+              value={boxName}
+              onChange={(e) => setBoxName(e.target.value)}
+              placeholder="Ví dụ: Hộp quà của Vợ Yêu 💕"
+            />
+          </label>
+
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-4)', marginTop: 'var(--sp-2)' }}>
+            <Button kind="pri" type="submit" disabled={isLoading} block={false} style={{ minWidth: 134 }}>
+              {isLoading ? 'Đang ghép đôi…' : 'Ghép đôi ngay'}
+            </Button>
+            <button
+              type="button" onClick={() => navigate('/dashboard')}
+              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--caramel-800)', fontFamily: 'var(--font)', fontSize: 14, fontWeight: 600 }}
             >
-              {isLoading ? <Loader2 size={20} strokeWidth={1.5} className="spin" /> : 'Ghép Đôi Ngay'}
+              Huỷ
             </button>
-          </form>
-        </div>
-      </div>
-    </div>
+          </div>
+        </form>
+      </Body>
+    </Screen>
   );
 }

@@ -1,82 +1,150 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getMessages } from '../api/message';
+import { getBoxDetails } from '../api/box';
+import { useAuth } from '../context/AuthContext';
+import Icon from '../components/ui/Icon';
+import { Screen, AppBar, Body, Actions, Header, Button, Tips, CircleIcon } from '../components/ui/Screen';
+
+/**
+ * Màn 06 "content-history-below-part".
+ *
+ * KHÔNG có badge "đã nhận / đã xem": Message không có trường trạng thái —
+ * message.types.ts ghi rõ "Sender không được biết trạng thái tin nhắn", ESP32
+ * chỉ so timestamp với last_download_ts nội bộ của nó. Thứ người gửi thật sự
+ * biết được là lần hộp thức dậy gần nhất, nên đó là thứ hiện lên.
+ */
+
+const MINUTE = 60 * 1000;
+
+function timeAgo(ts) {
+  const diff = Date.now() - ts;
+  if (diff < MINUTE) return 'vừa xong';
+  const mins = Math.floor(diff / MINUTE);
+  if (mins < 60) return `${mins} phút trước`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+  return `${Math.floor(hours / 24)} ngày trước`;
+}
+
+const clock = (ts) => new Date(ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
+/** Nhãn ngày: hôm nay / hôm qua / ngày tháng. */
+function dayLabel(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  if (same(d, today)) return 'Hôm nay';
+  if (same(d, yesterday)) return 'Hôm qua';
+  return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+const ICON_OF = { video: 'video', image: 'image', gif: 'image', voice: 'mic', text: 'text' };
+
+function titleOf(msg) {
+  const secs = msg.duration ? ` · ${Math.round(msg.duration)}s` : '';
+  switch (msg.type) {
+    case 'video': return `Video${secs}`;
+    case 'voice': return `Lời nhắn${secs}`;
+    case 'image': return 'Ảnh';
+    case 'gif': return 'Ảnh động';
+    case 'text': return 'Dòng chữ';
+    default: return 'Tin nhắn';
+  }
+}
 
 export default function SenderDashboard() {
   const { boxId } = useParams();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [messages, setMessages] = useState([]);
+  const [lastSeen, setLastSeen] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const fetchMessages = async () => {
-      try {
-        const res = await getMessages(boxId);
-        if (res.success) {
-          setMessages(res.data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch messages', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchMessages();
+    let alive = true;
+    (async () => {
+      const [msgRes, boxRes] = await Promise.allSettled([getMessages(boxId), getBoxDetails(boxId)]);
+      if (!alive) return;
+      if (msgRes.status === 'fulfilled' && msgRes.value.success) setMessages(msgRes.value.data || []);
+      else setError('Không tải được lịch sử tin nhắn.');
+      if (boxRes.status === 'fulfilled' && boxRes.value.success) setLastSeen(boxRes.value.data?.status?.last_seen);
+      setLoading(false);
+    })();
+    return () => { alive = false; };
   }, [boxId]);
 
-  return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ fontSize: '2rem' }}>Lịch sử tin nhắn</h1>
-          <p style={{ color: 'var(--color-text-muted)' }}>Box: {boxId}</p>
-        </div>
-        <button className="glass-button primary" onClick={() => navigate(`/box/${boxId}/sender`)}>
-          + Gửi tin mới
-        </button>
-      </div>
+  // Mới nhất lên trước, rồi gom theo ngày để chèn nhãn.
+  const sorted = [...messages].sort((a, b) => b.timestamp - a.timestamp);
+  let lastDay = null;
 
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '40px' }}>Đang tải...</div>
-      ) : messages.length === 0 ? (
-        <div className="glass-panel" style={{ padding: '32px', textAlign: 'center' }}>
-          <div style={{ fontSize: '4rem', marginBottom: '16px' }}>📭</div>
-          <h3>Chưa có tin nhắn nào</h3>
-          <p style={{ color: 'var(--color-text-muted)', marginTop: '8px' }}>Hãy gửi yêu thương đến Hộp quà ngay bây giờ!</p>
+  return (
+    <Screen>
+      <AppBar onBack={() => navigate('/dashboard')} />
+      <Body>
+        <Header title="Lịch sử tin nhắn" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
+
+        <div className="sl-note" style={{ border: '0.5px solid var(--caramel-300)', alignItems: 'center' }}>
+          <Icon name="sync" size={16} style={{ color: 'var(--rose-700)' }} />
+          <span style={{ fontWeight: 500, color: 'var(--neutral-500)' }}>
+            {lastSeen ? `Hộp thức dậy lần cuối ${timeAgo(lastSeen)}` : 'Chưa rõ lần hộp thức gần nhất'}
+          </span>
         </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {messages.map(msg => (
-            <div key={msg.id} className="glass-panel" style={{ display: 'flex', padding: '16px', gap: '16px', alignItems: 'center' }}>
-              <div style={{ width: '60px', height: '60px', borderRadius: '8px', overflow: 'hidden', background: '#eee', flexShrink: 0 }}>
-                {msg.thumbnail_url ? (
-                  <img src={msg.thumbnail_url} alt="thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>
-                    {msg.type === 'voice' ? '🎤' : msg.type === 'text' ? '✍️' : '📁'}
+
+        {error && <div className="sl-reason">{error}</div>}
+
+        <span className="sl-heading" style={{ color: 'var(--neutral-500)' }}>ĐÃ GỬI</span>
+
+        {loading ? (
+          <span className="sl-body">Đang tải…</span>
+        ) : sorted.length === 0 ? (
+          <div className="sl-card sl-card--center">
+            <CircleIcon size={56} bg="var(--rose-50)" color="var(--rose-400)" icon="chat" iconSize={24} />
+            <span className="sl-heading">Chưa gửi tin nào</span>
+            <span className="sl-body">Gửi lời nhắn đầu tiên — hộp sẽ nhận ở lần thức dậy kế tiếp.</span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+            {sorted.map((msg) => {
+              const day = dayLabel(msg.timestamp);
+              const showDay = day !== lastDay;
+              lastDay = day;
+              return (
+                <React.Fragment key={msg.id}>
+                  {showDay && (
+                    <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>{day}</span>
+                  )}
+                  <div className="sl-listcard" style={{ alignItems: 'flex-start' }}>
+                    <span className="sl-chip">
+                      <Icon name={ICON_OF[msg.type] || 'chat'} size={20} />
+                    </span>
+                    <div className="sl-listcard__mid">
+                      <span className="sl-label-s">{titleOf(msg)}</span>
+                      <span className="sl-caption" style={{
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                      }}>
+                        {msg.text || 'Không kèm dòng chữ nào'}
+                      </span>
+                    </div>
+                    <span className="sl-caption" style={{ color: 'var(--neutral-400)', flex: '0 0 auto' }}>
+                      {clock(msg.timestamp)}
+                    </span>
                   </div>
-                )}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 'bold', textTransform: 'capitalize' }}>{msg.type}</span>
-                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                    {new Date(msg.timestamp).toLocaleString('vi-VN')}
-                  </span>
-                </div>
-                {msg.text && (
-                  <p style={{ fontSize: '14px', color: 'var(--color-text-main)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    "{msg.text}"
-                  </p>
-                )}
-                {msg.duration && (
-                  <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>Thời lượng: {msg.duration}s</p>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        )}
+
+        <Tips>Hộp không báo ngược lại, nên không có dấu "đã xem".</Tips>
+
+        <Actions>
+          <Button kind="pri" onClick={() => navigate(`/box/${boxId}/sender`)}>Gửi tin mới</Button>
+        </Actions>
+      </Body>
+    </Screen>
   );
 }

@@ -117,15 +117,21 @@ exports.updateProfileSchema = {
     display_name: { type: 'string', minLength: 1, maxLength: 50 },
     avatar_url: { type: 'string', maxLength: 2048 },
 };
+/**
+ * "HH:mm" 24h thật sự. Pattern cũ /^\d{2}:\d{2}$/ nhận cả "99:99": firmware
+ * (AlarmClock::isValidTime) bỏ qua báo thức đó mà web vẫn hiện là đang bật.
+ * Trùng regex với database.rules.json (nhánh box ghi alarm_list).
+ */
+const ALARM_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** POST /boxes/:boxId/alarms */
 exports.createAlarmSchema = {
-    time: { type: 'string', required: true, pattern: /^\d{2}:\d{2}$/ },
+    time: { type: 'string', required: true, pattern: ALARM_TIME_PATTERN },
     is_enable: { type: 'boolean', required: true },
     repeatable: { type: 'boolean', required: true },
 };
 /** PATCH /boxes/:boxId/alarms/:alarmId */
 exports.updateAlarmSchema = {
-    time: { type: 'string', pattern: /^\d{2}:\d{2}$/ },
+    time: { type: 'string', pattern: ALARM_TIME_PATTERN },
     is_enable: { type: 'boolean' },
     repeatable: { type: 'boolean' },
 };

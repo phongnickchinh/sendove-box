@@ -137,6 +137,9 @@ private:
     bool updateFirebaseStatus(uint8_t batteryPercent, bool isCharging);
     bool checkFirebaseFlags();
     bool syncFirebaseAlarms();
+    bool pushFirebaseAlarms();
+    /// true tới khi tải được alarm_list lần đầu sau boot (hoặc lần tải trước hỏng)
+    bool _alarmsNeedFetch = true;
     bool checkAndDownloadNewMessages(class IStorageProvider* storage);
     bool downloadVoiceSegment(const String& rawVoiceUrl, class WiFiClientSecure& client,
                                class IStorageProvider* storage, const char* writeSlotId);
@@ -207,6 +210,14 @@ private:
     /// Cac URL do he dieu hanh goi de kiem tra "co internet khong". Tra 302 ve
     /// trang portal de may tu bat cua so dang nhap.
     void handleCaptiveProbe();
+    /// Báo thức trên portal (AP mode, không có Internet). Sửa ở đây bật cờ dirty
+    /// trong AlarmClock -> lần sync đầu tiên khi lên mạng đẩy đè lên cloud.
+    void handleAlarmList();    // GET  /alarms
+    void handleAlarmSave();    // POST /alarms/save   id?, time, en, rep
+    void handleAlarmDelete();  // POST /alarms/delete id
+    /// POST /time epoch — lấy giờ điện thoại khi hộp chưa từng có NTP (AP mode
+    /// sau khi cắm điện), không có thì báo thức không bao giờ kêu được.
+    void handleSetTime();
     String buildCaptivePortalHTML();
 };
 

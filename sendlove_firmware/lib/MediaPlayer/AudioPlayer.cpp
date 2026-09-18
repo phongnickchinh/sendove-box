@@ -53,16 +53,22 @@ void AudioPlayer::stop() {
 }
 
 void AudioPlayer::testBeep() {
+    DLOG("[AUD] Playing boot beep test (%lu Hz)", (unsigned long)(_sampleRate * AUDIO_OVERSAMPLE));
+    beep(150);
+}
+
+void AudioPlayer::beep(uint32_t durationMs) {
     if (!init()) return;
 
-    // init() đã mở I2S ở _sampleRate * AUDIO_OVERSAMPLE (32kHz mặc định) nên
-    // không cần set lại sample rate ở đây - cứ ghi thẳng ở tốc độ đó.
     uint32_t rate = _sampleRate * AUDIO_OVERSAMPLE;
-    DLOG("[AUD] Playing boot beep test (%lu Hz)", (unsigned long)rate);
+    // Bíp báo thức chạy sau khi đã phát tin: loadFromStorage() có thể đã đổi tốc
+    // độ phần cứng sang 16kHz x4 mà stop() chỉ trả _sampleRate về mặc định. Không
+    // set lại thì tiếng bíp nhanh gấp đôi và cao gấp đôi. Lúc boot thì vô hại.
+    i2s_set_sample_rates(I2S_NUM_0, rate);
     int16_t beepFrame[2];
     // Phát sóng sin mượt mà thay vì sóng vuông để tránh tiếng rè (rẹt rẹt)
     const int16_t sine[20] = {0, 1236, 2351, 3236, 3804, 4000, 3804, 3236, 2351, 1236, 0, -1236, -2351, -3236, -3804, -4000, -3804, -3236, -2351, -1236};
-    int samples = (rate * 150) / 1000;
+    int samples = (rate * durationMs) / 1000;
     for (int i = 0; i < samples; i++) {
         int16_t sample = sine[i % 20];
         beepFrame[0] = sample;

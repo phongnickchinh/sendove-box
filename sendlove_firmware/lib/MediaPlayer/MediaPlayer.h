@@ -51,6 +51,9 @@ public:
     /// Test I2S speaker beep
     void testAudioBeep();
 
+    /// Một hồi bíp báo thức (block ~0.6s). Gọi khi player đang IDLE.
+    void alarmBeep();
+
 
     /// Get current playback state
     PlaybackState getState() const;

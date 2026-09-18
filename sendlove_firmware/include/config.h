@@ -82,6 +82,12 @@ static constexpr uint32_t FIREBASE_TIMEOUT_MS = 10000;
 static constexpr const char *NVS_KEY_LAST_DOWNLOAD_TS = "last_dl_ts";
 static constexpr uint8_t MAX_ALARMS = 10;
 
+// Báo thức đang kêu (user chốt 2026-09-18): chạm ngắn = báo lại sau 5 phút,
+// chạm giữ = tắt, không ai chạm thì tự tắt sau 1 phút. Bíp mỗi giây một hồi.
+static constexpr uint32_t ALARM_SNOOZE_SEC = 5 * 60;
+static constexpr uint32_t ALARM_RING_MAX_MS = 60000;
+static constexpr uint32_t ALARM_BEEP_PERIOD_MS = 1000;
+
 // Bat xac thuc chung chi TLS cho moi ket noi Firebase (thay cho setInsecure()).
 // Root CA nam o include/firebase_root_ca.h.
 // Dat ve 0 = quay lai setInsecure() — DUONG LUI KHAN CAP, chi dung khi da xac

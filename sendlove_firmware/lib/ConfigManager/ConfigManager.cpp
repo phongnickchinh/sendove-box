@@ -125,49 +125,21 @@ size_t ConfigManager::loadAlarms(AlarmItem* alarms, size_t maxCount) {
     if (!alarms || maxCount == 0) return 0;
     uint32_t count = _prefs.getUInt(KEY_ALARM_COUNT, 0);
     if (count == 0) return 0;
+    // Blob phai dung count * sizeof(AlarmItem). Lech nghia la blob ghi boi ban
+    // firmware co AlarmItem khac kich thuoc (id[16] cu) -> doc vao se lech truong.
+    // Tra 0: AlarmClock coi nhu chua co bao thuc, lan sync dau se tai lai tu cloud.
+    if (_prefs.getBytesLength(KEY_ALARM_DATA) != count * sizeof(AlarmItem)) return 0;
     size_t toRead = (count < maxCount) ? count : maxCount;
     size_t readBytes = _prefs.getBytes(KEY_ALARM_DATA, alarms, toRead * sizeof(AlarmItem));
     return readBytes / sizeof(AlarmItem);
 }
 
-uint32_t ConfigManager::getSecondsToNextAlarm(time_t currentEpochTime) {
-    if (currentEpochTime <= 0) return 0xFFFFFFFF;
+bool ConfigManager::saveAlarmDirty(bool dirty) {
+    return _prefs.putBool(KEY_ALARM_DIRTY, dirty) > 0;
+}
 
-    struct tm timeinfo;
-    if (localtime_r(&currentEpochTime, &timeinfo) == nullptr) return 0xFFFFFFFF;
-
-    uint32_t currentSecOfDay = timeinfo.tm_hour * 3600 + timeinfo.tm_min * 60 + timeinfo.tm_sec;
-
-    AlarmItem alarms[10];
-    size_t count = loadAlarms(alarms, 10);
-    if (count == 0) return 0xFFFFFFFF;
-
-    uint32_t minSecRemaining = 0xFFFFFFFF;
-
-    for (size_t i = 0; i < count; i++) {
-        if (!alarms[i].isEnable) continue;
-
-        int aHour = 0, aMin = 0;
-        if (sscanf(alarms[i].time, "%d:%d", &aHour, &aMin) != 2) continue;
-
-        uint32_t alarmSecOfDay = aHour * 3600 + aMin * 60;
-        int32_t diff = (int32_t)alarmSecOfDay - (int32_t)currentSecOfDay;
-
-        if (diff <= 0) {
-            // Đã qua mốc giờ trong ngày
-            if (alarms[i].repeatable) {
-                diff += 86400; // Sang ngày hôm sau
-            } else {
-                continue; // One-shot đã qua
-            }
-        }
-
-        if ((uint32_t)diff < minSecRemaining) {
-            minSecRemaining = (uint32_t)diff;
-        }
-    }
-
-    return minSecRemaining;
+bool ConfigManager::loadAlarmDirty() {
+    return _prefs.getBool(KEY_ALARM_DIRTY, false);
 }
 
 bool ConfigManager::saveRefreshToken(const char* token) {

@@ -25,6 +25,10 @@ public:
     /// Phát một đoạn bip ngắn để test loa khi boot
     void testBeep();
 
+    /// Bíp sin ~1.6kHz dài durationMs, BLOCK tới khi phát xong (+200ms xả DMA).
+    /// Chỉ gọi khi không phát tin (dùng chung I2S với tick()).
+    void beep(uint32_t durationMs);
+
     /// Tìm AUDC header trong storage bắt đầu từ byte thứ videoDataSize.
     /// appendedSize = số byte audio bảng slot ghi nhận (gồm cả header AUDC), 0 = không rõ.
     /// Trả về true nếu tìm thấy audio hợp lệ.

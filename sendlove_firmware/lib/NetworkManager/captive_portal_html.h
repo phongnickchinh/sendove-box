@@ -18,6 +18,13 @@
 //   - textContent khi in ten mang (SSID la chuoi khong tin duoc)
 //   - hop dong POST /save voi hai field ssid / password
 // Doi CSS thi khong sao; doi mach nay la co the lam hop khong len duoc mang.
+//
+// The "Bao thuc" (2026-09-18) dung <script> RIENG o cuoi trang, khong dung chung
+// bien/ham voi script Wi-Fi o tren. Hop dong:
+//   GET  /alarms          -> {now, max, dirty, items:[{id,time,en,rep}]}
+//   POST /alarms/save     id (rong = them), time "HH:MM", en 0/1, rep 0/1
+//   POST /alarms/delete   id
+//   POST /time            epoch (giay) — gui gio dien thoai khi hop chua co NTP
 // ============================================================================
 
 const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
@@ -115,9 +122,40 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
       background: var(--car-50); border-radius: 12px;
       padding: 12px; margin-top: 16px;
     }
+    .wrap { width: 100%; max-width: 390px; display: flex; flex-direction: column; gap: 16px; align-self: flex-start; }
+    .alist { border: 1px solid var(--car-300); border-radius: 8px; margin-bottom: 16px; }
+    .alist .msg { padding: 12px; color: var(--n-500); font-size: 12px; line-height: 1.4; }
+    .arow {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border-bottom: 1px solid var(--n-100);
+    }
+    .arow:last-child { border-bottom: none; }
+    .arow .t { font-size: 22px; font-weight: 700; color: var(--car-900); min-width: 70px; }
+    .arow.off .t { color: var(--n-400); }
+    .arow .rep { flex: 1; font-size: 12px; color: var(--n-500); }
+    .arow input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--rose-400); }
+    .del {
+      background: none; border: none; color: var(--rose-700); font-size: 20px;
+      line-height: 1; padding: 4px 6px; cursor: pointer;
+    }
+    .addrow { display: flex; gap: 8px; }
+    .addrow input[type=time], .addrow select {
+      flex: 1; padding: 10px 12px; min-height: 44px;
+      background: var(--n-0); border: 1px solid var(--car-300); border-radius: 8px;
+      color: var(--car-900); font-family: inherit; font-size: 15px;
+    }
+    .btn {
+      min-height: 44px; padding: 0 16px;
+      background: var(--rose-400); color: var(--car-900);
+      border: none; border-radius: 8px;
+      font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .aerr { color: var(--rose-700); font-size: 12px; margin-top: 8px; min-height: 16px; }
   </style>
 </head>
 <body>
+  <div class="wrap">
   <div class="card">
     <div class="logo">Kết nối Wi-Fi</div>
     <div class="subtitle">Chọn mạng để chiếc hộp lên mạng và nhận tin nhắn.</div>
@@ -144,6 +182,24 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
     <!-- ESP32-C3 chi co radio 2.4 GHz: mang 5 GHz khong bao gio hien trong danh
          sach tren. Day la ly do hong hay gap nhat, phai noi truoc. -->
     <div class="tips">Hộp chỉ thấy được mạng 2.4 GHz. Mạng 5 GHz sẽ không hiện trong danh sách.</div>
+  </div>
+  <div class="card">
+    <div class="logo">Báo thức</div>
+    <div class="subtitle">Đặt ngay trên hộp, không cần Internet. Chạm hộp để báo lại sau 5 phút, giữ 3 giây để tắt.</div>
+    <div class="alist" id="alist"><div class="msg">Đang tải…</div></div>
+    <div class="addrow">
+      <input type="time" id="atime" value="07:00" aria-label="Giờ báo thức">
+      <select id="arep" aria-label="Tần suất">
+        <option value="1">Mỗi ngày</option>
+        <option value="0">Một lần</option>
+      </select>
+      <button type="button" class="btn" id="aadd">Thêm</button>
+    </div>
+    <div class="aerr" id="aerr"></div>
+    <!-- Luat dong bo nam o AlarmClock.h: sua o day thi len mang se GHI DE danh
+         sach tren web. Phai noi truoc, khong nguoi dung tuong web bi loi. -->
+    <div class="tips">Khi hộp lên mạng, danh sách này sẽ thay cho danh sách báo thức trên web.</div>
+  </div>
   </div>
   <script>
     // Poll /scan: box quet bat dong bo nen lan dau tra "scanning", phai hoi lai.
@@ -215,6 +271,95 @@ const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
       if (p.type === "password") { p.type = "text"; }
       else { p.type = "password"; }
     }
+  </script>
+  <script>
+    // Bao thuc — doc lap voi script Wi-Fi o tren.
+    (function () {
+      var MAX = 10;
+      var list = document.getElementById("alist");
+      var err = document.getElementById("aerr");
+      var addBtn = document.getElementById("aadd");
+
+      function post(url, data) {
+        var body = Object.keys(data).map(function (k) {
+          return encodeURIComponent(k) + "=" + encodeURIComponent(data[k]);
+        }).join("&");
+        return fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body
+        }).then(function (r) {
+          return r.json().then(function (d) {
+            if (!d.ok) throw new Error(d.err || "Lỗi");
+            return d;
+          });
+        });
+      }
+
+      function fail(e) { err.textContent = (e && e.message) ? e.message : "Không kết nối được hộp."; }
+
+      function row(a) {
+        var r = document.createElement("div");
+        r.className = "arow" + (a.en ? "" : " off");
+        var t = document.createElement("span");
+        t.className = "t";
+        t.textContent = a.time;
+        var rep = document.createElement("span");
+        rep.className = "rep";
+        rep.textContent = a.rep ? "Mỗi ngày" : (a.en ? "Một lần" : "Một lần — đã tắt");
+        var sw = document.createElement("input");
+        sw.type = "checkbox";
+        sw.checked = !!a.en;
+        sw.setAttribute("aria-label", "Bật báo thức " + a.time);
+        sw.onchange = function () {
+          err.textContent = "";
+          post("/alarms/save", { id: a.id, time: a.time, en: sw.checked ? 1 : 0, rep: a.rep ? 1 : 0 })
+            .then(load).catch(function (e) { fail(e); load(); });
+        };
+        var del = document.createElement("button");
+        del.type = "button";
+        del.className = "del";
+        del.textContent = "×";
+        del.setAttribute("aria-label", "Xoá báo thức " + a.time);
+        del.onclick = function () {
+          err.textContent = "";
+          post("/alarms/delete", { id: a.id }).then(load).catch(fail);
+        };
+        r.appendChild(t); r.appendChild(rep); r.appendChild(sw); r.appendChild(del);
+        return r;
+      }
+
+      function load() {
+        return fetch("/alarms").then(function (r) { return r.json(); }).then(function (d) {
+          MAX = d.max || MAX;
+          list.innerHTML = "";
+          var items = d.items || [];
+          items.sort(function (x, y) { return x.time < y.time ? -1 : (x.time > y.time ? 1 : 0); });
+          if (!items.length) {
+            var m = document.createElement("div");
+            m.className = "msg";
+            m.textContent = "Chưa có báo thức nào.";
+            list.appendChild(m);
+          }
+          items.forEach(function (a) { list.appendChild(row(a)); });
+          addBtn.disabled = items.length >= MAX;
+          addBtn.textContent = items.length >= MAX ? "Đã đủ " + MAX : "Thêm";
+        }).catch(fail);
+      }
+
+      addBtn.onclick = function () {
+        var t = document.getElementById("atime").value;
+        if (!/^\d{2}:\d{2}$/.test(t)) { err.textContent = "Chọn giờ trước đã."; return; }
+        err.textContent = "";
+        addBtn.disabled = true;
+        post("/alarms/save", { time: t, en: 1, rep: document.getElementById("arep").value })
+          .then(load).catch(function (e) { fail(e); load(); });
+      };
+
+      // Gui gio dien thoai truoc: hop vua cam dien o AP mode chua co NTP thi
+      // khong biet bay gio la may gio, bao thuc se khong bao gio keu.
+      post("/time", { epoch: Math.floor(Date.now() / 1000) }).catch(function () {}).then(load);
+    })();
   </script>
 </body>
 </html>

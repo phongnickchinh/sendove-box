@@ -1,5 +1,7 @@
 #include "NetworkManager.h"
+#include "AlarmClock.h"
 #include "captive_portal_html.h"
+#include <ArduinoJson.h>
 #include "firebase_root_ca.h"
 #include <DNSServer.h>
 #include <time.h>
@@ -7,6 +9,10 @@
 #include <algorithm>
 #include "esp_sntp.h"
 #include "ScreenLogger.h"
+
+// Moc Unix hop le toi thieu (2020-09-13). Duoi moc nay nghia la RTC chua tung
+// duoc set — mbedTLS se tu choi chung chi voi BADCERT_FUTURE.
+static constexpr time_t MIN_VALID_EPOCH = 1600000000;
 
 static const byte DNS_PORT = 53;
 static DNSServer dnsServer;
@@ -274,6 +280,10 @@ void NetworkManager::startProvisioningAP(const char* apSsid, const char* apPassw
     _captiveServer->on("/", [this]() { handleCaptiveRoot(); });
     _captiveServer->on("/save", [this]() { handleCaptiveSubmit(); });
     _captiveServer->on("/scan", [this]() { handleCaptiveScan(); });
+    _captiveServer->on("/alarms", HTTP_GET, [this]() { handleAlarmList(); });
+    _captiveServer->on("/alarms/save", HTTP_POST, [this]() { handleAlarmSave(); });
+    _captiveServer->on("/alarms/delete", HTTP_POST, [this]() { handleAlarmDelete(); });
+    _captiveServer->on("/time", HTTP_POST, [this]() { handleSetTime(); });
     for (size_t i = 0; i < sizeof(CAPTIVE_PROBE_PATHS) / sizeof(CAPTIVE_PROBE_PATHS[0]); i++) {
         _captiveServer->on(CAPTIVE_PROBE_PATHS[i], [this]() { handleCaptiveProbe(); });
     }
@@ -387,6 +397,94 @@ void NetworkManager::handleCaptiveSubmit() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Báo thức trên portal. Chạy trong task NetworkController (handleClient), nên
+// chỉ đụng AlarmClock (có mutex riêng), không đụng SPI/màn hình.
+// ---------------------------------------------------------------------------
+
+static void sendJsonResult(WebServer* srv, int code, bool ok, const char* err = nullptr) {
+    JsonDocument doc;
+    doc["ok"] = ok;
+    if (err) doc["err"] = err;
+    String out;
+    serializeJson(doc, out);
+    srv->send(code, "application/json", out);
+}
+
+void NetworkManager::handleAlarmList() {
+    if (!_captiveServer) return;
+    AlarmItem alarms[MAX_ALARMS];
+    size_t count = AlarmClock::instance().list(alarms, MAX_ALARMS);
+
+    JsonDocument doc;
+    time_t now = time(nullptr);
+    doc["now"] = (now >= MIN_VALID_EPOCH) ? (int64_t)now : 0;
+    doc["max"] = MAX_ALARMS;
+    uint32_t rev = 0;
+    doc["dirty"] = AlarmClock::instance().isDirty(&rev);
+    JsonArray items = doc["items"].to<JsonArray>();
+    for (size_t i = 0; i < count; i++) {
+        JsonObject a = items.add<JsonObject>();
+        a["id"] = alarms[i].id;
+        a["time"] = alarms[i].time;
+        a["en"] = alarms[i].isEnable;
+        a["rep"] = alarms[i].repeatable;
+    }
+    String out;
+    serializeJson(doc, out);
+    _captiveServer->send(200, "application/json", out);
+}
+
+void NetworkManager::handleAlarmSave() {
+    if (!_captiveServer) return;
+    String id = _captiveServer->arg("id");
+    String t = _captiveServer->arg("time");
+    bool en = _captiveServer->arg("en") != "0";
+    bool rep = _captiveServer->arg("rep") == "1";
+
+    if (!AlarmClock::isValidTime(t.c_str())) {
+        sendJsonResult(_captiveServer, 400, false, "Giờ không hợp lệ");
+        return;
+    }
+    if (!AlarmClock::instance().upsert(id.c_str(), t.c_str(), en, rep)) {
+        sendJsonResult(_captiveServer, 400, false,
+                       id.length() ? "Không tìm thấy báo thức" : "Đã đủ 10 báo thức");
+        return;
+    }
+    sendJsonResult(_captiveServer, 200, true);
+}
+
+void NetworkManager::handleAlarmDelete() {
+    if (!_captiveServer) return;
+    if (!AlarmClock::instance().remove(_captiveServer->arg("id").c_str())) {
+        sendJsonResult(_captiveServer, 404, false, "Không tìm thấy báo thức");
+        return;
+    }
+    sendJsonResult(_captiveServer, 200, true);
+}
+
+void NetworkManager::handleSetTime() {
+    if (!_captiveServer) return;
+    long long epoch = atoll(_captiveServer->arg("epoch").c_str());
+    // Chỉ nhận giờ điện thoại khi hộp chưa có giờ NTP. Đã có NTP thì NTP đáng tin
+    // hơn — và không cho một trang web bất kỳ trên AP kéo lùi đồng hồ.
+    if (_isTimeSynced || time(nullptr) >= MIN_VALID_EPOCH) {
+        sendJsonResult(_captiveServer, 200, true);
+        return;
+    }
+    if (epoch < MIN_VALID_EPOCH) {
+        sendJsonResult(_captiveServer, 400, false, "epoch");
+        return;
+    }
+    struct timeval tv = { .tv_sec = (time_t)epoch, .tv_usec = 0 };
+    settimeofday(&tv, nullptr);
+    // Cho màn hình chờ hiện giờ thật thay vì 00:00 (getTimeString đọc cờ này).
+    // syncNtpTime() khi lên mạng vẫn chạy và chỉnh lại cho chính xác.
+    _isTimeSynced = true;
+    DLOG("[NET] gio lay tu portal: %lld", epoch);
+    sendJsonResult(_captiveServer, 200, true);
+}
+
 String NetworkManager::buildCaptivePortalHTML() {
     return String(FPSTR(CAPTIVE_PORTAL_HTML));
 }
@@ -433,9 +531,7 @@ bool NetworkManager::isWebServerRunning() const {
 // Bao ve buoc gianh quyen co _isSyncing giua cac task khac do uu tien.
 static portMUX_TYPE s_syncMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Moc Unix hop le toi thieu (2020-09-13). Duoi moc nay nghia la RTC chua tung
-// duoc set — mbedTLS se tu choi chung chi voi BADCERT_FUTURE.
-static constexpr time_t MIN_VALID_EPOCH = 1600000000;
+// MIN_VALID_EPOCH: da chuyen len dau file (cac handler bao thuc cua portal dung truoc).
 
 // Moi WiFiClientSecure toi Firebase deu phai di qua day. Truoc kia moi cho tu
 // goi setInsecure() -> tat hoan toan viec kiem tra chung chi, ai dung giua mang
@@ -583,7 +679,9 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     // là API của ESP8266, WiFiClientSecure trên ESP32 không có, đã kiểm chứng
     // 2026-09-03). Nếu về sau còn gặp http.GET() = -1 mà Wi-Fi rõ ràng vẫn sống,
     // đây là con số cần nhìn đầu tiên để phân biệt OOM với lỗi đường truyền.
-    DLOG("[NET] sync start heap=%u", (unsigned)ESP.getFreeHeap());
+    // maxblk = khoi lien lon nhat: phan biet phan manh voi het RAM (MEMORY.md §21).
+    DLOG("[NET] sync start heap=%u maxblk=%u", (unsigned)ESP.getFreeHeap(),
+         (unsigned)ESP.getMaxAllocHeap());
 
     // 2. Đồng bộ thời gian NTP trước để các mốc timestamp phía sau luôn chính xác
     syncNtpTime(5000);
@@ -963,40 +1061,103 @@ bool NetworkManager::checkFirebaseFlags() {
     String payload = http.getString();
     http.end();
 
-    if (payload == "null" || payload.length() <= 2) return true;
-
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, payload);
-    if (err) return false;
-
-    bool syncAlarmsFlag = doc["sync_alarms_flag"] | false;
-    bool emergencyOta = doc["emergency_ota"] | false;
-    bool normalOta = doc["normal_ota"] | false;
-
-    if (syncAlarmsFlag) {
-        DLOG("[NET] flags: sync alarms");
-        syncFirebaseAlarms();
+    // Cờ báo thức tên là `a_flag` — đúng tên backend ghi (firebase-alarm.repository.ts).
+    // Trước 2026-09-18 firmware đọc `sync_alarms_flag`, một cờ không ai ghi, nên
+    // báo thức đặt trên web không bao giờ về tới hộp (nợ đã ghi ở MEMORY.md §20).
+    bool alarmFlag = false;
+    bool emergencyOta = false;
+    bool normalOta = false;
+    if (payload != "null" && payload.length() > 2) {
+        JsonDocument doc;
+        if (deserializeJson(doc, payload)) return false;
+        alarmFlag = doc["a_flag"] | false;
+        emergencyOta = doc["emergency_ota"] | false;
+        normalOta = doc["normal_ota"] | false;
     }
 
-    // Reset cờ sau khi đọc
-    WiFiClientSecure patchClient;
-    configureTlsClient(patchClient);
-    HTTPClient patchHttp;
+    // Reset cờ TRƯỚC khi tải danh sách báo thức: web sửa tiếp trong lúc đang tải
+    // sẽ bật lại a_flag và được bắt ở chu kỳ sau. Reset sau khi tải thì lần sửa đó
+    // bị xoá mất cờ. Chỉ PATCH khi có cờ bật — trước đây PATCH mỗi chu kỳ 10s,
+    // tốn một lần bắt tay TLS vô ích.
+    if (alarmFlag || emergencyOta || normalOta) {
+        WiFiClientSecure patchClient;
+        configureTlsClient(patchClient);
+        HTTPClient patchHttp;
 
-    // Dung lai _url an toan: GET flags o tren da http.end() xong truoc khi toi day.
-    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json",
-             FIREBASE_HOST, BOX_ID);
-    appendAuth('?');
+        // Dung lai _url an toan: GET flags o tren da http.end() xong truoc khi toi day.
+        snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json",
+                 FIREBASE_HOST, BOX_ID);
+        appendAuth('?');
 
-    if (patchHttp.begin(patchClient, _url)) {
-        patchHttp.setTimeout(FIREBASE_TIMEOUT_MS);
-        patchHttp.addHeader("Content-Type", "application/json");
-        int pc = patchHttp.PATCH("{\"sync_alarms_flag\":false,\"emergency_ota\":false,\"normal_ota\":false}");
-        noteAuthFailure(pc, "flags reset");
-        patchHttp.end();
+        if (patchHttp.begin(patchClient, _url)) {
+            patchHttp.setTimeout(FIREBASE_TIMEOUT_MS);
+            patchHttp.addHeader("Content-Type", "application/json");
+            int pc = patchHttp.PATCH("{\"a_flag\":false,\"emergency_ota\":false,\"normal_ota\":false}");
+            noteAuthFailure(pc, "flags reset");
+            patchHttp.end();
+        }
+    }
+
+    // Đồng bộ báo thức hai chiều (luật đầy đủ ở AlarmClock.h):
+    //  - hộp có sửa đổi chưa đẩy -> PUT cả danh sách lên, bỏ qua a_flag (hộp thắng)
+    //  - không thì tải về khi a_flag bật, hoặc lần sync đầu tiên sau khi boot
+    //    (NVS có thể rỗng/cũ, vd. vừa nạp firmware đổi kích thước AlarmItem)
+    uint32_t alarmRev = 0;
+    if (AlarmClock::instance().isDirty(&alarmRev)) {
+        if (pushFirebaseAlarms()) {
+            AlarmClock::instance().markPushed(alarmRev);
+            _alarmsNeedFetch = false;
+        }
+    } else if (alarmFlag || _alarmsNeedFetch) {
+        DLOG("[NET] flags: sync alarms");
+        // Tải hỏng thì giữ _alarmsNeedFetch để chu kỳ sau thử lại dù cờ đã reset.
+        _alarmsNeedFetch = !syncFirebaseAlarms();
     }
 
     return true;
+}
+
+// Hộp -> cloud: PUT thay TOÀN BỘ boxes/<id>/config/alarm_list. Rule cho phép box
+// ghi đúng nhánh này (database.rules.json). Không bật a_flag: chính hộp là bên
+// vừa ghi, bật lên chỉ khiến chu kỳ sau tải lại đúng thứ vừa đẩy.
+bool NetworkManager::pushFirebaseAlarms() {
+    AlarmItem alarms[MAX_ALARMS];
+    size_t count = AlarmClock::instance().list(alarms, MAX_ALARMS);
+
+    uint64_t nowMs = (uint64_t)time(nullptr) * 1000ULL;
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
+    for (size_t i = 0; i < count; i++) {
+        JsonObject a = root[alarms[i].id].to<JsonObject>();
+        a["id"] = alarms[i].id;
+        a["time"] = alarms[i].time;
+        a["is_enable"] = alarms[i].isEnable;
+        a["repeatable"] = alarms[i].repeatable;
+        // Web không đọc created_at; ghi cho khớp schema backend (BaseModel).
+        a["created_at"] = nowMs;
+        a["updated_at"] = nowMs;
+    }
+    String body;
+    serializeJson(doc, body);  // {} khi rỗng -> RTDB xoá nút, đúng ý "xoá hết"
+
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/config/alarm_list.json",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
+
+    if (!http.begin(client, _url)) return false;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    http.addHeader("Content-Type", "application/json");
+    int code = http.PUT(body);
+    noteAuthFailure(code, "alarms put");
+    if (code < 0) logTlsError(client, "alarms put");
+    http.end();
+
+    DLOG("[NET] alarms PUT %u -> %d", (unsigned)count, code);
+    return code == HTTP_CODE_OK;
 }
 
 bool NetworkManager::syncFirebaseAlarms() {
@@ -1023,33 +1184,37 @@ bool NetworkManager::syncFirebaseAlarms() {
     String payload = http.getString();
     http.end();
 
-    if (payload == "null" || payload.length() <= 2) return true;
-
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, payload);
-    if (err) return false;
-
     AlarmItem alarms[MAX_ALARMS];
     size_t count = 0;
 
-    JsonObject obj = doc.as<JsonObject>();
-    for (JsonPair kv : obj) {
-        if (count >= MAX_ALARMS) break;
-        JsonObject alarmObj = kv.value().as<JsonObject>();
-        strncpy(alarms[count].id, kv.key().c_str(), sizeof(alarms[count].id) - 1);
-        const char* tStr = alarmObj["time"] | "00:00";
-        strncpy(alarms[count].time, tStr, sizeof(alarms[count].time) - 1);
-        alarms[count].isEnable = alarmObj["is_enable"] | false;
-        alarms[count].repeatable = alarmObj["repeatable"] | false;
-        count++;
+    // "null" = web đã xoá hết báo thức. Trước đây return sớm ở đây nên hộp giữ
+    // nguyên danh sách cũ trong NVS và vẫn kêu các báo thức đã xoá.
+    if (payload != "null" && payload.length() > 2) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, payload);
+        if (err) return false;
+
+        JsonObject obj = doc.as<JsonObject>();
+        for (JsonPair kv : obj) {
+            if (count >= MAX_ALARMS) break;
+            JsonObject alarmObj = kv.value().as<JsonObject>();
+            const char* tStr = alarmObj["time"] | "";
+            // id dài hơn buffer sẽ bị cắt -> lần đẩy ngược lên tạo key khác. Bỏ qua
+            // và kêu lên thay vì âm thầm nhân đôi báo thức trên cloud.
+            if (strlen(kv.key().c_str()) >= sizeof(alarms[count].id) ||
+                !AlarmClock::isValidTime(tStr)) {
+                DLOG("[NET] alarm bo qua: %s", kv.key().c_str());
+                continue;
+            }
+            strncpy(alarms[count].id, kv.key().c_str(), sizeof(alarms[count].id) - 1);
+            strncpy(alarms[count].time, tStr, sizeof(alarms[count].time) - 1);
+            alarms[count].isEnable = alarmObj["is_enable"] | false;
+            alarms[count].repeatable = alarmObj["repeatable"] | false;
+            count++;
+        }
     }
 
-    ConfigManager cfg;
-    if (cfg.init(NVS_NAMESPACE)) {
-        cfg.saveAlarms(alarms, count);
-        cfg.end();
-    }
-
+    AlarmClock::instance().replaceFromCloud(alarms, count);
     return true;
 }
 

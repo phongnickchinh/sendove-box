@@ -427,6 +427,10 @@ void MediaPlayer::testAudioBeep() {
     _audio.testBeep();
 }
 
+void MediaPlayer::alarmBeep() {
+    _audio.beep(400);
+}
+
 PlaybackState MediaPlayer::getState() const {
     return _state;
 }

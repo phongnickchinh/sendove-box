@@ -1,3 +1,4 @@
+#include "AlarmClock.h"
 #include "ConfigManager.h"
 #include "DisplayDriver.h"
 #include "IStorageProvider.h"
@@ -48,7 +49,8 @@ static QueueHandle_t eventQueue = nullptr;
 // Serial Monitor đã được thay thế hoàn toàn bằng ScreenLogger on-screen overlay.
 // Không dng Serial.begin() để tránh block chip khi không có USB CDC.
 
-enum class AppState { STATE_STANDBY, STATE_VIDEO };
+// STATE_ALARM: báo thức đang kêu. Chặn vòng ngủ, nhận chạm kể cả lúc đang tải tin.
+enum class AppState { STATE_STANDBY, STATE_VIDEO, STATE_ALARM };
 
 // Đọc/ghi từ 3 task (MediaPlayer, UIController, vòng lặp chính) nên phải atomic.
 // 18 chỗ dùng đều là so sánh/gán trực tiếp (đã grep), không chỗ nào bind qua `auto`,
@@ -97,11 +99,53 @@ void Task_MediaPlayer(void *pvParameters) {
       }
   };
 
+  static constexpr const char* ALARM_HINT = "Cham: bao lai 5p - Giu: tat";
+  char alarmTime[6] = "";
+  uint32_t alarmStartMs = 0;
+  uint32_t lastBeepMs = 0;
+  uint32_t lastAlarmPollMs = 0;
+
   for (;;) {
+    // Báo thức: hỏi mỗi 500ms ở mọi trạng thái (kêu đè lên cả lúc đang xem tin),
+    // trừ khi đang kêu sẵn hoặc đang nạp OTA.
+    if (currentAppState != AppState::STATE_ALARM && !appCtx.otaHandler.isUpdating() &&
+        millis() - lastAlarmPollMs >= 500) {
+      lastAlarmPollMs = millis();
+      if (AlarmClock::instance().pollDue(time(nullptr), alarmTime, sizeof(alarmTime))) {
+        if (currentAppState == AppState::STATE_VIDEO) appCtx.player.stop();
+        currentAppState = AppState::STATE_ALARM;
+        // Cú chạm xếp hàng từ trước không được tắt ngay báo thức vừa kêu.
+        xQueueReset(eventQueue);
+        // Thức dậy bằng timer thì màn hình còn tắt (turnOn chỉ gọi khi wake bằng chạm).
+        appCtx.display.turnOn();
+        appCtx.layoutEngine.renderAlarmScreen(&appCtx.display, alarmTime, ALARM_HINT);
+        alarmStartMs = millis();
+        lastBeepMs = 0;
+        lastUserActivity = millis();
+      }
+    }
+
     SystemEvent event = SystemEvent::NONE;
     while (xQueueReceive(eventQueue, &event, 0) == pdTRUE) {
       // event loop — không log tại đây để tránh spam màn hình
-      
+
+      if (currentAppState == AppState::STATE_ALARM) {
+        // Chạm ngắn = báo lại sau 5 phút, chạm giữ 3s = tắt hẳn.
+        if (event == SystemEvent::TOUCH_SHORT) {
+          AlarmClock::instance().snooze(time(nullptr));
+          appCtx.layoutEngine.renderAlarmScreen(&appCtx.display, alarmTime, "Bao lai sau 5 phut");
+          vTaskDelay(pdMS_TO_TICKS(1500));
+        } else if (event == SystemEvent::TOUCH_LONG) {
+          AlarmClock::instance().dismiss();
+        } else {
+          continue;
+        }
+        currentAppState = AppState::STATE_STANDBY;
+        forceStandbyRedraw = true;
+        lastUserActivity = millis();
+        continue;
+      }
+
       if (event == SystemEvent::TOUCH_SHORT) {
         if (currentAppState == AppState::STATE_STANDBY) {
            if (appCtx.network.isDownloadingMedia()) {
@@ -211,6 +255,20 @@ void Task_MediaPlayer(void *pvParameters) {
         forceStandbyRedraw = false;
       }
       vTaskDelay(pdMS_TO_TICKS(10));
+    } else if (currentAppState == AppState::STATE_ALARM) {
+      // Giữ mốc hoạt động để vòng ngủ ở Task_UIController không chen vào lúc đang kêu.
+      lastUserActivity = millis();
+      if (millis() - alarmStartMs >= ALARM_RING_MAX_MS) {
+        DLOG("[ALM] het 1 phut -> tu tat");
+        AlarmClock::instance().dismiss();
+        currentAppState = AppState::STATE_STANDBY;
+        forceStandbyRedraw = true;
+      } else if (lastBeepMs == 0 || millis() - lastBeepMs >= ALARM_BEEP_PERIOD_MS) {
+        lastBeepMs = millis();
+        appCtx.player.alarmBeep();  // block ~0.6s, chạm trong lúc đó vẫn xếp hàng
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(20));
+      }
     }
   }
 }
@@ -222,8 +280,9 @@ void Task_UIController(void *pvParameters) {
   for (;;) {
     TouchEvent tEvent = appCtx.ui.getTouchEvent();
     if (tEvent != TouchEvent::NONE) {
-      if (appCtx.network.isDownloadingMedia()) {
-          // Bỏ qua touch khi đang download — không log để tránh spam
+      if (appCtx.network.isDownloadingMedia() && currentAppState != AppState::STATE_ALARM) {
+          // Bỏ qua touch khi đang download — không log để tránh spam.
+          // Trừ lúc báo thức đang kêu: không được bắt người dùng chờ tải xong mới tắt được.
       } else {
           SystemEvent event = (tEvent == TouchEvent::LONG_PRESS) ? SystemEvent::TOUCH_LONG : SystemEvent::TOUCH_SHORT;
           xQueueSend(eventQueue, &event, 0);
@@ -254,14 +313,18 @@ void Task_UIController(void *pvParameters) {
         appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
     }
 
+    // secondsToNext <= 2: sắp (hoặc đang) tới phút báo thức mà pollDue chưa kêu.
+    // Ngủ lúc này thì timer tối thiểu vẫn làm lỡ mất cả phút -> thức chờ tiếp.
     if (currentAppState != AppState::STATE_VIDEO &&
+        currentAppState != AppState::STATE_ALARM &&
         !appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
         !appCtx.network.isSyncing() &&
-        (now - lastUserActivity >= activeSleepTimeoutMs)) {
+        (now - lastUserActivity >= activeSleepTimeoutMs) &&
+        AlarmClock::instance().secondsToNext(time(nullptr)) > 2) {
       DLOG("[SLP] timeout -> sleeping");
-      
+
       time_t nowSec = time(nullptr);
-      uint32_t secToAlarm = appCtx.configManager.getSecondsToNextAlarm(nowSec);
+      uint32_t secToAlarm = AlarmClock::instance().secondsToNext(nowSec);
       uint64_t sleepTimeUs = SLEEP_TIMER_US;
       if (secToAlarm != 0xFFFFFFFF && secToAlarm > 0) {
         uint64_t alarmUs = (uint64_t)secToAlarm * 1000000ULL;
@@ -391,6 +454,7 @@ void setup() {
 
   appCtx.network.init();
   appCtx.configManager.init(NVS_NAMESPACE);
+  AlarmClock::instance().begin();
 
   char wifiSsid[WIFI_SSID_MAX_LEN] = "";
   char wifiPass[WIFI_PASS_MAX_LEN] = "";

@@ -130,6 +130,37 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver *display,
   display->releaseSPI();
 }
 
+// Nam o LayoutEngine chu khong o DisplayDriver: font 48 da nhung o day, include
+// them o file khac la nhan doi mang glyph trong flash.
+void LayoutEngine::renderAlarmScreen(DisplayDriver *display, const char *timeStr,
+                                     const char *hint) {
+  if (!display) return;
+  LGFX *tft = display->getTFT();
+  if (!display->acquireSPI()) return;
+
+  tft->startWrite();
+  tft->fillScreen(TFT_BLACK);
+  tft->setTextColor(TFT_WHITE);
+  tft->setTextDatum(lgfx::middle_center);
+
+  tft->setFont(&ChakraPetch_SemiBold_16);
+  tft->drawString("BAO THUC", SCREEN_WIDTH / 2, 60);
+
+  tft->setFont(&ChakraPetch_SemiBold_48);
+  tft->drawString(timeStr ? timeStr : "--:--", SCREEN_WIDTH / 2, 118);
+
+  tft->setFont(&ChakraPetch_SemiBold_16);
+  tft->setTextColor(0xFD34);  // hong nhat, cung tong voi portal
+  tft->drawString(hint ? hint : "", SCREEN_WIDTH / 2, 180);
+
+  tft->setFont(nullptr);
+  tft->endWrite();
+  display->releaseSPI();
+
+  // Lan ve standby ke tiep phai ve lai toan bo, khong duoc tin cache widget.
+  invalidateCache();
+}
+
 void LayoutEngine::drawTextWidget(LGFX* canvas, const WidgetConfig& cfg, const char* text, int32_t defaultW, int32_t defaultH, const lgfx::IFont* font) {
     int32_t boxX = cfg.x;
     int32_t boxY = cfg.y;

@@ -40,6 +40,9 @@ public:
     /// Render standby UI screen widgets
     void renderStandbyScreen(DisplayDriver* display, NetworkManager* network, bool fullRedraw = false);
 
+    /// Man hinh bao thuc dang keu: gio lon o giua + dong goi y thao tac (ASCII)
+    void renderAlarmScreen(DisplayDriver* display, const char* timeStr, const char* hint);
+
     /// Invalidate cached widget state to force full redraw of all widgets
     void invalidateCache();
 

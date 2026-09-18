@@ -14,7 +14,10 @@
 // ============================================================================
 
 struct AlarmItem {
-    char id[16] = "";
+    // 24 chu khong phai 16: backend sinh id "alarm_<ms>" = 19 ky tu. Ban 16 cu
+    // cat mat duoi -> day nguoc len cloud thanh mot key KHAC. Doi kich thuoc
+    // lam blob NVS cu khong con khop -> loadAlarms() bo qua, lan sync dau tai lai.
+    char id[24] = "";
     char time[6] = "00:00"; // "HH:MM"
     bool isEnable = false;
     bool repeatable = false;
@@ -71,10 +74,11 @@ public:
     /// Đọc danh sách báo thức
     size_t loadAlarms(AlarmItem* alarms, size_t maxCount);
 
-    /// Tính toán số giây còn lại đến mốc báo thức gần nhất
-    /// @param currentEpochTime Timestamp UNIX epoch hiện tại tính bằng giây
-    /// @return Số giây còn lại, hoặc 0xFFFFFFFF nếu không có báo thức
-    uint32_t getSecondsToNextAlarm(time_t currentEpochTime);
+    /// Cờ "danh sách báo thức trong hộp đã sửa (portal / tự tắt báo thức một lần)
+    /// mà chưa đẩy lên cloud". Nằm trong NVS để sống qua lần khởi động lại sau
+    /// khi lưu Wi-Fi trên portal.
+    bool saveAlarmDirty(bool dirty);
+    bool loadAlarmDirty();
 
     // --- Firebase Auth ---
 
@@ -99,6 +103,7 @@ private:
     static constexpr const char* KEY_LAST_DL_TS    = "last_dl_ts";
     static constexpr const char* KEY_ALARM_COUNT   = "alarm_cnt";
     static constexpr const char* KEY_ALARM_DATA    = "alarm_data";
+    static constexpr const char* KEY_ALARM_DIRTY   = "alarm_dirty";
     static constexpr const char* KEY_FB_REFRESH    = "fb_refresh";
 };
 

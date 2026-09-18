@@ -42,9 +42,16 @@ bool AudioPlayer::init() {
     return true;
 }
 
+// TRẢ LẠI 24KB RAM, không chỉ xoá bộ đệm. i2s_driver_install() cấp
+// AUDIO_DMA_BUF_COUNT × AUDIO_DMA_BUF_LEN × 2 kênh × 2 byte = 24KB RAM nội bộ
+// (đúng loại mbedTLS cần). Trước 2026-09-18 hàm này chỉ gọi i2s_zero_dma_buffer()
+// — ghi số 0 vào bộ đệm chứ không trả về heap — nên 24KB nằm chết từ tiếng bíp
+// lúc boot tới khi rút điện, trong khi hộp đứng ở màn hình chờ gần như suốt ngày.
 void AudioPlayer::stop() {
     if (_initialized) {
         i2s_zero_dma_buffer(I2S_NUM_0);
+        i2s_driver_uninstall(I2S_NUM_0);
+        _initialized = false;
     }
     _hasAudio    = false;
     _storage     = nullptr;
@@ -55,6 +62,7 @@ void AudioPlayer::stop() {
 void AudioPlayer::testBeep() {
     DLOG("[AUD] Playing boot beep test (%lu Hz)", (unsigned long)(_sampleRate * AUDIO_OVERSAMPLE));
     beep(150);
+    stop();  // trả 24KB DMA lại ngay; lần phát sau tự init lại
 }
 
 void AudioPlayer::beep(uint32_t durationMs) {
@@ -77,11 +85,11 @@ void AudioPlayer::beep(uint32_t durationMs) {
         // Block until written
         i2s_write(I2S_NUM_0, beepFrame, sizeof(beepFrame), &written, portMAX_DELAY);
     }
-    // Nếu stop() (i2s_driver_uninstall) ngay sau vòng ghi thì DMA còn dữ liệu
-    // chưa phát hết bị xoá giữa chừng ⇒ nghe thành tiếng rẹt chứ không phải
-    // tiếng bíp trọn vẹn. Chờ đủ thời lượng phát rồi mới gỡ driver.
+    // Gỡ driver ngay sau vòng ghi thì DMA còn dữ liệu chưa phát hết bị xoá giữa
+    // chừng ⇒ nghe thành tiếng rẹt. Chờ xả xong rồi mới cho phép gỡ.
+    // KHÔNG tự gọi stop() ở đây: báo thức bíp mỗi giây, gỡ rồi cài lại driver 60
+    // lần một hồi chuông là tự tay làm vụn heap. Bên gọi chịu trách nhiệm stop().
     delay(200);
-    stop();
 }
 
 bool AudioPlayer::loadFromStorage(IStorageProvider* storage, uint32_t videoDataSize, uint32_t appendedSize) {

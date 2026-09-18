@@ -117,14 +117,9 @@ bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
     }
     // _jpegBuffer (32KB) được cấp phát on-demand trong playItem() và giải phóng
     // ngay trong stop() để trả lại toàn bộ heap cho MbedTLS SSL Handshake lúc Standby.
-    _audio.init();
+    // I2S cũng vậy: KHÔNG init ở đây nữa (2026-09-18). playItem() tự init khi cần,
+    // beep() cũng thế; init sẵn từ boot nghĩa là giữ 24KB DMA suốt đời máy.
     return true;
-}
-
-bool MediaPlayer::playSlot(uint8_t slot) {
-    char slotStr[16];
-    snprintf(slotStr, sizeof(slotStr), "%d", slot);
-    return playItem(slotStr);
 }
 
 bool MediaPlayer::playItem(const char* identifier) {

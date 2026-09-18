@@ -9,23 +9,6 @@ void UIController::init(uint8_t touchPin, DisplayDriver* display) {
     pinMode(_touchPin, INPUT_PULLDOWN);
 }
 
-void UIController::startBreathingLED() {
-    _ledState = LEDState::BREATHING;
-    // Phase 2: ledcSetup + ledcAttachPin
-}
-
-void UIController::stopBreathingLED() {
-    _ledState = LEDState::OFF;
-}
-
-void UIController::updateLED() {
-    // Phase 2: LED breathing animation
-}
-
-void UIController::setLEDState(LEDState state) {
-    _ledState = state;
-}
-
 TouchEvent UIController::getTouchEvent() {
     bool currentState = digitalRead(_touchPin) == HIGH;
     uint32_t now = millis();
@@ -59,32 +42,6 @@ TouchEvent UIController::getTouchEvent() {
     }
 
     return result;
-}
-
-void UIController::resetTouch() {
-    _touchConfirmed = false;
-    _longPressEmitted = false;
-}
-
-void UIController::showConnecting() {
-    if (_display == nullptr) return;
-    _display->turnOn();
-    _display->showMessage("Connecting...");
-    _display->setBacklight(BACKLIGHT_NIGHT_PERCENT);
-}
-
-void UIController::showDownloading() {
-    if (_display == nullptr) return;
-    _display->showMessage("Downloading...");
-}
-
-void UIController::showError(const char* message) {
-    if (_display == nullptr) return;
-    DLOG("[UI] ERR: %s", message ? message : "(null)");
-    _display->turnOn();
-    _display->showMessage(message);
-    _display->setBacklight(BACKLIGHT_DAY_PERCENT);
-    setLEDState(LEDState::BLINK_FAST);
 }
 
 void UIController::showBootScreen() {

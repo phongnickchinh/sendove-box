@@ -32,6 +32,14 @@ public:
     /// Check if Wi-Fi connected and time is synchronized
     bool isReady() const;
 
+    /// Cờ OTA (`emergency_ota`/`normal_ota` trên cloud) đã bật chưa. Đọc là xoá —
+    /// main.cpp dùng nó để mở cửa sổ OTA rồi tự đóng.
+    bool takeOtaRequest() {
+        if (!_otaRequested) return false;
+        _otaRequested = false;
+        return true;
+    }
+
     /// Check if Wi-Fi is connected
     bool isConnected() const;
 
@@ -55,9 +63,6 @@ public:
 
     /// Synchronize NTP time blocking within timeoutMs (called by background task)
     bool syncNtpTime(uint32_t timeoutMs = 5000);
-
-    /// Trigger non-blocking NTP time sync in background task
-    void triggerNtpSync();
 
     /// Check if time has been synchronized at least once
     bool isTimeSynced() const;
@@ -145,7 +150,13 @@ private:
                                class IStorageProvider* storage, const char* writeSlotId);
 
     static void wakeupSyncTaskWorker(void* param);
-    static void ntpTaskWorker(void* param);
+
+    /// Task sync thường trú: tạo một lần, sau đó ngủ chờ notify. Tạo/xoá task
+    /// mỗi chu kỳ (cách cũ) là xin-trả 12KB liền mạch liên tục -> vụn heap (§21).
+    TaskHandle_t _syncTask = nullptr;
+    uint8_t _syncBattery = 0;
+    bool _syncCharging = false;
+    class IStorageProvider* _syncStorage = nullptr;
 
     // --- Firebase Auth: idToken riêng của box thay cho Database Secret ---
     // Giữ JWT THÔ, không kèm tiền tố. Trước đây giữ dạng "Bearer <jwt>" cho
@@ -183,6 +194,7 @@ private:
     void noteAuthFailure(int httpCode, const char* where);
 
     volatile bool _forceReassociate = false;
+    volatile bool _otaRequested = false;
     volatile bool _isSyncing = false;
     volatile bool _isFirebaseSyncing = false;
     volatile bool _isNtpSyncing = false;

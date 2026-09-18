@@ -23,37 +23,17 @@ static constexpr uint8_t PIN_NAND_CS = 8;
 // --- Touch Sensor (TTP223) --------------------------------------------------
 static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 
-// ============================================================================
-// Phase 2 — Chưa triển khai (chân dự trữ)
-// ============================================================================
-// --- I2S Audio (MAX98357A) --- Cần GPIO 0, 1, 2 rảnh
-// static constexpr uint8_t PIN_I2S_BCLK = 2;   // Bit Clock
-// static constexpr uint8_t PIN_I2S_LRC  = 1;   // Left/Right Clock (Word
-// Select) static constexpr uint8_t PIN_I2S_DOUT = 0;   // Data Out
-
-// --- LED Indicator ---
-// static constexpr uint8_t PIN_LED      = 20;  // Breathing LED (PWM)
-
-// --- Battery ADC ---
-// static constexpr uint8_t PIN_BATTERY_ADC = 2; // ADC1_CH2
-// static constexpr float BATTERY_VOLTAGE_DIVIDER_RATIO = 2.0f;
-// static constexpr float BATTERY_FULL_VOLTAGE  = 4.2f;
-// static constexpr float BATTERY_EMPTY_VOLTAGE = 3.0f;
-// static constexpr uint8_t BATTERY_LOW_THRESHOLD = 10;
-// static constexpr uint8_t PIN_SD_CS    = ???;
+// --- Chân dự trữ, chưa nối trên bo ---
+// PIN_LED (LED nhịp thở), PIN_BATTERY_ADC + bộ chia áp cho đo pin.
+// Chân I2S đã nối thật, xem khối I2S Audio ở cuối file.
 
 // Timing & Power Constants
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
 static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 60000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
-static constexpr uint8_t WIFI_RETRY_MAX = 3;
-static constexpr uint32_t TOUCH_DEBOUNCE_MS = 50;
-static constexpr uint32_t CLOCK_DISPLAY_DURATION_MS = 5000;
 
 // Display Backlight
 static constexpr uint8_t BACKLIGHT_DAY_PERCENT = 100;
-static constexpr uint8_t BACKLIGHT_NIGHT_PERCENT = 20;
-static constexpr uint8_t BACKLIGHT_OFF = 0;
 
 // Media Playback
 static constexpr uint8_t TARGET_FPS = 15;
@@ -79,6 +59,11 @@ static constexpr uint32_t MAX_MEDIA_BYTES = 5500000;
 #include "config_secrets.h"
 
 static constexpr uint32_t FIREBASE_TIMEOUT_MS = 10000;
+
+// Nhịp sync khi hộp đang thức. Mỗi chu kỳ tốn 3 lần bắt tay TLS (~40KB heap mỗi
+// lần) kể cả khi không có tin mới, nên 10s cũ vừa tốn pin vừa ép heap liên tục
+// (MEMORY.md §21). User chốt 20s 2026-09-18: tin tới chậm hơn tối đa 10 giây.
+static constexpr uint32_t SYNC_INTERVAL_MS = 20000;
 static constexpr const char *NVS_KEY_LAST_DOWNLOAD_TS = "last_dl_ts";
 static constexpr uint8_t MAX_ALARMS = 10;
 
@@ -123,6 +108,9 @@ static constexpr size_t FIREBASE_URL_MAX_LEN = 1792;
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";
+// Cửa sổ mở web server OTA sau khi cờ emergency_ota/normal_ota trên cloud bật.
+// Hộp thức suốt cửa sổ này (không ngủ) nên đừng kéo dài quá mức cần thiết.
+static constexpr uint32_t OTA_WINDOW_MS = 10 * 60 * 1000;
 static constexpr const char *FW_VERSION = "2.1.0";
 
 // Wi-Fi & NTP Configuration (Fallback credentials if NVS is empty)
@@ -138,13 +126,11 @@ static constexpr const char *NTP_SERVER_2 = "asia.pool.ntp.org";
 static constexpr const char *NTP_SERVER_3 = "pool.ntp.org";
 static constexpr const char *TIMEZONE_ENV = "ICT-7";
 
-// FreeRTOS Task Priorities & Stack Sizes
-static constexpr UBaseType_t TASK_PRIORITY_POWER_MANAGER = 4;
+// FreeRTOS Task Priorities & Stack Sizes (PowerManager không có task riêng)
 static constexpr UBaseType_t TASK_PRIORITY_MEDIA_PLAYER = 3;
 static constexpr UBaseType_t TASK_PRIORITY_NETWORK = 2;
 static constexpr UBaseType_t TASK_PRIORITY_UI_CONTROLLER = 5;
 
-static constexpr uint32_t TASK_STACK_POWER_MANAGER = 4096;
 static constexpr uint32_t TASK_STACK_MEDIA_PLAYER = 6144;
 static constexpr uint32_t TASK_STACK_NETWORK = 6144;
 static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
@@ -160,10 +146,6 @@ static constexpr const char *NVS_NAMESPACE = "sendlove";
 // Bật tạm thời để xóa sạch dữ liệu trên NOR/W25Q128 lúc boot kế tiếp.
 // Sau khi nạp xong và xác nhận dữ liệu đã được xóa, đổi về 0 rồi build lại.
 #define ERASE_NOR_ON_BOOT 0
-#ifdef WOKWI_SIMULATION
-static constexpr uint8_t PIN_BUZZER = 0;
-static constexpr uint32_t BUZZER_PLAY_DURATION_MS = 2000;
-#endif
 
 // ============================================================
 // I2S Audio (MAX98357A)

@@ -1,7 +1,15 @@
+# Flash 4MB (0x400000). Bo `spiffs` 0x6F000 (444KB) ngay 2026-09-18: khong co
+# SPIFFS/LittleFS o bat ky dau trong firmware (da grep ca src/ lan lib/), no chi
+# ngoi khong. Cho cho hai phan vung app: 0x1C0000 -> 0x1F0000 moi ben (+192KB).
+#
+# nvs GIU NGUYEN offset 0x9000 va size 0x5000 -> Wi-Fi creds, bao thuc, last_dl_ts
+# song qua lan nap nay. `nvs_keys` chi can khi bat ma hoa NVS (dang tat) nen doi
+# cho xuong cuoi la vo hai.
+#
+# Bang nay doi thi PHAI nap qua cap (partition table nam ngoai vung OTA ghi duoc).
 # Name,     Type, SubType,  Offset,   Size
 nvs,        data, nvs,      0x9000,   0x5000
 otadata,    data, ota,      0xe000,   0x2000
-app0,       app,  ota_0,    0x10000,  0x1C0000
-app1,       app,  ota_1,    0x1D0000, 0x1C0000
-nvs_keys,   data, nvs_keys, 0x390000, 0x1000
-spiffs,     data, spiffs,   0x391000, 0x6F000
+app0,       app,  ota_0,    0x10000,  0x1F0000
+app1,       app,  ota_1,    0x200000, 0x1F0000
+nvs_keys,   data, nvs_keys, 0x3F0000, 0x1000

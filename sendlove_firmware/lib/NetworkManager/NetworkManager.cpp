@@ -183,19 +183,9 @@ bool NetworkManager::syncNtpTime(uint32_t timeoutMs) {
     return s_ntpSyncDone;
 }
 
-void NetworkManager::triggerNtpSync() {
-    if (_isNtpSyncing || _isSyncing) return;
-    _isNtpSyncing = true;
-    xTaskCreate(ntpTaskWorker, "NtpSync", 4096, this, 2, nullptr);
-}
-
-void NetworkManager::ntpTaskWorker(void* param) {
-    NetworkManager* self = static_cast<NetworkManager*>(param);
-    if (self != nullptr) {
-        self->syncNtpTime(5000);
-    }
-    vTaskDelete(nullptr);
-}
+// triggerNtpSync() + ntpTaskWorker() đã xoá 2026-09-18: không có lời gọi nào
+// (chỉ khai báo trong header), NTP thật sự chạy bằng syncNtpTime() gọi thẳng
+// trong syncWakeup(). Giữ lại chỉ tạo ảo giác có một đường NTP nền thứ hai.
 
 void NetworkManager::getTimeString(char* buffer, size_t maxLen) const {
     if (buffer == nullptr || maxLen == 0) return;
@@ -610,14 +600,12 @@ void NetworkManager::appendAuth(char sep) {
 // chi ap cho mot lan doc, khong chot duoc ca vong lap.
 static const uint32_t DOWNLOAD_STALL_TIMEOUT_MS = 30000;
 
-struct FirebaseTaskParams {
-    NetworkManager* self;
-    uint8_t batteryPercent;
-    bool isCharging;
-    IStorageProvider* storage;
-    DisplayDriver* display;
-};
-
+// Task WakeSync THƯỜNG TRÚ, tạo một lần rồi ngủ chờ notify.
+//
+// Trước 2026-09-18 mỗi chu kỳ sync tạo một task mới stack 12KB rồi xoá. Xin và
+// trả một khối 12KB liền mạch cứ vài chục giây, ngay sát lúc mbedTLS cần khối
+// ~16KB liền mạch, là cách chắc chắn nhất để làm vụn heap — đúng triệu chứng
+// `SSL - Memory allocation` ở MEMORY.md §21. Stack giờ cấp đúng một lần.
 void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
     if (isPlaybackActive()) {
         DLOG("[NET] sync skip: video playing");
@@ -626,7 +614,7 @@ void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, 
 
     // Hai task khac do uu tien (UIController=5, MediaPlayer=3) cung goi ham nay.
     // Doc roi ghi _isSyncing thanh hai lenh rieng thi ca hai deu co the lot qua
-    // va tao 2 task WakeSync ghi de len cung mot slot flash.
+    // va tao 2 lan sync ghi de len cung mot slot flash.
     bool claimed = false;
     portENTER_CRITICAL(&s_syncMux);
     if (!_isSyncing) {
@@ -636,22 +624,35 @@ void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, 
     portEXIT_CRITICAL(&s_syncMux);
     if (!claimed) return;
 
-    FirebaseTaskParams* p = new FirebaseTaskParams{this, batteryPercent, isCharging, storage, nullptr};
-    BaseType_t res = xTaskCreate(wakeupSyncTaskWorker, "WakeSync", 12288, p, 2, nullptr);
-    if (res != pdPASS) {
-        _isSyncing = false;
-        delete p;
-        DLOG("[NET] WakeSync task RAM!");
+    // Tham số đi qua biến thành viên, không qua con trỏ cấp phát: chỉ có một lượt
+    // sync chạy tại một thời điểm (cờ _isSyncing ở trên đã chốt điều đó).
+    _syncBattery  = batteryPercent;
+    _syncCharging = isCharging;
+    _syncStorage  = storage;
+
+    if (_syncTask == nullptr) {
+        BaseType_t res = xTaskCreate(wakeupSyncTaskWorker, "WakeSync", 12288, this, 2, &_syncTask);
+        if (res != pdPASS) {
+            _syncTask = nullptr;
+            _isSyncing = false;
+            DLOG("[NET] WakeSync task RAM!");
+        }
+        return;  // task vừa tạo chạy ngay lượt đầu, không cần notify
     }
+
+    xTaskNotifyGive(_syncTask);
 }
 
 void NetworkManager::wakeupSyncTaskWorker(void* param) {
-    FirebaseTaskParams* p = static_cast<FirebaseTaskParams*>(param);
-    if (p && p->self) {
-        p->self->syncWakeup(p->batteryPercent, p->isCharging, p->storage);
-        delete p;
+    NetworkManager* self = static_cast<NetworkManager*>(param);
+    for (;;) {
+        if (self != nullptr) {
+            self->syncWakeup(self->_syncBattery, self->_syncCharging, self->_syncStorage);
+        }
+        // Chờ lượt sau. Notify tới trước khi vào đây thì ulTaskNotifyTake trả về
+        // ngay (đếm được giữ lại), nên không mất lượt nào.
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
-    vTaskDelete(nullptr);
 }
 
 bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
@@ -1073,6 +1074,15 @@ bool NetworkManager::checkFirebaseFlags() {
         alarmFlag = doc["a_flag"] | false;
         emergencyOta = doc["emergency_ota"] | false;
         normalOta = doc["normal_ota"] | false;
+    }
+
+    // Hai cờ OTA trước 2026-09-18 chỉ được đọc rồi reset, không kích hoạt gì —
+    // nhìn code tưởng hộp cập nhật được từ xa. Giờ chúng mở cửa sổ OTA thật:
+    // main.cpp bật web server + mDNS trong OTA_WINDOW_MS rồi tắt. Web server
+    // không còn chạy suốt đời máy chỉ để chờ một việc hiếm khi làm.
+    if (emergencyOta || normalOta) {
+        _otaRequested = true;
+        DLOG("[NET] flags: OTA requested");
     }
 
     // Reset cờ TRƯỚC khi tải danh sách báo thức: web sửa tiếp trong lúc đang tải

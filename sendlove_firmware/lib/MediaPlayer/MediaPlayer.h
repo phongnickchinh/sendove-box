@@ -38,8 +38,7 @@ public:
     /// Initialize MediaPlayer instance
     bool init(IStorageProvider* storage, DisplayDriver* display);
 
-    /// Start playing media from specified slot / item ID
-    bool playSlot(uint8_t slot);
+    /// Start playing media from item ID
     bool playItem(const char* identifier);
 
     /// Update playback loop frame timing

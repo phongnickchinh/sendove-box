@@ -140,6 +140,8 @@ void Task_MediaPlayer(void *pvParameters) {
         } else {
           continue;
         }
+        // Trả 24KB DMA của I2S: beep() cố ý không tự gỡ driver giữa các hồi bíp.
+        appCtx.player.stop();
         currentAppState = AppState::STATE_STANDBY;
         forceStandbyRedraw = true;
         lastUserActivity = millis();
@@ -261,6 +263,7 @@ void Task_MediaPlayer(void *pvParameters) {
       if (millis() - alarmStartMs >= ALARM_RING_MAX_MS) {
         DLOG("[ALM] het 1 phut -> tu tat");
         AlarmClock::instance().dismiss();
+        appCtx.player.stop();  // trả 24KB DMA của I2S
         currentAppState = AppState::STATE_STANDBY;
         forceStandbyRedraw = true;
       } else if (lastBeepMs == 0 || millis() - lastBeepMs >= ALARM_BEEP_PERIOD_MS) {
@@ -294,19 +297,34 @@ void Task_UIController(void *pvParameters) {
     uint32_t now = millis();
     static uint32_t lastIntervalSyncMs = millis();
 
-    // Trong luc sync chay ngam, day moc thoi gian theo -> chu ky 10s duoc tinh
-    // tu luc sync KET THUC, thay vi tu luc bat dau (tai xong 30s roi sync lai ngay).
+    // Trong luc sync chay ngam, day moc thoi gian theo -> chu ky duoc tinh tu luc
+    // sync KET THUC, thay vi tu luc bat dau (tai xong 30s roi sync lai ngay).
     if (appCtx.network.isSyncing()) {
         lastIntervalSyncMs = now;
     }
 
-    // Periodic check if device is kept awake in Standby UI (every 10s)
-    //
+    // Cửa sổ OTA: chỉ mở khi cờ trên cloud bật, tự đóng sau OTA_WINDOW_MS.
+    static uint32_t otaWindowUntil = 0;
+    if (appCtx.network.takeOtaRequest()) {
+        appCtx.network.startWebServer(OTA_HOSTNAME);
+        if (appCtx.network.getWebServer() != nullptr) {
+            appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
+        }
+        otaWindowUntil = millis() + OTA_WINDOW_MS;
+        DLOG("[OTA] mo %lus: http://%s.local/", (unsigned long)(OTA_WINDOW_MS / 1000), OTA_HOSTNAME);
+    }
+    if (otaWindowUntil != 0 && (int32_t)(millis() - otaWindowUntil) > 0 &&
+        !appCtx.otaHandler.isUpdating()) {
+        appCtx.network.stopWebServer();
+        otaWindowUntil = 0;
+        DLOG("[OTA] dong cua so");
+    }
+
     // KHÔNG còn điều kiện `!isStorageFull` ở đây: đầy slot chỉ có nghĩa là khỏi
     // tải tin, không có nghĩa là ngừng heartbeat / đọc cờ / đồng bộ báo thức.
     // Cổng đó đã chuyển xuống đúng bước tải tin trong syncWakeup(). Đánh đổi đã
-    // biết: box đầy slot giờ vẫn sync mỗi 10s nên tốn pin hơn trước.
-    if (now - lastIntervalSyncMs >= 10000 && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
+    // biết: box đầy slot vẫn sync theo chu kỳ nên tốn pin hơn trước.
+    if (now - lastIntervalSyncMs >= SYNC_INTERVAL_MS && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
         bool isCharging = appCtx.powerManager.isCharging();
@@ -318,7 +336,7 @@ void Task_UIController(void *pvParameters) {
     if (currentAppState != AppState::STATE_VIDEO &&
         currentAppState != AppState::STATE_ALARM &&
         !appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
-        !appCtx.network.isSyncing() &&
+        !appCtx.network.isSyncing() && otaWindowUntil == 0 &&
         (now - lastUserActivity >= activeSleepTimeoutMs) &&
         AlarmClock::instance().secondsToNext(time(nullptr)) > 2) {
       DLOG("[SLP] timeout -> sleeping");
@@ -417,7 +435,6 @@ void Task_UIController(void *pvParameters) {
       lastUserActivity = millis();
     }
 
-    appCtx.ui.updateLED();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -516,10 +533,9 @@ void setup() {
 
   if (appCtx.network.isConnected()) {
     DLOG("[BOOT] WiFi OK -> NTP+Firebase");
-    appCtx.network.startWebServer(OTA_HOSTNAME);
-    if (appCtx.network.getWebServer() != nullptr) {
-      appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
-    }
+    // Web server OTA KHÔNG còn bật ở đây (2026-09-18). Nó chạy suốt đời máy cho
+    // một việc hiếm khi làm, giữ RAM của WebServer + mDNS. Giờ chỉ mở khi cờ
+    // emergency_ota/normal_ota trên cloud bật — xem khối OTA ở Task_UIController.
 
     appCtx.network.setOnDownloadComplete([]() {
       forceStandbyRedraw = true;

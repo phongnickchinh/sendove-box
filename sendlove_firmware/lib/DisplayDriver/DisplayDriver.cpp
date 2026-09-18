@@ -31,41 +31,6 @@ void DisplayDriver::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const 
   _tft.pushImage(x, y, w, h, pixels);
 }
 
-void DisplayDriver::drawClockFace(uint8_t hour, uint8_t minute) {
-  if (!acquireSPI()) return;
-
-  _tft.fillScreen(TFT_BLACK);
-  _tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  _tft.setTextDatum(lgfx::middle_center);
-
-  char timeStr[6];
-  snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
-
-  _tft.setTextFont(7);
-  _tft.drawString(timeStr, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
-  releaseSPI();
-}
-
-void DisplayDriver::drawStatusBar(uint8_t batteryPercent, bool wifiConnected) {
-  if (!acquireSPI()) return;
-
-  _tft.fillRect(0, 0, SCREEN_WIDTH, 16, TFT_BLACK);
-  _tft.setTextFont(1);
-  _tft.setTextDatum(lgfx::top_left);
-
-  _tft.setTextColor(wifiConnected ? TFT_GREEN : TFT_RED, TFT_BLACK);
-  _tft.drawString(wifiConnected ? "WiFi" : "NoWF", 2, 2);
-
-  uint16_t batColor = (batteryPercent > 20) ? TFT_GREEN : TFT_RED;
-  _tft.setTextColor(batColor, TFT_BLACK);
-  char batStr[8];
-  snprintf(batStr, sizeof(batStr), "%3d%%", batteryPercent);
-  _tft.setTextDatum(lgfx::top_right);
-  _tft.drawString(batStr, SCREEN_WIDTH - 2, 2);
-
-  releaseSPI();
-}
-
 void DisplayDriver::showMessage(const char *message) {
   if (!acquireSPI()) return;
 

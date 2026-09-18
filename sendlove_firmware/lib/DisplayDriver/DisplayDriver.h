@@ -69,12 +69,6 @@ public:
   /// Push raw RGB565 pixel block to display
   void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t *pixels);
 
-  /// Draw digital clock face
-  void drawClockFace(uint8_t hour, uint8_t minute);
-
-  /// Draw top status bar with battery and Wi-Fi status
-  void drawStatusBar(uint8_t batteryPercent, bool wifiConnected);
-
   /// Display a centered message on screen
   void showMessage(const char *message);
 

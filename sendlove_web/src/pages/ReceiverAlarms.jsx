@@ -30,7 +30,9 @@ export default function ReceiverAlarms() {
   const load = useCallback(async () => {
     try {
       const res = await getAlarms(boxId);
-      if (res.success) setAlarms(res.data || []);
+      // RTDB trả theo thứ tự key (alarm_<thời điểm tạo>), không theo giờ kêu.
+      // "HH:mm" 24h so sánh chuỗi là đúng thứ tự thời gian.
+      if (res.success) setAlarms((res.data || []).slice().sort((a, b) => a.time.localeCompare(b.time)));
       setError(null);
     } catch {
       setError('Không đọc được danh sách báo thức.');
@@ -204,6 +206,11 @@ export default function ReceiverAlarms() {
 
           <span className="sl-caption">
             "Một lần" kêu đúng một lần rồi tự tắt — nó vẫn nằm trong danh sách để bạn bật lại.
+          </span>
+
+          {/* Khớp hành vi firmware (config.h ALARM_SNOOZE_SEC / ALARM_RING_MAX_MS) */}
+          <span className="sl-caption">
+            Khi hộp kêu: chạm để báo lại sau 5 phút, giữ 3 giây để tắt. Không ai chạm thì tự tắt sau 1 phút.
           </span>
 
           {/* a_flag: hộp chỉ đọc lại danh sách ở lần thức dậy kế tiếp */}

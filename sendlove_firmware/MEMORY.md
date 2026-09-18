@@ -1896,3 +1896,79 @@ Tự khỏi sau retry ⇒ **phân mảnh heap**, không phải rò rỉ. Ba ngu�
    fail. Khối lớn nhất < ~16–20KB trong khi free còn vài chục KB ⇒ xác nhận phân mảnh.
 2. Hướng sửa rẻ nhất: rút URL/text/timestamp của **tin sắp tải** ra buffer tĩnh rồi giải phóng `doc`
    **trước** khi mở phiên TLS media.
+
+> **Đính chính §21 (2026-09-18):** số lần bắt tay TLS mỗi chu kỳ sync đã đổi. `checkFirebaseFlags()`
+> giờ chỉ PATCH reset cờ khi có cờ bật (trước đây PATCH mỗi chu kỳ 10s) → chu kỳ thường bớt 1
+> handshake; bù lại lần sync đầu sau boot và mỗi lần đổi báo thức tốn thêm 1–2 (GET/PUT
+> `alarm_list`). `[NET] sync start` in thêm `maxblk=` (`getMaxAllocHeap`) để đo phân mảnh.
+
+## 22. Báo thức hoàn chỉnh: kêu trên hộp + portal + đồng bộ hai chiều + deploy (2026-09-18)
+
+### Hiện trạng trước khi làm (đã đọc code, không suy đoán)
+
+- **Hộp chưa từng kêu.** `getSecondsToNextAlarm()` chỉ dùng để tính thời gian light sleep. Thức
+  dậy bằng timer thì nháy đèn, sync rồi ngủ tiếp — không có code phát âm/hiện màn hình.
+- **Web đặt báo thức, hộp không bao giờ biết:** backend bật `flags/a_flag`, firmware đọc
+  `sync_alarms_flag` (nợ ghi ở §20). Đã đổi firmware sang `a_flag` ở CẢ GET lẫn PATCH reset.
+- `syncFirebaseAlarms()` return sớm khi cloud trả `null` → web xoá hết báo thức mà hộp vẫn kêu.
+- `AlarmItem.id[16]` cắt id backend `alarm_<ms>` (19 ký tự). Nâng lên `id[24]`; `loadAlarms()`
+  kiểm độ dài blob NVS, lệch (blob của bản cũ) → coi như rỗng, lần sync đầu tải lại.
+- Web đã có màn báo thức hoàn chỉnh; `.env` trỏ emulator nên bản build deploy sẽ gọi localhost.
+
+### User chốt (2026-09-18)
+
+1. Tới giờ: sáng màn hình + hiện giờ + bíp mỗi giây. **Chạm ngắn = báo lại sau 5 phút, giữ 3s =
+   tắt, không ai chạm thì tự tắt sau 1 phút.** Hằng số: `ALARM_SNOOZE_SEC`, `ALARM_RING_MAX_MS`,
+   `ALARM_BEEP_PERIOD_MS` (config.h).
+2. **Portal AP có quản lý báo thức** (thêm/bật-tắt/xoá), không cần Internet.
+3. Báo thức một lần kêu xong **hộp tự tắt VÀ báo lên cloud** (rule mới cho box ghi `alarm_list`).
+4. Deploy cả database rules + functions + hosting.
+
+### Thiết kế
+
+- `lib/AlarmClock` (singleton, mutex riêng) là nơi DUY NHẤT giữ danh sách trong RAM + quyết định
+  kêu. Ba task dùng: WakeSync (cloud), NetworkController (portal), MediaPlayer/UIController (kêu/ngủ).
+- **Luật đồng bộ:** sửa trong hộp (portal, hoặc một-lần tự tắt) → cờ `alarm_dirty` trong NVS →
+  lần sync kế PUT **cả danh sách** đè lên cloud. Còn dirty thì bỏ qua danh sách từ cloud (hộp
+  thắng). Hết dirty: `a_flag` bật hoặc lần sync đầu sau boot → tải về thay toàn bộ. Không merge
+  từng mục: ở AP mode không có đồng hồ tin cậy để so `updated_at`. Portal có dòng cảnh báo điều này.
+  `rev` đếm sửa đổi để lần sửa xảy ra TRONG LÚC đang PUT không bị xoá cờ.
+- **Reset `a_flag` TRƯỚC khi GET `alarm_list`**, không phải sau — web sửa giữa chừng sẽ bật lại cờ.
+  GET hỏng → `_alarmsNeedFetch` giữ true để thử lại dù cờ đã reset.
+- **Kêu theo so sánh giờ, không theo `ESP_SLEEP_WAKEUP_TIMER`**: wake 5 phút thường và wake báo thức
+  trông y hệt nhau. `pollDue()` mỗi 500ms trong `Task_MediaPlayer`, chống kêu lại bằng
+  `_lastFiredMinute = epoch/60`. Một-lần bị tắt ngay LÚC BẮT ĐẦU kêu (mất điện giữa chừng không kêu lại).
+- **Vòng ngủ không ngủ khi `secondsToNext() <= 2`** — trả 0 khi đang ở đúng phút báo thức mà chưa kêu
+  (thức sớm vài ms). Không có chặn này thì timer 5 phút làm lỡ cả phút báo thức.
+- `AppState::STATE_ALARM`: chặn ngủ, chạm vẫn nhận khi đang tải tin (trước đây touch bị bỏ khi
+  `isDownloadingMedia`), `xQueueReset` lúc bắt đầu kêu để cú chạm cũ không tắt ngay.
+- `AudioPlayer::beep()` set lại `i2s_set_sample_rates` mỗi lần: sau khi phát tin 16kHz phần cứng giữ
+  64kHz mà `stop()` chỉ trả `_sampleRate` về mặc định → bíp nhanh/cao gấp đôi.
+- Màn báo thức vẽ trong `LayoutEngine::renderAlarmScreen` vì font 48 đã nhúng ở đó (include lại chỗ
+  khác là nhân đôi glyph trong flash). Chữ ASCII không dấu như các màn khác.
+- Portal: `GET /alarms`, `POST /alarms/save|delete`, `POST /time`. `/time` gửi giờ điện thoại —
+  hộp cắm điện ở AP mode chưa có NTP thì không bao giờ kêu được; chỉ nhận khi hộp chưa có giờ.
+- Rule `config/alarm_list`: box ghi được, validate `time` 24h, boolean, cấm trường lạ. Backend siết
+  cùng regex (`/^\d{2}:\d{2}$/` cũ nhận "99:99").
+
+### Deploy 2026-09-18 — gotcha
+
+- Thứ tự: **database → functions → hosting → (user) flash**. Flash trước rule thì PUT bị từ chối,
+  dirty không bao giờ xoá → PUT lại mỗi 10s (thêm handshake, đổ dầu vào §21).
+- **Functions deploy fail `npm ci` "Missing @emnapi/runtime@1.11.3 from lock file"**: lock sinh bằng
+  npm 11 (Node 25 máy user) bỏ entry optional mà npm 10 (Node 20 Cloud Build) bắt buộc. Sửa:
+  `npx npm@10 install --package-lock-only`. Bản function đang chạy trước đó là từ **2026-07-04**.
+- `sendlove_web/.env.production` (commit, không bí mật) đè `VITE_API_URL` lúc `vite build`.
+  Không có nó bundle deploy gọi `127.0.0.1`. Đã kiểm bundle + CORS preflight từ origin hosting.
+- Chưa bật cleanup policy Artifact Registry (CLI báo "Error" nhưng function đã cập nhật xong).
+- Đừng dùng `firebase deploy` trần — nó quét luôn `storage` (§19). Luôn `--only`.
+
+### Chưa kiểm chứng trên máy thật (syntax check toolchain thật OK, chưa link/flash)
+
+1. Web tạo báo thức 2 phút tới → `[NET] flags: sync alarms` → `[ALM] cloud -> N alarms` → kêu;
+   chạm ngắn → `[ALM] snooze 300s` → kêu lại sau 5 phút; giữ 3s → `[ALM] tat`.
+2. Portal thêm báo thức → lưu Wi-Fi (restart) → boot `[ALM] ... dirty=1` → `[NET] alarms PUT N -> 200`
+   → reload web thấy báo thức của portal.
+3. Một-lần kêu xong → web (reload) hiện "đã kêu và tự tắt".
+4. Để hộp ngủ, báo thức rơi giữa chu kỳ 5 phút → thức đúng giờ và kêu.
+- Web chỉ tải danh sách khi mở màn, box đẩy lên thì phải reload mới thấy (chấp nhận cho prototype).

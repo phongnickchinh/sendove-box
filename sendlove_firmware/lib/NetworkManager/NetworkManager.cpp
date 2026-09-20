@@ -658,7 +658,19 @@ void NetworkManager::wakeupSyncTaskWorker(void* param) {
 bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
     _isSyncing = true;
 
+    // Lưu chẩn đoán của chu kỳ trước đó (đặc biệt hữu ích khi chu kỳ trước fail hoặc ngủ vội)
+    strncpy(_prevWakeCause, _currentWakeCause, sizeof(_prevWakeCause) - 1);
+    _prevWakeCause[sizeof(_prevWakeCause) - 1] = '\0';
+    strncpy(_prevDiagStep, _diagStep, sizeof(_prevDiagStep) - 1);
+    _prevDiagStep[sizeof(_prevDiagStep) - 1] = '\0';
+    strncpy(_prevDiagErr, _diagErr, sizeof(_prevDiagErr) - 1);
+    _prevDiagErr[sizeof(_prevDiagErr) - 1] = '\0';
+
+    strncpy(_diagStep, "start", sizeof(_diagStep) - 1);
+    strncpy(_diagErr, "none", sizeof(_diagErr) - 1);
+
     if (isPlaybackActive()) {
+        strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
     }
@@ -667,13 +679,23 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     // associate + 4-way handshake + xin IP DHCP hoàn toàn mới (xem ensureConnected),
     // thực tế tốn 3-8s. Cắt ở 5s là bỏ dở giữa chừng đúng lúc sắp xong.
     // Không sợ tốn pin oan: Task_UIController bị khoá không cho ngủ khi isSyncing().
+    uint32_t wifiStart = millis();
     if (!ensureConnected(12000)) {
+        _lastWifiMs = millis() - wifiStart;
         DLOG("[NET] sync skip: no wifi");
+        strncpy(_diagStep, "wifi_fail", sizeof(_diagStep) - 1);
+        strncpy(_diagErr, "wifi_timeout", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
     }
+    _lastWifiMs = millis() - wifiStart;
+    strncpy(_diagStep, "wifi_ok", sizeof(_diagStep) - 1);
 
-    if (isPlaybackActive()) { _isSyncing = false; return false; }
+    if (isPlaybackActive()) {
+        strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
+        _isSyncing = false;
+        return false;
+    }
 
     // Mỗi phiên TLS tới Firebase cần ~35-45KB heap cho mbedTLS handshake (in/out
     // content buffer mặc định 16KB mỗi chiều — KHÔNG chỉnh được: setBufferSizes()
@@ -702,11 +724,18 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         // Marker RIÊNG, không lẫn với http.GET() = -1: ở đây chưa hề mở kết nối
         // nào cả. Thấy dòng này nghĩa là lỗi NTP, không phải lỗi TLS/mạng.
         DLOG("[NET] sync abort: time invalid");
+        strncpy(_diagStep, "ntp_fail", sizeof(_diagStep) - 1);
+        strncpy(_diagErr, "time_invalid", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
     }
+    strncpy(_diagStep, "ntp_ok", sizeof(_diagStep) - 1);
 
-    if (isPlaybackActive()) { _isSyncing = false; return false; }
+    if (isPlaybackActive()) {
+        strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
+        _isSyncing = false;
+        return false;
+    }
 
     // 2b. Lấy/gia hạn idToken TRƯỚC mọi lời gọi Firebase. Đặt sau chốt chặn thời
     // gian vì hạn token so bằng time(nullptr) — RTC sai thì token vừa lấy về đã
@@ -714,21 +743,32 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     // lại biến trong RAM, không tốn request nào.
     if (!ensureIdToken()) {
         DLOG("[NET] sync abort: khong lay duoc idToken");
+        strncpy(_diagStep, "token_fail", sizeof(_diagStep) - 1);
+        strncpy(_diagErr, "idtoken_fail", sizeof(_diagErr) - 1);
+        _isSyncing = false;
+        return false;
+    }
+    strncpy(_diagStep, "token_ok", sizeof(_diagStep) - 1);
+
+    // 3. Check Flags (Alarms, OTA, Pairing) TRƯỚC để status có dữ liệu alarm mới nhất
+    checkFirebaseFlags();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    if (isPlaybackActive()) {
+        strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
     }
 
-    // 3. Update Status (Heartbeat)
+    // 4. Update Status (Heartbeat + Diag Telemetry đẩy lên cloud)
     updateFirebaseStatus(batteryPercent, isCharging);
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    if (isPlaybackActive()) { _isSyncing = false; return false; }
-
-    // 4. Check Flags (Alarms, OTA, Pairing)
-    checkFirebaseFlags();
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    if (isPlaybackActive()) { _isSyncing = false; return false; }
+    if (isPlaybackActive()) {
+        strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
+        _isSyncing = false;
+        return false;
+    }
 
     // 5. Check and download new messages.
     //
@@ -740,12 +780,22 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     // ap cho RIENG buoc nay.
     if (storage != nullptr) {
         if (storage->isFull()) {
-            DLOG("[NET] msg skip: het slot (cac buoc khac van chay)");
+            // _numOfNewMsg CHI duoc gan trong checkAndDownloadNewMessages(), tuc
+            // la NAM SAU cong nay. Sau mot lan reset trong lúc dang day slot, no
+            // ve 0 va khong duong nao dat lai duoc -> hop vua bao "No new
+            // messages" luc cham, vua bao "het slot" luc sync, ket vinh vien vi
+            // slot chi duoc tra lai bang cach doc. Nang san moi chu ky sync.
+            uint8_t unread = storage->getUnreadCount();
+            if (_numOfNewMsg < unread) _numOfNewMsg = unread;
+            // In kèm số slot chưa đọc: phân biệt "đầy thật" (unread > 0) với
+            // "con trỏ ghi trỏ nhầm" (unread == 0 mà vẫn báo đầy).
+            DLOG("[NET] msg skip: het slot, unread=%u", (unsigned)unread);
         } else {
             checkAndDownloadNewMessages(storage);
         }
     }
 
+    strncpy(_diagStep, "sync_done", sizeof(_diagStep) - 1);
     _isSyncing = false;
     return true;
 }
@@ -1015,11 +1065,35 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     http.setTimeout(FIREBASE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
-    char payload[128];
+    char payload[384];
     uint32_t now = (uint32_t)time(nullptr);
     snprintf(payload, sizeof(payload),
-             "{\"online\":true,\"battery\":%d,\"is_charging\":%s,\"last_seen\":%u}",
-             batteryPercent, isCharging ? "true" : "false", now);
+             "{\"online\":true,\"battery\":%d,\"is_charging\":%s,\"last_seen\":%u,"
+             "\"diag\":{"
+             "\"wake\":\"%s\","
+             "\"step\":\"%s\","
+             "\"err\":\"%s\","
+             "\"wifi_ms\":%u,"
+             "\"a_flag\":%s,"
+             "\"dirty\":%s,"
+             "\"alm_cnt\":%u,"
+             "\"flags_http\":%d,"
+             "\"prev_wake\":\"%s\","
+             "\"prev_step\":\"%s\","
+             "\"prev_err\":\"%s\""
+             "}}",
+             batteryPercent, isCharging ? "true" : "false", now,
+             _currentWakeCause,
+             _diagStep,
+             _diagErr,
+             (unsigned)_lastWifiMs,
+             _lastAFlag ? "true" : "false",
+             _lastAlarmsDirty ? "true" : "false",
+             (unsigned)_lastAlarmsCount,
+             _lastFlagsHttp,
+             _prevWakeCause,
+             _prevDiagStep,
+             _prevDiagErr);
 
     int httpCode = http.PATCH((uint8_t*)payload, strlen(payload));
     noteAuthFailure(httpCode, "status");
@@ -1047,15 +1121,23 @@ bool NetworkManager::checkFirebaseFlags() {
              FIREBASE_HOST, BOX_ID);
     appendAuth('?');
 
-    if (!http.begin(client, _url)) return false;
+    if (!http.begin(client, _url)) {
+        _lastFlagsHttp = -99;
+        strncpy(_diagStep, "flags_begin_err", sizeof(_diagStep) - 1);
+        strncpy(_diagErr, "begin_fail", sizeof(_diagErr) - 1);
+        return false;
+    }
     http.setTimeout(FIREBASE_TIMEOUT_MS);
 
     int httpCode = http.GET();
+    _lastFlagsHttp = httpCode;
     noteAuthFailure(httpCode, "flags");
     if (httpCode != HTTP_CODE_OK) {
         DLOG("[NET] flags GET fail: %d", httpCode);
         if (httpCode < 0) logTlsError(client, "flags");
         http.end();
+        strncpy(_diagStep, "flags_get_err", sizeof(_diagStep) - 1);
+        snprintf(_diagErr, sizeof(_diagErr), "get_%d", httpCode);
         return false;
     }
 
@@ -1070,11 +1152,16 @@ bool NetworkManager::checkFirebaseFlags() {
     bool normalOta = false;
     if (payload != "null" && payload.length() > 2) {
         JsonDocument doc;
-        if (deserializeJson(doc, payload)) return false;
+        if (deserializeJson(doc, payload)) {
+            strncpy(_diagStep, "flags_json_err", sizeof(_diagStep) - 1);
+            strncpy(_diagErr, "json_fail", sizeof(_diagErr) - 1);
+            return false;
+        }
         alarmFlag = doc["a_flag"] | false;
         emergencyOta = doc["emergency_ota"] | false;
         normalOta = doc["normal_ota"] | false;
     }
+    _lastAFlag = alarmFlag;
 
     // Hai cờ OTA trước 2026-09-18 chỉ được đọc rồi reset, không kích hoạt gì —
     // nhìn code tưởng hộp cập nhật được từ xa. Giờ chúng mở cửa sổ OTA thật:
@@ -1113,16 +1200,34 @@ bool NetworkManager::checkFirebaseFlags() {
     //  - không thì tải về khi a_flag bật, hoặc lần sync đầu tiên sau khi boot
     //    (NVS có thể rỗng/cũ, vd. vừa nạp firmware đổi kích thước AlarmItem)
     uint32_t alarmRev = 0;
-    if (AlarmClock::instance().isDirty(&alarmRev)) {
+    bool isDirty = AlarmClock::instance().isDirty(&alarmRev);
+    _lastAlarmsDirty = isDirty;
+    if (isDirty) {
         if (pushFirebaseAlarms()) {
             AlarmClock::instance().markPushed(alarmRev);
             _alarmsNeedFetch = false;
+            strncpy(_diagStep, "alm_push_ok", sizeof(_diagStep) - 1);
+        } else {
+            strncpy(_diagStep, "alm_push_fail", sizeof(_diagStep) - 1);
+            strncpy(_diagErr, "put_fail", sizeof(_diagErr) - 1);
         }
     } else if (alarmFlag || _alarmsNeedFetch) {
         DLOG("[NET] flags: sync alarms");
         // Tải hỏng thì giữ _alarmsNeedFetch để chu kỳ sau thử lại dù cờ đã reset.
-        _alarmsNeedFetch = !syncFirebaseAlarms();
+        bool fetchOk = syncFirebaseAlarms();
+        _alarmsNeedFetch = !fetchOk;
+        if (fetchOk) {
+            strncpy(_diagStep, "alm_fetch_ok", sizeof(_diagStep) - 1);
+        } else {
+            strncpy(_diagStep, "alm_fetch_fail", sizeof(_diagStep) - 1);
+            strncpy(_diagErr, "fetch_fail", sizeof(_diagErr) - 1);
+        }
+    } else {
+        strncpy(_diagStep, "alm_idle", sizeof(_diagStep) - 1);
     }
+
+    AlarmItem alarmsTmp[MAX_ALARMS];
+    _lastAlarmsCount = (uint8_t)AlarmClock::instance().list(alarmsTmp, MAX_ALARMS);
 
     return true;
 }

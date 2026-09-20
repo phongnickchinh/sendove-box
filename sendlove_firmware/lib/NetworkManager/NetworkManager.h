@@ -134,6 +134,14 @@ public:
     void setPlaybackActiveCallback(std::function<bool()> cb) { _isPlaybackActiveCb = cb; }
     bool isPlaybackActive() const { return _isPlaybackActiveCb ? _isPlaybackActiveCb() : false; }
 
+    /// Ghi nhận nguyên nhân thức dậy ("timer", "touch", "boot") cho telemetry
+    void setWakeupCause(const char* cause) {
+        if (cause) {
+            strncpy(_currentWakeCause, cause, sizeof(_currentWakeCause) - 1);
+            _currentWakeCause[sizeof(_currentWakeCause) - 1] = '\0';
+        }
+    }
+
 private:
     char _wifiSsid[WIFI_SSID_MAX_LEN] = "";
     char _wifiPassword[WIFI_PASS_MAX_LEN] = "";
@@ -205,6 +213,19 @@ private:
 
     bool _isTimeSynced = false;
     uint32_t _lastTimeSync = 0;
+
+    // Telemetry & Diagnostics cho Timer/Touch Wakeup
+    char _currentWakeCause[12] = "boot";
+    char _prevWakeCause[12] = "none";
+    char _diagStep[24] = "boot";
+    char _diagErr[24] = "none";
+    char _prevDiagStep[24] = "none";
+    char _prevDiagErr[24] = "none";
+    uint32_t _lastWifiMs = 0;
+    bool _lastAFlag = false;
+    bool _lastAlarmsDirty = false;
+    uint8_t _lastAlarmsCount = 0;
+    int _lastFlagsHttp = 0;
 
     WebServer* _webServer = nullptr;
     bool _webServerRunning = false;

@@ -1972,3 +1972,51 @@ Tự khỏi sau retry ⇒ **phân mảnh heap**, không phải rò rỉ. Ba ngu�
 3. Một-lần kêu xong → web (reload) hiện "đã kêu và tự tắt".
 4. Để hộp ngủ, báo thức rơi giữa chu kỳ 5 phút → thức đúng giờ và kêu.
 - Web chỉ tải danh sách khi mở màn, box đẩy lên thì phải reload mới thấy (chấp nhận cho prototype).
+
+## 23. 🔴 Vòng khoá chết "het slot + No new messages" — hai nguồn sự thật lệch vòng đời (2026-09-20)
+
+**Triệu chứng (bài test 45 tin trên thẻ SD).** Đã chạm-ngắn đọc hết mọi tin, màn hình đã hiện
+"Reached newest msg"; sau đó chạm thì ra "No new messages" còn sync thì ra
+`[NET] msg skip: het slot`. Hộp không tải thêm được tin nào nữa, vĩnh viễn.
+
+**Nguyên nhân.** Hai nguồn sự thật có vòng đời khác nhau:
+
+| | Lưu ở đâu | Sống qua reset? |
+|---|---|---|
+| Cờ `unread` từng slot | `index.bin` trên thẻ (SD) / bitmask NVS (NAND) | **Có** |
+| `_numOfNewMsg` | RAM (`NetworkManager`) | Không — về 0 |
+
+Chỗ **duy nhất** gán `_numOfNewMsg` nằm trong `checkAndDownloadNewMessages()`, mà hàm đó chỉ có
+một lời gọi và nó nằm **phía sau cổng `isFull()`** trong `syncWakeup()`. Nên:
+
+1. Reset / cắm lại điện / nạp OTA trong lúc đang đầy slot → `_numOfNewMsg = 0`, `unread > 0`.
+2. Sync: `isFull()` true → bỏ bước tải → bỏ luôn chỗ duy nhất đặt lại biến đếm.
+3. Chạm: `main.cpp` đòi `getNumOfNewMsg() > 0` mới cho đọc → 0 → "No new messages".
+4. Slot chỉ được trả lại bằng cách **đọc**, mà đọc bị chặn ở bước 3. Không có đường ra.
+
+**Không reset thì KHÔNG kẹt được** — đã kiểm bất biến: `_numOfNewMsg = unreadInMem + newCloudMsg`
+tính TRƯỚC vòng tải, vòng tải thêm tối đa `newCloudMsg` slot ⇒ luôn `count ≥ unread`; mỗi lần đọc
+hai số cùng giảm 1 ⇒ `unread` về 0 trước hoặc cùng lúc. Đây là lý do lỗi chỉ lộ ra sau cả một đợt
+45 tin có cắm rút/nạp lại. Không phải lỗi riêng của SD: bản NAND dính y hệt, chỉ là 3 slot thì
+hiếm khi tắt máy trúng lúc đang đầy.
+
+**Đã sửa (2 chỗ).**
+- `NetworkManager::syncWakeup()`, tại cổng `isFull()`: nâng sàn
+  `if (_numOfNewMsg < storage->getUnreadCount()) _numOfNewMsg = ...` mỗi chu kỳ sync, và in
+  `unread=<n>` vào log `het slot` để phân biệt "đầy thật" với "`writeSlotIndex` trỏ nhầm".
+- `src/main.cpp`, cả nhánh STANDBY lẫn nhánh VIDEO: câu hỏi "có tin để đọc không" hỏi thẳng
+  `storage->getNextUnreadIdentifier()` thay vì `getNumOfNewMsg() > 0`; nhánh "Downloading..." nay
+  kích hoạt bằng `network.hasPendingMessages()`. `getNumOfNewMsg()` không còn lời gọi nào — giữ
+  hàm lại, nó lùi về vai trò telemetry.
+
+**KHÔNG đổi (user chốt 2026-09-20):** chỉ **chạm ngắn** mới `markAsRead()`. Thoát bằng giữ tay
+hoặc để tự hết giờ thì tin **phải** còn chưa đọc để lần xem sau phát lại. Đừng "sửa" chỗ này —
+đã có một lượt đề xuất sai và bị bác.
+
+### Chưa kiểm chứng trên máy thật (syntax check toolchain thật OK, chưa link/flash)
+
+1. Tải đầy 20 slot → **rút điện** → cắm lại → chạm phải phát được tin chưa đọc ngay (trước sửa:
+   "No new messages" + `het slot`, kẹt).
+2. Đọc hết 20 tin → "Reached newest msg" → chờ ≤ `SYNC_INTERVAL_MS` → log `[NET] msg: cloud=… mem=…
+   new=…` và tải tiếp, không còn `het slot`.
+3. Thoát bằng giữ tay / để tự hết giờ → tin đó còn nguyên chưa đọc, chạm lần sau phát lại đúng nó.

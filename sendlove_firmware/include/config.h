@@ -185,7 +185,7 @@ static constexpr uint8_t SD_SLOT_COUNT = 20;
 // SD.begin() mặc định 4MHz — quá chậm cho video 15fps (đọc 1 frame JPEG ~15KB
 // đã ăn hết ngân sách 66ms). Thư viện tự hạ về 400kHz trong lúc init rồi mới
 // dùng con số này. Hạ xuống 10MHz nếu breadboard sinh "Read short"/"Bad jpegSize".
-static constexpr uint32_t SD_SPI_FREQ_HZ = 20000000;
+static constexpr uint32_t SD_SPI_FREQ_HZ = 10000000;
 
 static constexpr const char *SD_MEDIA_DIR = "/media";
 static constexpr const char *SD_MANIFEST_PATH = "/media/index.bin";

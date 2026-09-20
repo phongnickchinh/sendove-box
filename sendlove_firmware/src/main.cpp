@@ -155,26 +155,32 @@ void Task_MediaPlayer(void *pvParameters) {
                drawToast("Downloading...");
            } else {
                char unreadId[32] = "";
-               if (appCtx.network.getNumOfNewMsg() > 0) {
-                  if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
-                      currentAppState = AppState::STATE_VIDEO;
-                      appCtx.display.clear();
-                      strncpy(currentId, unreadId, sizeof(currentId) - 1);
-                      if (appCtx.player.playItem(currentId)) {
-                          playStartTime = millis();
-                      } else {
-                          DLOG("[PLAY] FAIL -> STANDBY");
-                          currentAppState = AppState::STATE_STANDBY;
-                          forceStandbyRedraw = true;
-                      }
+               // Hỏi THẺ, không hỏi biến đếm RAM. getNumOfNewMsg() từng là cổng ở
+               // đây, nhưng nó chỉ được gán bên trong checkAndDownloadNewMessages()
+               // — hàm nằm SAU cổng isFull() — nên sau một lần reset trong lúc đang
+               // đầy slot, nó kẹt ở 0 trong khi cờ unread trên thẻ vẫn còn: hộp vừa
+               // báo "No new messages" lúc chạm, vừa báo "het slot" lúc sync, và
+               // slot thì chỉ được trả lại bằng cách đọc -> không có đường ra.
+               if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+                  currentAppState = AppState::STATE_VIDEO;
+                  appCtx.display.clear();
+                  strncpy(currentId, unreadId, sizeof(currentId) - 1);
+                  if (appCtx.player.playItem(currentId)) {
+                      playStartTime = millis();
                   } else {
-                      DLOG("[PLAY] no local unread, downloading...");
-                      appCtx.player.stop();
-                      drawToast("Downloading...");
-                      uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-                      bool isCharging = appCtx.powerManager.isCharging();
-                      appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+                      DLOG("[PLAY] FAIL -> STANDBY");
+                      currentAppState = AppState::STATE_STANDBY;
+                      forceStandbyRedraw = true;
                   }
+               } else if (appCtx.network.hasPendingMessages()) {
+                  // Hết tin chưa đọc trên thẻ nhưng vòng tải trước đã phải bỏ dở
+                  // vì hết slot -> vừa đọc xong là có chỗ, kéo tiếp ngay.
+                  DLOG("[PLAY] no local unread, downloading...");
+                  appCtx.player.stop();
+                  drawToast("Downloading...");
+                  uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+                  bool isCharging = appCtx.powerManager.isCharging();
+                  appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
                } else {
                   appCtx.display.turnOn();
                   drawToast("No new messages");
@@ -189,24 +195,24 @@ void Task_MediaPlayer(void *pvParameters) {
            }
 
            char unreadId[32] = "";
-           if (appCtx.network.getNumOfNewMsg() > 0) {
-               if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
-                   strncpy(currentId, unreadId, sizeof(currentId) - 1);
-                   if (appCtx.player.playItem(currentId)) {
-                       playStartTime = millis();
-                   } else {
-                       DLOG("[PLAY] FAIL -> STANDBY");
-                       currentAppState = AppState::STATE_STANDBY;
-                       forceStandbyRedraw = true;
-                   }
+           // Cùng lý do như nhánh STANDBY ở trên: nguồn sự thật là cờ unread trên
+           // thẻ, không phải biến đếm RAM.
+           if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+               strncpy(currentId, unreadId, sizeof(currentId) - 1);
+               if (appCtx.player.playItem(currentId)) {
+                   playStartTime = millis();
                } else {
-                   appCtx.player.stop();
+                   DLOG("[PLAY] FAIL -> STANDBY");
                    currentAppState = AppState::STATE_STANDBY;
-                   drawToast("Downloading...");
-                   uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-                   bool isCharging = appCtx.powerManager.isCharging();
-                   appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+                   forceStandbyRedraw = true;
                }
+           } else if (appCtx.network.hasPendingMessages()) {
+               appCtx.player.stop();
+               currentAppState = AppState::STATE_STANDBY;
+               drawToast("Downloading...");
+               uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+               bool isCharging = appCtx.powerManager.isCharging();
+               appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
            } else {
                appCtx.player.stop();
                if (appCtx.display.acquireSPI()) {

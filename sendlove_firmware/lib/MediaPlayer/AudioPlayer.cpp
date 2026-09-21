@@ -198,7 +198,11 @@ bool AudioPlayer::fillChunk() {
     uint32_t remaining = _audioPcmSize - _audioCursor;
     if (remaining == 0) return false;
 
-    uint32_t toRead = (remaining < AUDIO_PCM_CHUNK_SIZE) ? remaining : AUDIO_PCM_CHUNK_SIZE;
+    // MỘT lời gọi đọc cho cả AUDIO_READ_CHUNK_SIZE byte. Trên thẻ SD mỗi lượt đọc
+    // là một lần lấy spiMutex + NOP hack + fread xuyên VFS/FATFS, nên số LƯỢT mới
+    // là thứ đắt, không phải số byte. Cỡ giãn mẫu vẫn giữ AUDIO_PCM_CHUNK_SIZE để
+    // _stereo không phình (xem config.h).
+    uint32_t toRead = (remaining < AUDIO_READ_CHUNK_SIZE) ? remaining : AUDIO_READ_CHUNK_SIZE;
     toRead &= ~1u;
     if (toRead == 0) return false;
 
@@ -207,36 +211,49 @@ bool AudioPlayer::fillChunk() {
     if (bytesRead <= 0) return false;
     bytesRead &= ~1;
 
-    // Expand Mono → Stereo + Linear Interpolation Oversample (x AUDIO_OVERSAMPLE):
-    // Thay vì lặp mẫu thô (Zero-Order Hold) tạo sóng bậc thang vuông vức gây chói gắt,
-    // nội suy tuyến tính nối mượt giữa mẫu hiện tại và mẫu tiếp theo:
-    // S[i] -> S[i+1], chia đều khoảng cách làm AUDIO_OVERSAMPLE nấc liên tục.
-    const int16_t* pcm     = (const int16_t*)_chunk;
-    int            samples = bytesRead / 2;
-    for (int i = 0; i < samples; i++) {
-        int16_t currSample = pcm[i];
-        int16_t nextSample = (i + 1 < samples) ? pcm[i + 1] : currSample;
-        int32_t diff       = (int32_t)nextSample - (int32_t)currSample;
+    const int16_t* pcm         = (const int16_t*)_chunk;
+    const int      totalSamples = bytesRead / 2;
+    // Mỗi lượt giãn tối đa bấy nhiêu mẫu thì vừa đúng sức chứa _stereo.
+    const int      maxPerPass   = (int)(AUDIO_PCM_CHUNK_SIZE / 2);
 
-        for (int r = 0; r < AUDIO_OVERSAMPLE; r++) {
-            int16_t interpolated = (int16_t)(currSample + ((diff * r) / (int32_t)AUDIO_OVERSAMPLE));
-            int idx = (i * AUDIO_OVERSAMPLE + r) * 2;
-            _stereo[idx]     = interpolated; // Left
-            _stereo[idx + 1] = interpolated; // Right
+    for (int base = 0; base < totalSamples; base += maxPerPass) {
+        int passSamples = totalSamples - base;
+        if (passSamples > maxPerPass) passSamples = maxPerPass;
+
+        // Expand Mono → Stereo + Linear Interpolation Oversample (x AUDIO_OVERSAMPLE):
+        // Thay vì lặp mẫu thô (Zero-Order Hold) tạo sóng bậc thang vuông vức gây chói gắt,
+        // nội suy tuyến tính nối mượt giữa mẫu hiện tại và mẫu tiếp theo:
+        // S[i] -> S[i+1], chia đều khoảng cách làm AUDIO_OVERSAMPLE nấc liên tục.
+        // Mẫu kế được nhìn XUYÊN ranh giới lượt trong cùng buffer đọc, nên chỉ mẫu
+        // cuối cùng của cả buffer mới phải tự lặp lại chính nó.
+        for (int i = 0; i < passSamples; i++) {
+            int16_t currSample = pcm[base + i];
+            int16_t nextSample = (base + i + 1 < totalSamples) ? pcm[base + i + 1] : currSample;
+            int32_t diff       = (int32_t)nextSample - (int32_t)currSample;
+
+            for (int r = 0; r < AUDIO_OVERSAMPLE; r++) {
+                int16_t interpolated = (int16_t)(currSample + ((diff * r) / (int32_t)AUDIO_OVERSAMPLE));
+                int idx = (i * AUDIO_OVERSAMPLE + r) * 2;
+                _stereo[idx]     = interpolated; // Left
+                _stereo[idx + 1] = interpolated; // Right
+            }
         }
+
+        // timeout = 0 (non-blocking). 'written' PHẢI được tôn trọng: nếu DMA từ
+        // chối một phần thì chỉ tính phần đã chấp nhận rồi DỪNG cả vòng — phần
+        // còn lại của buffer sẽ được đọc lại ở tick() sau. Đọc lặp một lượt rẻ
+        // hơn nhiều so với việc phải giữ thêm state của buffer dở dang.
+        size_t passBytes = (size_t)passSamples * AUDIO_OVERSAMPLE * 4;
+        size_t written   = 0;
+        i2s_write(I2S_NUM_0, _stereo, passBytes, &written, 0);
+
+        // Quy đổi ngược: 1 mẫu mono gốc = AUDIO_OVERSAMPLE * 4 bytes stereo output
+        // -> 1 byte mono gốc = AUDIO_OVERSAMPLE * 2 bytes stereo output
+        written &= ~(size_t)3;
+        _audioCursor += (uint32_t)(written / (AUDIO_OVERSAMPLE * 2));
+
+        if (written < passBytes) return false; // DMA đã đầy
     }
 
-    // Một lần i2s_write cho cả chunk, timeout = 0 (non-blocking).
-    // 'written' PHẢI được tôn trọng: nếu DMA từ chối một phần thì chỉ tính
-    // phần đã chấp nhận, lần tick() kế sẽ nạp phần còn lại.
-    size_t totalBytes = (size_t)samples * AUDIO_OVERSAMPLE * 4;
-    size_t written    = 0;
-    i2s_write(I2S_NUM_0, _stereo, totalBytes, &written, 0);
-
-    // Quy đổi ngược: 1 mẫu mono gốc = AUDIO_OVERSAMPLE * 4 bytes stereo output
-    // -> 1 byte mono gốc = AUDIO_OVERSAMPLE * 2 bytes stereo output
-    written &= ~(size_t)3;
-    _audioCursor += (uint32_t)(written / (AUDIO_OVERSAMPLE * 2));
-
-    return written == totalBytes;
+    return true;
 }

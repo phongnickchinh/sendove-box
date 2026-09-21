@@ -72,7 +72,14 @@ private:
     PlaybackState     _state   = PlaybackState::IDLE;
     SemaphoreHandle_t _playerMutex = nullptr;
 
-    JPEGDEC  _jpeg;
+    // 17.884 byte — thành phần to nhất của cả appCtx (24.508 byte RAM tĩnh), nhưng
+    // chỉ sống trong _jpeg->decode(). Để nó là member trực tiếp nghĩa là giữ 17,9KB
+    // BSS suốt đời máy, đúng loại RAM mà mbedTLS cần khối ~16KB liền mạch, đúng lúc
+    // hộp đứng ở màn hình chờ bắt tay TLS (§21). Cấp/giải phóng cùng nhịp với
+    // _jpegBuffer: đỉnh RAM lúc phát không đổi, chỉ lúc chờ mới dư ra.
+    // An toàn: openRAM() mở đầu bằng memset(&_jpeg, 0, sizeof(JPEGIMAGE)) nên đối
+    // tượng cấp trên heap với rác vẫn đúng — nó không dựa vào BSS được xoá sẵn.
+    JPEGDEC* _jpeg          = nullptr;
     uint8_t* _jpegBuffer    = nullptr;
     int8_t   _currentSlot   = -1;
     char     _currentId[32] = "";

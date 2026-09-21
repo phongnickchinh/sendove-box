@@ -2020,3 +2020,69 @@ hoặc để tự hết giờ thì tin **phải** còn chưa đọc để lần 
 2. Đọc hết 20 tin → "Reached newest msg" → chờ ≤ `SYNC_INTERVAL_MS` → log `[NET] msg: cloud=… mem=…
    new=…` và tải tiếp, không còn `het slot`.
 3. Thoát bằng giữ tay / để tự hết giờ → tin đó còn nguyên chưa đọc, chạm lần sau phát lại đúng nó.
+
+## 24. RAM thường trú + phân bổ tài nguyên khi phát video + audio (2026-09-20)
+
+**Triệu chứng.** Sau khi chuyển sang thẻ SD, phát tin hỏng theo 4 kiểu **không xác định** — cùng
+một video mỗi lần một kiểu: (2) hình+tiếng cùng giật nhưng timestamp vẫn đúng; (3) hình mượt mà
+tiếng rẹt rẹt rất nặng; (4) đôi khi bấm phát thì hộp tự khởi động lại. Và (1) log tắt lúc `PLAYING`
+nên không lấy được gì.
+
+### Số đo RAM (từ `firmware.elf`, `nm --size-sort` + probe `sizeof` bằng toolchain thật)
+
+RAM tĩnh 65.228 B. **Cảnh báo khi đọc `nm`:** phải lọc theo địa chỉ. `StandbyBackground` 115.200 B
+nằm ở 0x3C… tức **flash**, không tốn một byte RAM nào — nhìn `nm` không lọc sẽ tưởng nhầm nó là
+thủ phạm số một.
+
+`appCtx` = 24.508 B, bổ ra: **`JPEGDEC` 17.884** · `AudioPlayer` 2.328 · `NetworkManager` 3.548 ·
+còn lại ~657. Stack cấp từ heap: `WakeSync` 12.288 (thường trú **có chủ ý**, chống vụn heap cho TLS
+§21 — giữ nguyên), `loopTask` Arduino 8.192 (`loop()` chỉ `vTaskDelay`, không làm gì).
+
+### Vì sao đơn nhân + một bus sinh ra tiếng rẹt
+
+Trong `PLAYING` mọi thứ tuần tự trong MỘT task, MỘT lõi, MỘT bus SPI:
+`tick audio → đọc CẢ frame JPEG từ SD (giữ spiMutex) → acquireSPI → decode + đẩy 240×240 (giữ
+spiMutex cả frame) → tick audio`. Giữa hai `tick()` DMA I2S không nhận byte nào.
+
+Độ sâu DMA = 12 × 512 = 6.144 khung ⇒ **192 ms** ở file 8 kHz, **96 ms** ở 16 kHz (phần cứng chạy
+× `AUDIO_OVERSAMPLE`). Ngân sách 1 frame ở 15 fps là 66 ms. Vượt mốc đó thì DMA cạn,
+`tx_desc_auto_clear` phát số 0 → đúng tiếng "rẹt rẹt". Vượt xa hơn thì pacer bỏ frame, mà pacer
+**cộng dồn mốc** nên hình giật trong khi timestamp vẫn đúng.
+
+### Đã sửa
+
+1. **`JPEGDEC` ra khỏi `appCtx`** → `JPEGDEC*` cấp/giải phóng cùng nhịp `_jpegBuffer` trong
+   `playItem()`/`stop()`. Trả **17.884 B** RAM tĩnh; đỉnh RAM lúc phát KHÔNG đổi, chỉ lúc chờ mới
+   dư — đúng chỗ mbedTLS cần khối ~16 KB liền mạch (§21).
+   *An toàn đã kiểm:* `JPEGDEC::openRAM()` mở đầu bằng `memset(&_jpeg, 0, sizeof(JPEGIMAGE))`, nên
+   cấp trên heap với rác vẫn đúng; lớp không có ctor/dtor tự khai.
+2. **Thêm một nhịp `_audio.tick()` ngay TRƯỚC `acquireSPI()`** trong `decodeOneFrame()` (cả nhánh
+   JPEG lẫn nhánh SLBX RGB565). Cắt khoảng mù của DMA từ (đọc + decode) xuống còn (decode). Phải
+   đặt trước `acquireSPI()` vì `tick()` đọc thẻ, mutex không đệ quy.
+3. **Tách cỡ ĐỌC khỏi cỡ GIÃN MẪU**: thêm `AUDIO_READ_CHUNK_SIZE = 1024`; `_chunk` dùng cỡ này,
+   `_stereo` **giữ nguyên** 2048 B. `fillChunk()` đọc một lượt rồi giãn mẫu thành nhiều lượt
+   ≤ `AUDIO_PCM_CHUNK_SIZE`. Ở file 16 kHz/15 fps: **9 lượt gọi FS mỗi frame → 3**, chỉ tốn thêm
+   768 B (tăng thẳng `AUDIO_PCM_CHUNK_SIZE` sẽ tốn ~7 KB vì `_stereo` phình theo).
+   `AUDIO_PCM_CHUNK_SIZE = 256` vốn chỉnh cho NAND đọc thô tính bằng micro-giây; trên SD mỗi lượt
+   đọc là một lần lấy spiMutex + NOP hack + `fread` xuyên VFS/FATFS.
+
+### CHƯA làm, và cố ý chưa làm
+
+- **Xoá `loopTask`** (`vTaskDelete(NULL)` cuối `setup()`, trả 8.192 B): để **flash riêng một lượt**
+  sau khi 1–3 đã ổn, vì nó đổi vòng đời task của Arduino core. Đã rà: `enableLoopWDT()` mặc định
+  tắt nên `loopTask` không đăng ký task-WDT; không dùng `Serial` nên `serialEventRun()` vô can.
+- **KHÔNG nâng `TASK_STACK_MEDIA_PLAYER` lên 8192.** Triệu chứng (4) tự reboot phải đọc
+  `[BOOT] reset=<n>` (main.cpp, có sẵn) trước: `9` = brownout (nguồn, không phải firmware),
+  `12` = panic (khi đó mới nghi tràn stack — đường SD đi qua VFS/FATFS sâu hơn hẳn NAND thô, mà
+  §9.7 ghi stack bị hạ 8192→6144 chưa hề đo), `5`/`6` = watchdog. Nâng chung với 1–3 rồi hết reboot
+  thì không biết nhờ cái nào; mà nếu là brownout thì đã tiêu mất RAM vừa giành lại.
+- **KHÔNG tăng `AUDIO_DMA_BUF_COUNT`** — đổi RAM lấy biên an toàn, đi ngược mục tiêu đợt này.
+
+### Chưa kiểm chứng trên máy thật (syntax check toolchain thật OK, chưa link/flash)
+
+1. `[BOOT] heap=` phải cao hơn mốc trước sửa **~17,9 KB**. Đây là con số khách quan duy nhất của
+   cả đợt.
+2. Phát lại đúng tin từng gây "rẹt rẹt nặng": mong đợi hết hoặc giảm rõ. **Nếu không đổi gì thì
+   giả thuyết đói DMA sai**, nghi can chuyển sang thông lượng thẻ (`SD_SPI_FREQ_HZ`, hạ 20 → 10 MHz).
+3. Không hồi quy: video đúng tốc độ, ảnh tĩnh + caption đúng, tin chỉ text/voice (sentinel
+   `dataSize == 4`) vẫn có tiếng trên nền đen, và tiếng bíp báo thức vẫn sạch.

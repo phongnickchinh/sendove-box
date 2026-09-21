@@ -1,4 +1,7 @@
 #include "MediaPlayer.h"
+
+#include <new>  // std::nothrow cho JPEGDEC cap tren heap
+
 #include "DisplayDriver.h"
 #include "SystemMonitor.h"
 #include "config.h"
@@ -147,6 +150,17 @@ bool MediaPlayer::playItem(const char* identifier) {
         }
         if (_jpegBuffer == nullptr) {
             DLOG("[PLAY] err: JPEG buf alloc fail");
+            _state = PlaybackState::ERROR;
+            if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
+            return false;
+        }
+    }
+
+    // Bộ giải mã (17,9KB) đi cùng nhịp với _jpegBuffer — xem chú thích ở MediaPlayer.h
+    if (_jpeg == nullptr) {
+        _jpeg = new (std::nothrow) JPEGDEC();
+        if (_jpeg == nullptr) {
+            DLOG("[PLAY] err: JPEGDEC alloc fail");
             _state = PlaybackState::ERROR;
             if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             return false;
@@ -410,6 +424,11 @@ void MediaPlayer::stop() {
         free(_jpegBuffer);
         _jpegBuffer = nullptr;
     }
+    // ...và 17,9KB của bộ giải mã, cùng lý do (MediaPlayer.h)
+    if (_jpeg != nullptr) {
+        delete _jpeg;
+        _jpeg = nullptr;
+    }
     _currentSlot = -1;
     _currentId[0] = '\0';
     _currentFrame = 0;
@@ -435,7 +454,7 @@ int8_t MediaPlayer::getCurrentSlot() const {
 }
 
 bool MediaPlayer::decodeOneFrame(bool skipRender) {
-    if (_jpegBuffer == nullptr || _storage == nullptr) return false;
+    if (_jpegBuffer == nullptr || _jpeg == nullptr || _storage == nullptr) return false;
 
     // Serial.printf("[MediaPlayer] decodeOneFrame: slot=%d state=%d totalFrames=%u baseOffset=%lu readHeader=%d\n",
     //               _currentSlot, (int)_state, _totalFrames, (unsigned long)_frameBaseOffset,
@@ -462,6 +481,9 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
                 DLOG("[PLAY] RGB short read");
                 return false;
             }
+
+            // Cùng lý do như nhánh JPEG bên dưới: nạp DMA trước khi khoá bus.
+            _audio.tick();
 
             // Lấy SPI mutex chỉ trong lúc push lên LCD
             if (!skipRender) {
@@ -527,19 +549,27 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
     // để bỏ đúng phần đắt nhất (JPEGDEC + đẩy full frame qua SPI).
     if (skipRender) return true;
 
+    // Nạp DMA đầy lại NGAY TRƯỚC đoạn mù dài nhất. update() chỉ tick hai đầu
+    // frame, nên giữa hai lần đó DMA không nhận byte nào trong suốt (đọc SD +
+    // giải mã + đẩy màn hình). DMA chỉ cầm cự 192ms ở file 8kHz và 96ms ở 16kHz
+    // (12 × 512 khung, phần cứng chạy x AUDIO_OVERSAMPLE) -> cạn là nghe rẹt.
+    // Đặt ở ĐÂY chứ không sau acquireSPI(): tick() đọc thẻ nên phải nằm ngoài
+    // giao dịch hiển thị, mutex không đệ quy.
+    _audio.tick();
+
     // 3. Khóa bus SPI và giải mã trực tiếp lên màn hình
     if (!_display->acquireSPI()) return false;
 
-    if (_jpeg.openRAM(_jpegBuffer, jpegSize, jpegDrawCallback)) {
-        _jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
+    if (_jpeg->openRAM(_jpegBuffer, jpegSize, jpegDrawCallback)) {
+        _jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
         LGFX* tft = _display->getTFT();
 
         tft->startWrite(); // Khóa giao dịch SPI với ST7789 để đẩy toàn bộ block MCU siêu mượt
-        int decodeRes = _jpeg.decode(0, 0, 0);
+        int decodeRes = _jpeg->decode(0, 0, 0);
         tft->endWrite();
 
         // Serial.printf("[MediaPlayer] JPEG decode result=%d size=%lu\n", decodeRes, (unsigned long)jpegSize);
-        _jpeg.close();
+        _jpeg->close();
     } else {
         DLOG("[PLAY] ERR: openRAM");
     }

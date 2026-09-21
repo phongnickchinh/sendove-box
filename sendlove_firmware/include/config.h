@@ -161,6 +161,12 @@ static constexpr uint32_t AUDIO_MAX_PCM_BYTES  = 600000;
 // Oversample x4 Stereo = 512 samples = 2048 bytes = ĐÚNG 1 DMA BUFFER.
 // Tiết kiệm 12KB static RAM trong AudioPlayer, giúp DMA fit chuẩn 100% không dư rác.
 static constexpr uint32_t AUDIO_PCM_CHUNK_SIZE = 256;
+// Cỡ ĐỌC, tách khỏi cỡ giãn mẫu ở trên. 256 là con số chỉnh cho NAND đọc thô
+// tính bằng micro-giây; trên thẻ SD mỗi lượt đọc là một lần lấy spiMutex + NOP
+// hack + fread xuyên VFS/FATFS. File 16kHz ở 15fps cần ~2134 B audio mỗi frame
+// => 9 lượt như vậy mỗi frame. Gộp thành 1024 B/lượt còn 3, chỉ tốn thêm 768 B
+// (_stereo giữ nguyên 2048 B; tăng thẳng AUDIO_PCM_CHUNK_SIZE thì tốn ~7 KB).
+static constexpr uint32_t AUDIO_READ_CHUNK_SIZE = 1024;
 static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 12;   // 12 × 512 samples = 192ms @ 32kHz (24KB DMA RAM)
 static constexpr uint16_t AUDIO_DMA_BUF_LEN    = 512;   // samples per DMA buffer
 // BCLK ở 8kHz mono (~256kHz) quá thấp cho MAX98357A -> rè liên tục. Test tay

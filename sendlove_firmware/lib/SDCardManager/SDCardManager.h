@@ -88,7 +88,7 @@ public:
 
     /// Đọc tại offset tuyệt đối. Chặn theo kích thước file vật lý.
     /// Bỏ qua seek khi offset trùng vị trí hiện tại — AudioPlayer đọc đơn điệu
-    /// tăng dần từng AUDIO_PCM_CHUNK_SIZE byte, seek mỗi lần sẽ phá readahead.
+    /// tăng dần từng AUDIO_READ_CHUNK_SIZE byte, seek mỗi lần sẽ phá readahead.
     int readAtFile(uint32_t offset, uint8_t* buffer, uint32_t len);
 
     /// Đóng handle đọc ngẫu nhiên

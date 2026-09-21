@@ -227,7 +227,7 @@ int SDCardManager::readAtFile(uint32_t offset, uint8_t* buffer, uint32_t len) {
 
     bool ok = true;
     // Bo qua seek khi da dung vi tri: AudioPlayer doc don dieu tang dan tung
-    // AUDIO_PCM_CHUNK_SIZE byte, seek moi lan se pha readahead cua stdio.
+    // AUDIO_READ_CHUNK_SIZE byte, seek moi lan se pha readahead cua stdio.
     if (!_atPosKnown || offset != _atPos) {
         ok = _atFile.seek(offset);
         _atPosKnown = ok;

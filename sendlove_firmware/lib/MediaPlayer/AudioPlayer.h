@@ -58,8 +58,10 @@ private:
     uint32_t _audioCursor    = 0; // Bytes đã đưa vào DMA
     uint32_t _sampleRate     = AUDIO_SAMPLE_RATE; // Đọc từ header AUDC, không hardcode
 
-    // Buffer đọc 1 chunk PCM từ NAND (stack-allocated, tránh malloc)
-    uint8_t _chunk[AUDIO_PCM_CHUNK_SIZE];
+    // Buffer đọc PCM từ storage. Cỡ ĐỌC (AUDIO_READ_CHUNK_SIZE) tách khỏi cỡ
+    // giãn mẫu (AUDIO_PCM_CHUNK_SIZE) vì trên thẻ SD mỗi lượt đọc là một fread
+    // xuyên VFS/FATFS — xem config.h.
+    uint8_t _chunk[AUDIO_READ_CHUNK_SIZE];
     // Mono -> Stereo (x2) rồi lặp mỗi mẫu AUDIO_OVERSAMPLE lần (I2S mở ở tốc độ
     // file x AUDIO_OVERSAMPLE, xem config.h) để BCLK đủ cao cho MAX98357A.
     int16_t _stereo[AUDIO_PCM_CHUNK_SIZE / 2 * 2 * AUDIO_OVERSAMPLE];

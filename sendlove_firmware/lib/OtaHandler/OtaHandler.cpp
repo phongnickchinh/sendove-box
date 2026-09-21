@@ -1,5 +1,6 @@
 #include "OtaHandler.h"
 #include <Update.h>
+#include "ScreenLogger.h"
 #include "config.h"
 
 void OtaHandler::sendJson(WebServer& server, int code, const char* body) {
@@ -31,6 +32,9 @@ void OtaHandler::handleBegin(WebServer& server) {
 
     if (md5.length() == 32) Update.setMD5(md5.c_str());
 
+    // Mốc cho watchdog bắt đầu từ lúc begin, không phải từ chunk đầu: client
+    // gọi begin xong rồi chết luôn thì cũng phải được dọn.
+    _lastChunkMs = millis();
     _isUpdating = true;
     sendJson(server, 200, "{\"ready\":true}");
 }
@@ -56,6 +60,7 @@ void OtaHandler::handleUploadData(WebServer& server) {
         break;
 
     case UPLOAD_FILE_WRITE:
+        _lastChunkMs = millis();
         Update.write(upload.buf, upload.currentSize);
         break;
 
@@ -85,4 +90,20 @@ void OtaHandler::registerRoutes(WebServer& server) {
                  FW_VERSION, _isUpdating ? "true" : "false", ESP.getFreeHeap());
         sendJson(server, 200, body);
     });
+}
+
+void OtaHandler::tickWatchdog() {
+    if (!_isUpdating) return;
+    if (millis() - _lastChunkMs < OTA_STALL_TIMEOUT_MS) return;
+
+    // Huỷ an toàn: Update.write() chỉ ghi vào partition KHÔNG chạy, và otadata chỉ
+    // đổi khi Update.end(true) thành công -> bỏ dở ở đây thì bản đang chạy vẫn nguyên.
+    Update.abort();
+    _isUpdating = false;
+    DLOG("[OTA] huy: %lus khong co chunk nao", (unsigned long)(OTA_STALL_TIMEOUT_MS / 1000));
+}
+
+uint8_t OtaHandler::progressPercent() const {
+    if (!_isUpdating || Update.size() == 0) return 0;
+    return (uint8_t)((uint64_t)Update.progress() * 100 / Update.size());
 }

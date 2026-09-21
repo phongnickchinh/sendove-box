@@ -108,10 +108,24 @@ static constexpr size_t FIREBASE_URL_MAX_LEN = 1792;
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";
-// Cửa sổ mở web server OTA sau khi cờ emergency_ota/normal_ota trên cloud bật.
-// Hộp thức suốt cửa sổ này (không ngủ) nên đừng kéo dài quá mức cần thiết.
-static constexpr uint32_t OTA_WINDOW_MS = 10 * 60 * 1000;
 static constexpr const char *FW_VERSION = "2.1.0";
+// Chuỗi chạm vào/ra chế độ OTA (user chốt 2026-09-21): giữ 3s → nhả → giữ 3s → nhả
+// (hiện nhắc "giữ thêm 6s") → giữ TOUCH_OTA_HOLD_MS. Không dùng một cú giữ dài duy nhất
+// vì TTP223 TỰ HIỆU CHUẨN sau 7-8s chạm liên tục và từ đó báo là đã nhả dù tay vẫn đặt
+// (đo trên hộp: nhả ở 7700-7800ms; diễn đàn Arduino xác nhận trên hàng trăm con chip).
+// 6s cách mốc đó ~1,7s. ĐỪNG nâng lên gần 7s.
+static constexpr uint32_t TOUCH_OTA_HOLD_MS = 6000;
+// Cú giữ 3s thứ hai phải tới trong bấy nhiêu ms kể từ cú thứ nhất.
+static constexpr uint32_t OTA_SEQ_STEP_WINDOW_MS = 6000;
+// Từ lúc hiện nhắc, phải BẮT ĐẦU cú giữ 6s trong bấy nhiêu ms (đang giữ thì không huỷ).
+static constexpr uint32_t OTA_SEQ_FINAL_WINDOW_MS = 12000;
+// Đang nạp mà quá bấy nhiêu ms không nhận thêm chunk nào -> Update.abort(). Không
+// có chốt này, TCP đứt giữa chừng làm cờ _isUpdating kẹt true vĩnh viễn: hộp không
+// bao giờ ngủ và không bao giờ kêu báo thức nữa cho tới khi rút điện.
+static constexpr uint32_t OTA_STALL_TIMEOUT_MS = 30000;
+// Bản mới phải sống bấy nhiêu ms kể từ boot mới được đánh dấu hợp lệ. Reset trước
+// mốc này (crash, WDT, brownout) thì bootloader tự quay về bản cũ (main.cpp).
+static constexpr uint32_t OTA_VERIFY_DELAY_MS = 60000;
 
 // Wi-Fi & NTP Configuration (Fallback credentials if NVS is empty)
 static constexpr size_t WIFI_SSID_MAX_LEN = 33;  // 32 chars + null terminator

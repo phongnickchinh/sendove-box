@@ -32,14 +32,6 @@ public:
     /// Check if Wi-Fi connected and time is synchronized
     bool isReady() const;
 
-    /// Cờ OTA (`emergency_ota`/`normal_ota` trên cloud) đã bật chưa. Đọc là xoá —
-    /// main.cpp dùng nó để mở cửa sổ OTA rồi tự đóng.
-    bool takeOtaRequest() {
-        if (!_otaRequested) return false;
-        _otaRequested = false;
-        return true;
-    }
-
     /// Check if Wi-Fi is connected
     bool isConnected() const;
 
@@ -202,7 +194,6 @@ private:
     void noteAuthFailure(int httpCode, const char* where);
 
     volatile bool _forceReassociate = false;
-    volatile bool _otaRequested = false;
     volatile bool _isSyncing = false;
     volatile bool _isFirebaseSyncing = false;
     volatile bool _isNtpSyncing = false;

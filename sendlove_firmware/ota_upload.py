@@ -3,15 +3,19 @@
 OTA Push Upload Script for Sendlove Box (ESP32-C3).
 
 Usage:
-  python ota_upload.py                         # Default mDNS hostname
-  python ota_upload.py --host 192.168.1.100    # Specific IP address
+  python ota_upload.py --host 192.168.1.100    # IP hien tren man hinh che do OTA (KHUYEN DUNG)
+  python ota_upload.py                         # mDNS sendlovebox.local (tren Windows hay khong phan giai duoc)
   python ota_upload.py --bin path/to/firmware.bin  # Specific firmware binary file
+
+Truoc khi chay: tren hop GIU 3s, nha, GIU 3s, nha, roi GIU 6s de vao che do OTA. Web server chi
+ton tai trong che do do (tu 2026-09-21 khong con bat bang co cloud nua).
 
 Workflow:
   1. Read firmware binary, compute MD5
   2. POST /api/ota/begin  -> ESP32 prepares flash partition
   3. POST /api/ota/upload -> Send firmware binary
   4. ESP32 automatically restarts with new firmware
+  5. Ban moi phai song 60s moi duoc xac nhan; reset truoc do thi hop tu quay ve ban cu
 """
 
 import argparse
@@ -28,7 +32,8 @@ except ImportError:
     sys.exit(1)
 
 # Defaults
-DEFAULT_HOST = "sendlovebox"  # mDNS hostname
+# Can ".local" thi moi di qua mDNS. Ten tran "sendlovebox" khong phan giai duoc.
+DEFAULT_HOST = "sendlovebox.local"
 DEFAULT_PORT = 80
 DEFAULT_BIN  = ".pio/build/esp32-c3-devkitm-1/firmware.bin"
 TIMEOUT      = 30  # seconds
@@ -61,7 +66,7 @@ def ota_upload(host: str, port: int, bin_path: str):
     print(f"  MD5  : {fw_md5}")
     print(f"============================================")
 
-    # Step 1: POST /api/ota/begin (Auto-retry loop while ESP32 is sleeping)
+    # Step 1: POST /api/ota/begin. Retry cho toi khi nguoi dung dua hop vao che do OTA.
     max_wait_time = 310  # Wait up to 310 seconds (> 5 minutes)
     start_time = time.time()
     retry_interval = 3   # Retry every 3 seconds
@@ -69,7 +74,7 @@ def ota_upload(host: str, port: int, bin_path: str):
     r = None
 
     print("\n[1/2] Connecting to ESP32 (/api/ota/begin)...")
-    print(f"      (If ESP32 is sleeping, script will auto-retry for {max_wait_time}s until device wakes)...")
+    print(f"      (Chua vao che do OTA? Tren hop: giu 3s, giu 3s, roi giu 6s. Script thu lai trong {max_wait_time}s)...")
 
     while time.time() - start_time < max_wait_time:
         try:
@@ -125,6 +130,9 @@ def ota_upload(host: str, port: int, bin_path: str):
         print(f"  [OK] OTA UPLOAD SUCCESSFUL! ({elapsed:.1f}s)")
         print(f"  -> {resp.get('msg', '')}")
         print(f"  Sendlove Box is restarting...")
+        print(f"")
+        print(f"  CHO 60 GIAY roi moi rut dien: ban moi dang thu thach,")
+        print(f"  reset truoc moc do thi hop tu quay ve ban cu.")
         print(f"============================================")
     else:
         print(f"\n[ERROR] Upload failed status {r.status_code}: {r.text}")

@@ -15,6 +15,8 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <atomic>
+#include <esp_ota_ops.h>
+#include <esp_timer.h>
 
 // ============================================================================
 // SENDLOVE BOX — Main Firmware (Phase 3A: Storage Abstraction Layer)
@@ -24,7 +26,8 @@
 //   - Task_UIController: Đọc touch sensor + gửi event chuyển slot/item
 //   - Task_NetworkController: Phục vụ WebServer / Captive Portal
 // ============================================================================
-enum class SystemEvent : uint8_t { NONE, TOUCH_SHORT, TOUCH_LONG, TIMEOUT_AUTO_NEXT };
+// TOUCH_OTA_TOGGLE: cú giữ TOUCH_OTA_HOLD_MS (6s) — bước cuối của chuỗi chạm OTA.
+enum class SystemEvent : uint8_t { NONE, TOUCH_SHORT, TOUCH_LONG, TIMEOUT_AUTO_NEXT, TOUCH_OTA_TOGGLE };
 
 struct AppContext {
   DisplayDriver display;
@@ -46,11 +49,47 @@ static volatile bool forceStandbyRedraw = false;
 static SemaphoreHandle_t spiMutex = nullptr;
 static QueueHandle_t eventQueue = nullptr;
 
+// ============================================================================
+// Rollback sau OTA
+// ============================================================================
+// Bootloader đã bật sẵn rollback (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=1), nhưng
+// initArduino() mặc định gọi verifyOta() (weak, trả true) rồi đánh dấu bản mới HỢP LỆ
+// ngay lúc boot — lớp bảo vệ bị vô hiệu. Trả true ở đây = Arduino không tự đánh dấu,
+// firmware tự lo: sống đủ OTA_VERIFY_DELAY_MS mới xác nhận (Task_UIController).
+// Reset trước mốc đó thì bootloader thấy partition vẫn PENDING_VERIFY và tự quay về
+// bản cũ — đó là toàn bộ nhánh thất bại, không cần code gì thêm.
+//
+// PHẢI extern "C": bản weak gốc nằm trong esp32-hal-misc.c (C linkage).
+//
+// Nạp qua cáp KHÔNG đi qua đường này: boot_app0.bin ghi otadata với
+// ota_state = 0xFFFFFFFF (UNDEFINED, đã đọc byte thật 2026-09-21), không phải NEW,
+// nên bản nạp cáp không bao giờ ở trạng thái PENDING_VERIFY.
+extern "C" bool verifyRollbackLater() { return true; }
+
+static volatile bool s_otaPendingVerify = false;
+
+// Lệnh bật/tắt web server OTA: +1 bật, -1 tắt, 0 không có gì. Task_MediaPlayer ghi,
+// Task_NetworkController thực thi. Mọi thao tác với WebServer PHẢI nằm ở task gọi
+// handleClient(): stopWebServer() làm `delete _webServer`, gọi từ task khác trong lúc
+// handleClient() đang chạy là use-after-free.
+static volatile int8_t s_otaServerCmd = 0;
+static esp_timer_handle_t s_otaGuardTimer = nullptr;
+
+// Lưới an toàn cho bản mới bị TREO (không crash). Rollback chỉ xảy ra khi chip RESET,
+// mà ở cấu hình này treo KHÔNG gây reset: task WDT không canh IDLE task
+// (CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 không bật) và loopTask không đăng ký
+// (loopTaskWDTEnabled = false), nên một vòng while(1) chỉ đứng im mãi mãi.
+// esp_timer chạy ở task ưu tiên 22, vẫn bắn khi các task ứng dụng đã chết.
+static void otaGuardFire(void*) { esp_restart(); }
+
 // Serial Monitor đã được thay thế hoàn toàn bằng ScreenLogger on-screen overlay.
 // Không dng Serial.begin() để tránh block chip khi không có USB CDC.
 
 // STATE_ALARM: báo thức đang kêu. Chặn vòng ngủ, nhận chạm kể cả lúc đang tải tin.
-enum class AppState { STATE_STANDBY, STATE_VIDEO, STATE_ALARM };
+// STATE_OTA: chế độ nạp, vào/ra bằng chuỗi chạm giữ 3s, 3s rồi 6s. Hộp CHỈ chờ và nạp: không
+// ngủ, không sync, không phát tin, KHÔNG kêu báo thức (user chốt 2026-09-21 — quên
+// thoát là mất báo thức, màn OTA có dòng nhắc).
+enum class AppState { STATE_STANDBY, STATE_VIDEO, STATE_ALARM, STATE_OTA };
 
 // Đọc/ghi từ 3 task (MediaPlayer, UIController, vòng lặp chính) nên phải atomic.
 // 18 chỗ dùng đều là so sánh/gán trực tiếp (đã grep), không chỗ nào bind qua `auto`,
@@ -99,16 +138,108 @@ void Task_MediaPlayer(void *pvParameters) {
       }
   };
 
+  // Màn chế độ OTA. Chỉ ASCII: font hiện chỉ có glyph 32-126 (xem asciiFold ở MediaPlayer).
+  auto drawOtaScreen = []() {
+      if (!appCtx.display.acquireSPI()) return;
+      LGFX* tft = appCtx.display.getTFT();
+      char line[48];
+      tft->fillScreen(TFT_BLACK);
+      tft->setTextDatum(lgfx::middle_center);
+      tft->setTextColor(TFT_YELLOW);
+      tft->setTextSize(2);
+      tft->drawString("CHE DO NAP OTA", 120, 30);
+      tft->setTextColor(TFT_WHITE);
+      tft->setTextSize(1);
+      snprintf(line, sizeof(line), "http://%s.local/", OTA_HOSTNAME);
+      tft->drawString(line, 120, 75);
+      snprintf(line, sizeof(line), "IP: %s", WiFi.localIP().toString().c_str());
+      tft->drawString(line, 120, 95);
+      snprintf(line, sizeof(line), "FW %s", FW_VERSION);
+      tft->drawString(line, 120, 115);
+      if (appCtx.otaHandler.isUpdating()) {
+          snprintf(line, sizeof(line), "Dang nap %u%% - dung rut dien", (unsigned)appCtx.otaHandler.progressPercent());
+      } else {
+          snprintf(line, sizeof(line), "Cho nap...");
+      }
+      tft->setTextColor(TFT_GREEN);
+      tft->drawString(line, 120, 150);
+      // Biện pháp giảm thiểu DUY NHẤT cho đánh đổi đã chốt: quên thoát = mất báo thức.
+      tft->setTextColor(TFT_RED);
+      tft->drawString("BAO THUC DANG TAT", 120, 190);
+      tft->setTextColor(TFT_WHITE);
+      tft->drawString("Thoat: giu 3s, 3s, roi 6s", 120, 210);
+      appCtx.display.releaseSPI();
+  };
+
+  auto enterOtaMode = [&drawOtaScreen, &drawToast]() {
+      // OTA qua LAN là đường DUY NHẤT: không có Wi-Fi thì dựng server cũng vô ích.
+      if (!appCtx.network.isConnected()) {
+          DLOG("[OTA] khong co Wi-Fi -> khong vao che do");
+          appCtx.display.turnOn();
+          drawToast("OTA: can Wi-Fi");
+          vTaskDelay(pdMS_TO_TICKS(1500));
+          forceStandbyRedraw = true;
+          return;
+      }
+      appCtx.player.stop();
+      s_otaServerCmd = 1;  // Task_NetworkController dựng server trong ≤ 50ms
+      currentAppState = AppState::STATE_OTA;
+      appCtx.display.turnOn();
+      drawOtaScreen();
+      DLOG("[OTA] vao che do: http://%s.local/ %s", OTA_HOSTNAME, WiFi.localIP().toString().c_str());
+  };
+
+  auto exitOtaMode = []() {
+      // Đang nạp dở thì KHÔNG cho thoát. Task_UIController vốn đã chặn mọi cú chạm
+      // khi isUpdating(), đây chỉ là chốt thứ hai.
+      if (appCtx.otaHandler.isUpdating()) return;
+      s_otaServerCmd = -1;
+      currentAppState = AppState::STATE_STANDBY;
+      forceStandbyRedraw = true;
+      lastUserActivity = millis();
+      DLOG("[OTA] thoat che do");
+  };
+
   static constexpr const char* ALARM_HINT = "Cham: bao lai 5p - Giu: tat";
   char alarmTime[6] = "";
   uint32_t alarmStartMs = 0;
   uint32_t lastBeepMs = 0;
   uint32_t lastAlarmPollMs = 0;
+  // Chuỗi chạm vào/ra chế độ OTA: giữ 3s → nhả → giữ 3s → nhả → giữ 6s. Không dùng
+  // một cú giữ dài vì TTP223 tự hiệu chuẩn sau 7-8s chạm liên tục (config.h).
+  // Chỉ đếm LONG nhận được lúc đang STANDBY hoặc OTA, nên LONG thoát video (nhận lúc
+  // VIDEO) và LONG tắt báo thức (nhánh ALARM nuốt trước) không bao giờ là bước 1.
+  uint8_t  otaSeqStep = 0;      // 0 rảnh · 1 xong cú giữ thứ nhất · 2 xong cú thứ hai (đang hiện nhắc)
+  uint32_t otaSeqStep2Ms = 0;   // mốc xong cú giữ thứ hai
+  uint32_t otaSeqDeadline = 0;
+
+  // Dải đáy y 200-239 (gồm cả chỗ thanh tiến trình, để vẽ lại là xoá luôn thanh cũ).
+  auto drawOtaPrompt = []() {
+      if (!appCtx.display.acquireSPI()) return;
+      LGFX* tft = appCtx.display.getTFT();
+      tft->fillRect(0, 200, 240, 40, TFT_BLACK);
+      tft->setTextDatum(lgfx::middle_center);
+      tft->setTextSize(1);
+      tft->setTextColor(TFT_YELLOW);
+      tft->drawString(currentAppState == AppState::STATE_OTA ? "Giu them 6s de THOAT OTA"
+                                                             : "Giu them 6s de vao OTA", 120, 214);
+      appCtx.display.releaseSPI();
+  };
+
+  auto resetOtaSeq = [&otaSeqStep, &drawOtaScreen]() {
+      bool hadPrompt = (otaSeqStep == 2);
+      otaSeqStep = 0;
+      if (!hadPrompt) return;
+      if (currentAppState == AppState::STATE_STANDBY) forceStandbyRedraw = true;
+      else if (currentAppState == AppState::STATE_OTA) drawOtaScreen();
+  };
 
   for (;;) {
     // Báo thức: hỏi mỗi 500ms ở mọi trạng thái (kêu đè lên cả lúc đang xem tin),
-    // trừ khi đang kêu sẵn hoặc đang nạp OTA.
-    if (currentAppState != AppState::STATE_ALARM && !appCtx.otaHandler.isUpdating() &&
+    // trừ khi đang kêu sẵn, đang nạp OTA, hoặc đang ở CHẾ ĐỘ OTA (user chốt tắt hẳn
+    // báo thức trong chế độ này, 2026-09-21).
+    if (currentAppState != AppState::STATE_ALARM && currentAppState != AppState::STATE_OTA &&
+        !appCtx.otaHandler.isUpdating() &&
         millis() - lastAlarmPollMs >= 500) {
       lastAlarmPollMs = millis();
       if (AlarmClock::instance().pollDue(time(nullptr), alarmTime, sizeof(alarmTime))) {
@@ -123,6 +254,13 @@ void Task_MediaPlayer(void *pvParameters) {
         lastBeepMs = 0;
         lastUserActivity = millis();
       }
+    }
+
+    // Hết hạn chuỗi chạm OTA. Đang giữ tay thì KHÔNG huỷ dưới ngón tay người dùng:
+    // bắt đầu cú giữ cuối trước hạn là được hoàn thành.
+    if (otaSeqStep != 0 && (int32_t)(millis() - otaSeqDeadline) > 0 &&
+        appCtx.ui.getTouchHoldMs() == 0) {
+      resetOtaSeq();
     }
 
     SystemEvent event = SystemEvent::NONE;
@@ -147,6 +285,46 @@ void Task_MediaPlayer(void *pvParameters) {
         lastUserActivity = millis();
         continue;
       }
+
+      // ---- Chuỗi chạm OTA (xem otaSeqStep) ----
+      bool otaSeqState = (currentAppState == AppState::STATE_STANDBY ||
+                          currentAppState == AppState::STATE_OTA);
+      if (event == SystemEvent::TOUCH_LONG && otaSeqState) {
+        if (otaSeqStep == 0) {
+          otaSeqStep = 1;
+          otaSeqDeadline = millis() + OTA_SEQ_STEP_WINDOW_MS;
+        } else if (otaSeqStep == 1) {
+          otaSeqStep = 2;
+          otaSeqStep2Ms = millis();
+          otaSeqDeadline = millis() + OTA_SEQ_FINAL_WINDOW_MS;
+          drawOtaPrompt();
+        }
+        // Bước 2: đây là LONG ở giây thứ 3 của cú giữ cuối — cứ để nó giữ tiếp tới 6s.
+        // Ở STANDBY, LONG vốn là no-op; ở OTA thì mọi event đều bị bỏ qua.
+        continue;
+      }
+      if (event == SystemEvent::TOUCH_OTA_TOGGLE) {
+        // Cú giữ 6s phải là lần giữ MỚI, bắt đầu SAU khi xong bước 2. Không kiểm thì ai
+        // giữ tiếp cú thứ hai tới 6s sẽ rút chuỗi còn hai bước. Cú giữ bắn event này
+        // bắt đầu lúc (now - TOUCH_OTA_HOLD_MS) — trễ hàng đợi chỉ vài ms, còn cú thứ
+        // hai thì bắt đầu trước mốc bước 2 tới 3s, nên biên phân định rất rộng.
+        bool freshHold = (int32_t)((millis() - TOUCH_OTA_HOLD_MS) - otaSeqStep2Ms) > 0;
+        if (otaSeqStep == 2 && freshHold && otaSeqState) {
+          otaSeqStep = 0;  // enter/exit tự vẽ lại màn, không cần resetOtaSeq()
+          if (currentAppState == AppState::STATE_OTA) exitOtaMode();
+          else enterOtaMode();
+        }
+        continue;
+      }
+      if (event == SystemEvent::TOUCH_SHORT && otaSeqStep == 2) {
+        resetOtaSeq();  // đang hiện nhắc: chạm ngắn là HUỶ, không phát tin
+        continue;
+      }
+      if (event == SystemEvent::TOUCH_SHORT) {
+        otaSeqStep = 0;  // bước 1 chưa hiện gì: huỷ âm thầm, chạm vẫn làm việc bình thường
+      }
+      // Chế độ OTA chỉ nhận chuỗi thoát ở trên; mọi event khác bị bỏ qua.
+      if (currentAppState == AppState::STATE_OTA) continue;
 
       if (event == SystemEvent::TOUCH_SHORT) {
         if (currentAppState == AppState::STATE_STANDBY) {
@@ -261,6 +439,9 @@ void Task_MediaPlayer(void *pvParameters) {
         appCtx.layoutEngine.renderStandbyScreen(&appCtx.display, &appCtx.network, fullRedraw);
         lastClockRender = now;
         forceStandbyRedraw = false;
+        // Render vừa rồi có thể đè mất lời nhắc. Không vẽ lúc đang giữ tay: sẽ xoá
+        // thanh tiến trình của cú giữ cuối.
+        if (otaSeqStep == 2 && appCtx.ui.getTouchHoldMs() == 0) drawOtaPrompt();
       }
       vTaskDelay(pdMS_TO_TICKS(10));
     } else if (currentAppState == AppState::STATE_ALARM) {
@@ -278,6 +459,40 @@ void Task_MediaPlayer(void *pvParameters) {
       } else {
         vTaskDelay(pdMS_TO_TICKS(20));
       }
+    } else if (currentAppState == AppState::STATE_OTA) {
+      // Vẽ lại mỗi giây để dòng tiến độ "Dang nap N%" chạy. Không vẽ khi đang giữ
+      // tay (thanh tiến trình ở dưới cần nguyên dải đáy màn hình).
+      static uint32_t lastOtaRender = 0;
+      if (millis() - lastOtaRender >= 1000 && appCtx.ui.getTouchHoldMs() == 0) {
+        lastOtaRender = millis();
+        drawOtaScreen();
+        if (otaSeqStep == 2) drawOtaPrompt();  // drawOtaScreen() vừa xoá cả màn
+      }
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    // Thanh tiến trình CHỈ cho cú giữ 6s cuối: đang ở bước 2 và cú giữ bắt đầu SAU
+    // mốc bước 2. Thiếu điều kiện sau, phần còn lại của cú giữ thứ hai (đã qua 3s)
+    // sẽ hiện như thể cú cuối đã được một nửa.
+    static bool holdBarShown = false;
+    uint32_t holdMs = appCtx.ui.getTouchHoldMs();
+    bool finalHold = (otaSeqStep == 2) && holdMs > 0 &&
+                     (int32_t)((millis() - holdMs) - otaSeqStep2Ms) > 0;
+    if (finalHold) {
+      uint32_t w = (holdMs >= TOUCH_OTA_HOLD_MS) ? 240 : (holdMs * 240 / TOUCH_OTA_HOLD_MS);
+      if (appCtx.display.acquireSPI()) {
+        appCtx.display.getTFT()->fillRect(0, 232, 240, 8, TFT_DARKGREY);
+        appCtx.display.getTFT()->fillRect(0, 232, (int32_t)w, 8, TFT_YELLOW);
+        appCtx.display.releaseSPI();
+      }
+      holdBarShown = true;
+    } else if (holdBarShown && holdMs == 0) {
+      // Nhả tay: nhả sớm (còn ở bước 2) thì vẽ lại lời nhắc, nó xoá luôn thanh; đã
+      // vào/ra chế độ thì vẽ lại màn hiện tại.
+      holdBarShown = false;
+      if (otaSeqStep == 2) drawOtaPrompt();
+      else if (currentAppState == AppState::STATE_STANDBY) forceStandbyRedraw = true;
+      else if (currentAppState == AppState::STATE_OTA) drawOtaScreen();
     }
   }
 }
@@ -289,11 +504,16 @@ void Task_UIController(void *pvParameters) {
   for (;;) {
     TouchEvent tEvent = appCtx.ui.getTouchEvent();
     if (tEvent != TouchEvent::NONE) {
-      if (appCtx.network.isDownloadingMedia() && currentAppState != AppState::STATE_ALARM) {
+      // Đang nạp OTA thì chặn MỌI cú chạm, cùng cơ chế với lúc đang tải tin — kể cả
+      // chuỗi chạm để thoát: thoát giữa chừng là tắt web server khi file còn đang tới.
+      if ((appCtx.network.isDownloadingMedia() || appCtx.otaHandler.isUpdating()) &&
+          currentAppState != AppState::STATE_ALARM) {
           // Bỏ qua touch khi đang download — không log để tránh spam.
           // Trừ lúc báo thức đang kêu: không được bắt người dùng chờ tải xong mới tắt được.
       } else {
-          SystemEvent event = (tEvent == TouchEvent::LONG_PRESS) ? SystemEvent::TOUCH_LONG : SystemEvent::TOUCH_SHORT;
+          SystemEvent event = (tEvent == TouchEvent::VERY_LONG_PRESS) ? SystemEvent::TOUCH_OTA_TOGGLE
+                            : (tEvent == TouchEvent::LONG_PRESS)      ? SystemEvent::TOUCH_LONG
+                                                                      : SystemEvent::TOUCH_SHORT;
           xQueueSend(eventQueue, &event, 0);
           lastUserActivity = millis();
           activeSleepTimeoutMs = INACTIVITY_SLEEP_TIMEOUT_MS;
@@ -309,21 +529,17 @@ void Task_UIController(void *pvParameters) {
         lastIntervalSyncMs = now;
     }
 
-    // Cửa sổ OTA: chỉ mở khi cờ trên cloud bật, tự đóng sau OTA_WINDOW_MS.
-    static uint32_t otaWindowUntil = 0;
-    if (appCtx.network.takeOtaRequest()) {
-        appCtx.network.startWebServer(OTA_HOSTNAME);
-        if (appCtx.network.getWebServer() != nullptr) {
-            appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
+    // Bản mới sau OTA đã sống đủ OTA_VERIFY_DELAY_MS -> xác nhận, huỷ lưới an toàn.
+    // Từ đây trở đi bootloader không còn quay về bản cũ nữa.
+    if (s_otaPendingVerify && millis() >= OTA_VERIFY_DELAY_MS) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        if (s_otaGuardTimer != nullptr) {
+            esp_timer_stop(s_otaGuardTimer);
+            esp_timer_delete(s_otaGuardTimer);
+            s_otaGuardTimer = nullptr;
         }
-        otaWindowUntil = millis() + OTA_WINDOW_MS;
-        DLOG("[OTA] mo %lus: http://%s.local/", (unsigned long)(OTA_WINDOW_MS / 1000), OTA_HOSTNAME);
-    }
-    if (otaWindowUntil != 0 && (int32_t)(millis() - otaWindowUntil) > 0 &&
-        !appCtx.otaHandler.isUpdating()) {
-        appCtx.network.stopWebServer();
-        otaWindowUntil = 0;
-        DLOG("[OTA] dong cua so");
+        s_otaPendingVerify = false;
+        DLOG("[OTA] ban moi da xac nhan (%s)", FW_VERSION);
     }
 
     // KHÔNG còn điều kiện `!isStorageFull` ở đây: đầy slot chỉ có nghĩa là khỏi
@@ -342,7 +558,11 @@ void Task_UIController(void *pvParameters) {
     if (currentAppState != AppState::STATE_VIDEO &&
         currentAppState != AppState::STATE_ALARM &&
         !appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
-        !appCtx.network.isSyncing() && otaWindowUntil == 0 &&
+        !appCtx.network.isSyncing() && currentAppState != AppState::STATE_OTA &&
+        // Không ngủ trong thời gian thử thách: vừa thức, lưới an toàn esp_timer (ưu
+        // tiên 22) có thể bắn TRƯỚC khi task này kịp xác nhận -> reset oan một bản tốt.
+        // INACTIVITY_SLEEP_TIMEOUT_MS cũng là 60s, tức rơi đúng cửa sổ đó.
+        !s_otaPendingVerify &&
         (now - lastUserActivity >= activeSleepTimeoutMs) &&
         AlarmClock::instance().secondsToNext(time(nullptr)) > 2) {
       DLOG("[SLP] timeout -> sleeping");
@@ -447,12 +667,48 @@ void Task_UIController(void *pvParameters) {
 
 void Task_NetworkController(void *pvParameters) {
   for (;;) {
+    // Thực thi lệnh bật/tắt server OTA ở ĐÚNG task gọi handleClient() — xem s_otaServerCmd.
+    int8_t cmd = s_otaServerCmd;
+    if (cmd != 0) {
+      s_otaServerCmd = 0;
+      if (cmd > 0) {
+        appCtx.network.startWebServer(OTA_HOSTNAME);
+        // stopWebServer() delete + gán nullptr, nên mỗi lần vào là một WebServer mới:
+        // đăng ký route đúng một lần trên mỗi instance, không tích luỹ handler.
+        if (appCtx.network.getWebServer() != nullptr) {
+          appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
+        }
+      } else {
+        appCtx.network.stopWebServer();
+      }
+    }
     appCtx.network.update();
+    // CÙNG task với handleClient() ở trên, nên watchdog không bao giờ chạy song
+    // song với một Update.write() đang dở — không cần khoá gì thêm.
+    appCtx.otaHandler.tickWatchdog();
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
 void setup() {
+  // Dò trạng thái partition và dựng lưới an toàn ĐẦU TIÊN, trước mọi thứ có thể treo
+  // (kể cả vòng while(1) ngay dưới đây). Chỉ bản vừa nạp qua OTA mới ở PENDING_VERIFY.
+  {
+    esp_ota_img_states_t st;
+    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &st) == ESP_OK &&
+        st == ESP_OTA_IMG_PENDING_VERIFY) {
+      s_otaPendingVerify = true;
+      const esp_timer_create_args_t args = {
+          .callback = &otaGuardFire, .arg = nullptr, .dispatch_method = ESP_TIMER_TASK,
+          .name = "ota_guard", .skip_unhandled_events = false};
+      // +30s sau mốc xác nhận: đủ khoảng trống để Task_UIController (tick 10ms) xác
+      // nhận trước, mà vẫn đủ ngắn để bản treo không ngồi im quá lâu.
+      if (esp_timer_create(&args, &s_otaGuardTimer) == ESP_OK) {
+        esp_timer_start_once(s_otaGuardTimer, (uint64_t)(OTA_VERIFY_DELAY_MS + 30000) * 1000ULL);
+      }
+    }
+  }
+
   spiMutex = xSemaphoreCreateMutex();
   eventQueue = xQueueCreate(8, sizeof(SystemEvent));
 
@@ -474,6 +730,9 @@ void setup() {
   // reset=1 POWERON, 3 SW, 4 INT_WDT, 5 TASK_WDT, 6 WDT, 9 BROWNOUT, 12 PANIC.
   // Nếu dòng này lặp lại đều đặn trong log ⇒ box đang reset vòng lặp, không phải lỗi audio.
   DLOG("[BOOT] reset=%d", (int)esp_reset_reason());
+  if (s_otaPendingVerify) {
+    DLOG("[OTA] ban moi dang thu thach %lus", (unsigned long)(OTA_VERIFY_DELAY_MS / 1000));
+  }
 
   appCtx.network.init();
   appCtx.configManager.init(NVS_NAMESPACE);
@@ -540,8 +799,9 @@ void setup() {
   if (appCtx.network.isConnected()) {
     DLOG("[BOOT] WiFi OK -> NTP+Firebase");
     // Web server OTA KHÔNG còn bật ở đây (2026-09-18). Nó chạy suốt đời máy cho
-    // một việc hiếm khi làm, giữ RAM của WebServer + mDNS. Giờ chỉ mở khi cờ
-    // emergency_ota/normal_ota trên cloud bật — xem khối OTA ở Task_UIController.
+    // một việc hiếm khi làm, giữ RAM của WebServer + mDNS. Từ 2026-09-21 nó chỉ
+    // dựng khi người dùng làm chuỗi chạm 3s-3s-6s vào STATE_OTA (enterOtaMode trong
+    // Task_MediaPlayer); đường kích hoạt bằng cờ cloud đã gỡ hẳn.
 
     appCtx.network.setOnDownloadComplete([]() {
       forceStandbyRedraw = true;

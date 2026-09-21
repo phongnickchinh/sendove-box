@@ -2086,3 +2086,147 @@ spiMutex cả frame) → tick audio`. Giữa hai `tick()` DMA I2S không nhận 
    giả thuyết đói DMA sai**, nghi can chuyển sang thông lượng thẻ (`SD_SPI_FREQ_HZ`, hạ 20 → 10 MHz).
 3. Không hồi quy: video đúng tốc độ, ảnh tĩnh + caption đúng, tin chỉ text/voice (sentinel
    `dataSize == 4`) vẫn có tiếng trên nền đen, và tiếng bíp báo thức vẫn sạch.
+
+## 25. Chế độ OTA do người dùng kích hoạt + rollback thật (2026-09-21)
+
+### Đã gỡ: kích hoạt OTA bằng cờ cloud
+
+`emergency_ota` / `normal_ota` **không xuất hiện ở bất cứ đâu ngoài firmware** — không backend,
+không web, không `database.rules.json`. Chưa từng có gì bật hai cờ đó ngoài sửa tay trong Firebase
+console. Thêm nữa, kích hoạt từ xa buộc hộp thức 10 phút (`OTA_WINDOW_MS`) chờ một việc có thể
+không bao giờ tới. Đã xoá `_otaRequested`, `takeOtaRequest()`, `OTA_WINDOW_MS`, khối cửa sổ OTA ở
+`Task_UIController`; PATCH reset cờ giờ chỉ còn `{"a_flag":false}`.
+
+(Lưu ý cho ai đọc backend: backend có hệ `ota_flag` + `ota_tasks` + `firmware` RIÊNG, đi qua
+`/device/sync`. Firmware không gọi API backend mà đọc thẳng RTDB, nên hai hệ này **chưa từng nối
+với nhau**.)
+
+### `STATE_OTA` — chế độ riêng (user chốt 2026-09-21)
+
+- **Vào/ra: ~~giữ tay 15 giây~~ → chuỗi 3s-3s-6s** (xem mục "Lỗi ở máy thật" bên dưới — TTP223 không
+  cho giữ quá ~7s). `UIController` có ngưỡng thứ hai
+  `VERY_LONG_PRESS` — trước đây `_longPressEmitted` chặn mọi event sau mốc 3s cho tới khi nhả tay.
+  Thanh tiến trình (`getTouchHoldMs()`) chỉ chạy ở cú giữ 6s cuối của chuỗi.
+- **Chỉ vào được khi có Wi-Fi** — OTA qua LAN là đường duy nhất.
+- Trong chế độ: web server + mDNS bật, **không ngủ, không sync, không phát tin, KHÔNG kêu báo thức**.
+  Báo thức tắt hẳn và **không tự thoát** là đánh đổi user chốt; biện pháp giảm thiểu duy nhất là dòng
+  đỏ "BAO THUC DANG TAT" trên màn OTA.
+- **Đang nạp thì chặn mọi cú chạm** — mở rộng đúng cổng sẵn có của lúc đang tải tin
+  (`isDownloadingMedia() || otaHandler.isUpdating()`), kể cả chuỗi chạm để thoát.
+- **Chống kẹt cờ `_isUpdating`**: `OtaHandler::tickWatchdog()` huỷ phiên sau `OTA_STALL_TIMEOUT_MS`
+  (30s) không có chunk. Trước đây TCP đứt mà không sinh `UPLOAD_FILE_ABORTED` thì cờ kẹt `true` vĩnh
+  viễn → hộp không bao giờ ngủ, không bao giờ kêu báo thức. Watchdog gọi ở **`Task_NetworkController`,
+  cùng task với `handleClient()`**, nên không bao giờ chạy song song với `Update.write()`.
+
+### Rollback — ĐÃ ĐỌC SDKCONFIG THẬT, đừng đoán lại
+
+Hai lớp lỗi, hai cơ chế:
+
+1. **Lỗi giữa chừng lúc nạp** (rớt Wi-Fi, client ngắt, MD5 sai, mất điện): **không cần rollback**.
+   `Update.write()` ghi vào partition *không* chạy; `otadata` chỉ đổi khi `Update.end(true)` thành
+   công. Cần đúng `Update.abort()` + watchdog ở trên.
+2. **Bản mới nạp xong nhưng hỏng**: rollback của bootloader.
+   - Nền tảng **đã bật sẵn**: `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=1`, `CONFIG_APP_ROLLBACK_ENABLE=1`.
+     Nhưng `initArduino()` gọi weak `verifyOta()` (trả `true`) rồi `esp_ota_mark_app_valid_cancel_rollback()`
+     **ngay lúc boot** → lớp bảo vệ bị vô hiệu.
+   - Sửa: `extern "C" bool verifyRollbackLater() { return true; }` (**phải `extern "C"`**, bản weak gốc
+     ở `esp32-hal-misc.c`). Bản mới phải sống `OTA_VERIFY_DELAY_MS` (60s) thì `Task_UIController` mới
+     xác nhận. Reset trước mốc đó → bootloader thấy vẫn `PENDING_VERIFY` → tự quay về bản cũ.
+
+**Gotcha 1 — TREO không gây reset, nên không gây rollback.** `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0`
+**không bật** và `loopTaskWDTEnabled = false`: một vòng `while(1)` chỉ đứng im mãi mãi, không có WDT
+nào bắn. Rollback chỉ xảy ra khi chip RESET. Nên đã thêm **lưới an toàn `esp_timer`** dựng ở **dòng
+đầu tiên của `setup()`** (trước cả `while(1)` khi tạo mutex hỏng): hết `OTA_VERIFY_DELAY_MS + 30s` mà
+chưa xác nhận thì `esp_restart()`. `esp_timer` chạy ở task ưu tiên 22 nên vẫn bắn khi task ứng dụng
+đã chết. Xác nhận thành công thì huỷ timer.
+
+**Gotcha 2 — không được ngủ trong thời gian thử thách.** Vừa tỉnh từ Light Sleep, `esp_timer` quá hạn
+bắn NGAY (ưu tiên 22) — có thể trước khi `Task_UIController` (ưu tiên 5) kịp xác nhận → reset oan một
+bản tốt. Mà `INACTIVITY_SLEEP_TIMEOUT_MS` cũng là 60s, rơi đúng cửa sổ đó. Cổng ngủ có thêm
+`!s_otaPendingVerify`.
+
+**Gotcha 3 — nạp qua cáp KHÔNG bị thử thách.** `boot_app0.bin` (PlatformIO ghi mỗi lần upload) đặt
+`ota_state = 0xFFFFFFFF` = `ESP_OTA_IMG_UNDEFINED` (đã đọc byte thật), không phải `NEW`, nên bản nạp
+cáp không bao giờ ở `PENDING_VERIFY`. Bằng chứng khi test: nạp cáp thì **không** thấy dòng
+`[OTA] ban moi dang thu thach`.
+
+> **Đính chính plan đã duyệt (2026-09-21):** plan ghi "nạp cáp cũng đi qua PENDING_VERIFY, rút điện
+> trong 60s là quay về bản cũ" — **SAI** (gotcha 3). Plan cũng ghi bước test rollback bằng
+> `while(1);` đầu `setup()` — **SAI**, bản đó chỉ treo chứ không reset (gotcha 1); trước khi có lưới
+> an toàn thì nó treo mãi. Test đúng là dùng `abort();` (panic → reset ngay), hoặc `while(1);` và chờ
+> lưới an toàn bắn ở giây 90.
+
+### Hai lỗi bắt được khi rà lại, trước khi báo xong
+
+- **Use-after-free khi tắt server.** `stopWebServer()` làm `delete _webServer`; gọi từ
+  `Task_MediaPlayer` trong lúc `Task_NetworkController` đang ở giữa `_webServer->handleClient()` là
+  dùng vùng nhớ đã giải phóng. Code cửa sổ OTA cũ cũng có race này, nhưng tắt server giờ là thao tác
+  người dùng làm thường xuyên. Sửa: `enterOtaMode`/`exitOtaMode` chỉ đặt `s_otaServerCmd` (+1/-1),
+  `Task_NetworkController` thực thi — **mọi thao tác với WebServer nằm ở đúng task gọi
+  `handleClient()`**. `stopWebServer()` delete + gán `nullptr`, nên mỗi lần vào là một `WebServer`
+  mới và route đăng ký đúng một lần mỗi instance (đã đọc code, không tích luỹ handler).
+- ~~**Tắt báo thức bằng giữ tay → lỡ giữ tiếp → vào chế độ OTA với báo thức TẮT.**~~ **ĐÃ GỠ cùng
+  thao tác 15s** — với chuỗi 3s-3s-6s, cú giữ tắt báo thức bị nhánh ALARM nuốt nên không bao giờ là
+  bước 1, chốt chặn này thành thừa. Nội dung cũ để tham khảo: dismiss ở giây 3,
+  `VERY_LONG_PRESS` ở giây 15 của CÙNG lần giữ. Sửa: ghi `alarmDismissByTouchMs`, bỏ qua
+  `TOUCH_OTA_TOGGLE` tới trong vòng `TOUCH_OTA_HOLD_MS` sau mốc đó (cùng lần giữ luôn tới trong 12s;
+  lần giữ mới sau khi nhả tay luôn ≥ 15s), và không vẽ thanh tiến trình cho lần giữ đó.
+
+### Lỗi ở máy thật: giữ 15s bị ngắt giữa chừng → ĐỔI THAO TÁC (2026-09-21)
+
+Triệu chứng: giữ được khoảng một nửa thời gian thì thanh tiến trình biến mất.
+
+**Chẩn đoán lần 1 — SAI, giữ lại làm bài học:** tưởng là nhiễu ngắn vì `getTouchEvent()` không có
+chống nhiễu khi nhả tay (`_lastDebounceTime` được ghi nhưng không chỗ nào đọc — dead code có từ
+trước, để nguyên). Đã thêm ân hạn 250ms + log. Log trả về `nha tay sau 7700-7800ms` **ổn định mỗi
+lần** và dài hơn 250ms → không phải nhiễu. Ân hạn 250ms **đã gỡ** (không còn bằng chứng nào cho nó).
+
+**Nguyên nhân thật: TTP223 tự hiệu chuẩn sau 7-8 giây chạm liên tục, và từ đó báo là đã nhả dù
+ngón tay vẫn đặt nguyên** — chip hấp thụ ngón tay thành "nền" mới. Diễn đàn Arduino (thread
+"Using ttp223 touch sensor without auto calibration") có người dùng 30 con, người dùng hàng trăm
+con, đều xác nhận 7-8s ở mọi chế độ. Trần MOTB ~100s trong datasheet là cơ chế KHÁC, đừng nhầm.
+Hệ quả: **với TTP223, không có cú giữ liên tục nào dài quá ~7s dùng được.** Muốn giữ lâu tuỳ ý phải
+đổi chip (AT42QT1011).
+
+**Thao tác mới (user chốt):** giữ 3s → nhả → giữ 3s → nhả → (hiện "Giu them 6s de vao/THOAT OTA")
+→ giữ 6s. Cùng một chuỗi để vào và ra. Máy trạng thái `otaSeqStep` nằm trong `Task_MediaPlayer`:
+- Chỉ đếm `LONG` nhận lúc đang STANDBY/OTA → `LONG` thoát video (nhận lúc VIDEO) và `LONG` tắt báo
+  thức (nhánh ALARM nuốt trước) không bao giờ là bước 1. Nhờ vậy **chốt chặn "tắt báo thức rồi lỡ
+  tay" không còn cần — đã gỡ** `alarmDismissByTouchMs`.
+- Cú 6s phải là **lần giữ mới** bắt đầu sau mốc bước 2 (`now - TOUCH_OTA_HOLD_MS > otaSeqStep2Ms`),
+  không thì giữ tiếp cú thứ hai tới 6s sẽ rút chuỗi còn hai bước.
+- Hạn: `OTA_SEQ_STEP_WINDOW_MS` (6s) giữa hai `LONG` đầu; `OTA_SEQ_FINAL_WINDOW_MS` (12s) để bắt đầu
+  cú cuối. Đang giữ tay thì không huỷ.
+- Chạm ngắn khi đang hiện nhắc = huỷ (không phát tin). Chạm ngắn ở bước 1 = huỷ âm thầm, chạm vẫn
+  làm việc bình thường.
+- `TOUCH_OTA_HOLD_MS = 6000`: cách mốc tự hiệu chuẩn ~1,7s. **Đừng nâng lên gần 7s.**
+
+### Đẩy version lên cloud
+
+`updateFirebaseStatus()` thêm `"fw":"<FW_VERSION>"`. `payload` nâng 384 → **448**: chuỗi đã sát trần,
+tràn thì `snprintf` cắt cụt âm thầm và cả gói JSON hỏng. `database.rules.json` không cần sửa (nhánh
+`status` box ghi tự do). Màn so sánh version trên web để đợt sau — backend đã có
+`FirebaseFirmwareRepository.getLatest()`.
+
+### Công cụ nạp: `sendlove_firmware/ota_upload.py` (đã có từ trước)
+
+`python ota_upload.py --host <IP hiện trên màn OTA>`. Đã đổi: `DEFAULT_HOST` → `sendlovebox.local`
+(tên trần không qua mDNS), thông điệp retry nói "giữ 3s, 3s, rồi 6s", in cảnh báo chờ 60s sau khi nạp.
+Sau nạp hộp về **STANDBY**, web server tắt → `/api/status` không dùng xác nhận version được; xem màn
+OTA (vào lại) hoặc `boxes/<id>/status/fw` trên Firebase console.
+
+### Chưa kiểm chứng trên máy thật (syntax check toolchain thật OK, chưa link/flash)
+
+Quy trình: đổi `FW_VERSION` → `pio run` → trên hộp giữ 3s, 3s, rồi 6s → `python ota_upload.py --host <IP>` →
+chờ `[OTA] ban moi da xac nhan`.
+1. Chuỗi 3s-3s-6s vào/ra được; lời nhắc hiện sau cú giữ thứ hai; thanh chỉ chạy ở cú 6s.
+2. Tắt router rồi làm chuỗi → "OTA: can Wi-Fi", vẫn STANDBY.
+3. Nạp thật: trong lúc nạp chạm ngắn và chuỗi thoát đều **không** có tác dụng.
+4. Rollback: bản `9.9.9-broken` có `abort();` đầu `setup()` → quay về bản cũ, `status/fw` là version cũ.
+5. Treo: bản có `while(1);` đầu `setup()` → sau ~90s lưới an toàn reset → quay về bản cũ.
+6. Rút mạng PC giữa lúc nạp → ≤ 30s thấy `[OTA] huy:` và thoát được chế độ.
+6b. Giữ cú thứ hai tới quá 6s → KHÔNG vào OTA (phải là lần giữ mới).
+7. Đặt báo thức rồi vào chế độ OTA → **không** kêu (đúng thiết kế).
+8. Nạp **cáp** → **không** thấy `[OTA] ban moi dang thu thach`.
+9. Để báo thức kêu, giữ tay tắt rồi giữ tiếp → về STANDBY, **không** vào OTA.
+10. Vào/ra chế độ OTA liên tiếp 5 lần, mỗi lần gọi `/api/status` → luôn trả 200, không treo/reset.

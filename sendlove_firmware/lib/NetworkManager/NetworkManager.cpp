@@ -1065,10 +1065,13 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     http.setTimeout(FIREBASE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
-    char payload[384];
+    // 448 chứ không phải 384: thêm trường "fw" (2026-09-21) đã đẩy chuỗi sát trần,
+    // mà tràn thì snprintf cắt cụt ÂM THẦM -> cả gói JSON hỏng, PATCH bị từ chối.
+    char payload[448];
     uint32_t now = (uint32_t)time(nullptr);
     snprintf(payload, sizeof(payload),
              "{\"online\":true,\"battery\":%d,\"is_charging\":%s,\"last_seen\":%u,"
+             "\"fw\":\"%s\","
              "\"diag\":{"
              "\"wake\":\"%s\","
              "\"step\":\"%s\","
@@ -1083,6 +1086,7 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
              "\"prev_err\":\"%s\""
              "}}",
              batteryPercent, isCharging ? "true" : "false", now,
+             FW_VERSION,
              _currentWakeCause,
              _diagStep,
              _diagErr,
@@ -1147,9 +1151,12 @@ bool NetworkManager::checkFirebaseFlags() {
     // Cờ báo thức tên là `a_flag` — đúng tên backend ghi (firebase-alarm.repository.ts).
     // Trước 2026-09-18 firmware đọc `sync_alarms_flag`, một cờ không ai ghi, nên
     // báo thức đặt trên web không bao giờ về tới hộp (nợ đã ghi ở MEMORY.md §20).
+    // Hai cờ OTA `emergency_ota`/`normal_ota` đã GỠ ngày 2026-09-21: không bên nào
+    // ghi chúng (không backend, không web, không rules — chỉ sửa tay được trong
+    // Firebase console), và kích hoạt OTA từ xa buộc hộp thức 10 phút chờ một việc
+    // có thể không bao giờ tới. OTA giờ là chế độ riêng do người dùng vào bằng
+    // chuỗi chạm giữ 3s, 3s rồi 6s (STATE_OTA trong main.cpp).
     bool alarmFlag = false;
-    bool emergencyOta = false;
-    bool normalOta = false;
     if (payload != "null" && payload.length() > 2) {
         JsonDocument doc;
         if (deserializeJson(doc, payload)) {
@@ -1158,25 +1165,14 @@ bool NetworkManager::checkFirebaseFlags() {
             return false;
         }
         alarmFlag = doc["a_flag"] | false;
-        emergencyOta = doc["emergency_ota"] | false;
-        normalOta = doc["normal_ota"] | false;
     }
     _lastAFlag = alarmFlag;
-
-    // Hai cờ OTA trước 2026-09-18 chỉ được đọc rồi reset, không kích hoạt gì —
-    // nhìn code tưởng hộp cập nhật được từ xa. Giờ chúng mở cửa sổ OTA thật:
-    // main.cpp bật web server + mDNS trong OTA_WINDOW_MS rồi tắt. Web server
-    // không còn chạy suốt đời máy chỉ để chờ một việc hiếm khi làm.
-    if (emergencyOta || normalOta) {
-        _otaRequested = true;
-        DLOG("[NET] flags: OTA requested");
-    }
 
     // Reset cờ TRƯỚC khi tải danh sách báo thức: web sửa tiếp trong lúc đang tải
     // sẽ bật lại a_flag và được bắt ở chu kỳ sau. Reset sau khi tải thì lần sửa đó
     // bị xoá mất cờ. Chỉ PATCH khi có cờ bật — trước đây PATCH mỗi chu kỳ 10s,
     // tốn một lần bắt tay TLS vô ích.
-    if (alarmFlag || emergencyOta || normalOta) {
+    if (alarmFlag) {
         WiFiClientSecure patchClient;
         configureTlsClient(patchClient);
         HTTPClient patchHttp;
@@ -1189,7 +1185,7 @@ bool NetworkManager::checkFirebaseFlags() {
         if (patchHttp.begin(patchClient, _url)) {
             patchHttp.setTimeout(FIREBASE_TIMEOUT_MS);
             patchHttp.addHeader("Content-Type", "application/json");
-            int pc = patchHttp.PATCH("{\"a_flag\":false,\"emergency_ota\":false,\"normal_ota\":false}");
+            int pc = patchHttp.PATCH("{\"a_flag\":false}");
             noteAuthFailure(pc, "flags reset");
             patchHttp.end();
         }

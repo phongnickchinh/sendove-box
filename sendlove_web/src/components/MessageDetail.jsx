@@ -99,21 +99,23 @@ function Media({ msg, media }) {
 
   if (msg.type === 'voice') {
     return media.voice
-      ? <AudioRow label="Lời nhắn thoại" src={media.voice} duration={msg.duration} big />
+      ? <AudioRow src={media.voice} big />
       : <Fallback media={media} what="đoạn ghi âm" />;
   }
 
   return null;
 }
 
-function AudioRow({ label, src, duration, big = false }) {
+/** label bỏ trống khi tiêu đề popup đã nói rõ đây là gì (tin thoại). */
+function AudioRow({ label, src, big = false }) {
   return (
     <div className={`sl-msgdetail__audio${big ? ' sl-msgdetail__audio--big' : ''}`}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-        <Icon name="mic" size={16} style={{ color: 'var(--rose-700)' }} />
-        <span className="sl-label-s" style={{ flex: 1 }}>{label}</span>
-        {duration ? <span className="sl-caption">{Math.round(duration)}s</span> : null}
-      </span>
+      {label && (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <Icon name="mic" size={16} style={{ color: 'var(--rose-700)' }} />
+          <span className="sl-label-s">{label}</span>
+        </span>
+      )}
       <audio src={src} controls preload="metadata" />
     </div>
   );

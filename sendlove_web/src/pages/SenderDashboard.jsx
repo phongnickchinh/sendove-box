@@ -8,6 +8,7 @@ import MessageDetail from '../components/MessageDetail';
 import UnpairConfirm from '../components/UnpairConfirm';
 import { Screen, AppBar, Body, Actions, Header, Button, Tips, CircleIcon } from '../components/ui/Screen';
 import { clock, dayLabel, iconOf, kindOf, timeAgo, titleOf } from '../utils/messageFormat';
+import { lastSeenMs } from '../utils/boxStatus';
 
 /**
  * Màn 06 "content-history-below-part" — lịch sử tin đã gửi của một hộp.
@@ -51,7 +52,7 @@ export default function SenderDashboard() {
   useEffect(() => {
     let alive = true;
     getBoxDetails(boxId)
-      .then((res) => { if (alive && res.success) setLastSeen(res.data?.status?.last_seen); })
+      .then((res) => { if (alive && res.success) setLastSeen(lastSeenMs(res.data?.status)); })
       .catch(() => {});
     return () => { alive = false; };
   }, [boxId]);

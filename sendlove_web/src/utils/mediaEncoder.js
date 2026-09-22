@@ -100,16 +100,31 @@ export const encodeImageToBin = async (imageBlob) => {
   };
 };
 
-export const encodeVideoToBin = async (videoBlob, onProgress) => {
+/**
+ * Trần an toàn của mọi đoạn cắt — đúng trần duration backend chấp nhận
+ * (validation.middleware.ts confirmMessageSchema max 60). Trần theo loại hộp
+ * (15s NAND / 60s SD) do màn chọn đoạn áp, không đặt ở đây.
+ */
+const HARD_MAX_SECONDS = 60;
+
+/** Đoạn [start, end) hợp lệ trong một media dài `total` giây. */
+function segmentOf(total, { start = 0, end } = {}) {
+  const s = Math.max(0, Math.min(start, total));
+  const e = Math.min(end ?? total, total, s + HARD_MAX_SECONDS);
+  return { start: s, duration: Math.max(0, e - s) };
+}
+
+export const encodeVideoToBin = async (videoBlob, onProgress, range) => {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.src = URL.createObjectURL(videoBlob);
     video.muted = true;
     video.setAttribute('playsinline', ''); // Hỗ trợ mobile
-    
+
     video.onloadeddata = async () => {
       const fps = 15; // Target FPS
-      const duration = Math.min(video.duration, 15); // Max 15 seconds
+      // Chỉ mã hoá đoạn người dùng đã chọn ở VideoInput (không còn cắt cứng 15s đầu).
+      const { start, duration } = segmentOf(video.duration, range);
       const totalFrames = Math.floor(duration * fps);
       
       const canvas = document.createElement('canvas');
@@ -135,7 +150,7 @@ export const encodeVideoToBin = async (videoBlob, onProgress) => {
           return;
         }
         
-        video.currentTime = currentFrame / fps;
+        video.currentTime = start + currentFrame / fps;
       };
       
       video.onseeked = async () => {
@@ -218,24 +233,53 @@ function audioBufferToWavBlob(buffer) {
 // Loa MAX98357A trên box phát mono 16-bit. 8kHz đủ cho giọng nói và giữ file
 // nhỏ để vừa slot NAND (một slot chứa cả video lẫn audio).
 const AUDIO_SAMPLE_RATE = 8000;
-const AUDIO_MAX_SECONDS = 15; // Khớp với trần 15s của video ở encodeVideoToBin
 
-export const extractAudioFromVideo = async (videoBlob, onProgress) => {
+/**
+ * Trần PCM firmware hiện tại nạp được cho MỘT file âm thanh
+ * (AUDIO_MAX_PCM_BYTES = 600000, config.h) — 16 kHz chỉ chứa được ~18,7s.
+ * Lời nhắn thoại dài hơn thì hạ xuống 8 kHz (~37,5s) để hộp đang chạy vẫn
+ * phát trọn. Quá 37,5s thì chỉ còn cách nâng trần phía firmware.
+ */
+export const FW_AUDIO_PCM_BYTES = 600000;
+
+export function voiceSampleRate(durationSec) {
+  return durationSec * 16000 * 2 <= FW_AUDIO_PCM_BYTES ? 16000 : 8000;
+}
+
+/** Giải mã mọi thứ trình duyệt phát được (webm/ogg/mp3/m4a/wav/mp4) ra AudioBuffer. */
+export async function decodeAudioBlob(blob) {
+  const arrayBuffer = await blob.arrayBuffer();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    return await ctx.decodeAudioData(arrayBuffer);
+  } finally {
+    ctx.close();
+  }
+}
+
+/**
+ * Cắt [start, end) của một AudioBuffer, downmix mono, resample, qua bộ nén
+ * đỉnh (xem renderSegment) → WAV PCM16. Dùng cho lời nhắn thoại (thu trực tiếp
+ * hoặc file tải lên) và nhạc nền của tin tĩnh.
+ */
+export async function encodeAudioSegment(buffer, range, sampleRate) {
+  const { start, duration } = segmentOf(buffer.duration, range);
+  const rate = sampleRate || voiceSampleRate(duration);
+  const rendered = await renderSegment(buffer, start, duration, rate);
+  return { wavBlob: audioBufferToWavBlob(rendered), duration: Math.round(duration), sampleRate: rate };
+}
+
+export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
   // Giải mã offline thay vì play() realtime: không phụ thuộc autoplay policy,
   // không mất mẫu khi tab bị throttle, và chạy nhanh hơn thời lượng thật.
-  const arrayBuffer = await videoBlob.arrayBuffer();
-
-  const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
   let decoded;
   try {
-    decoded = await decodeCtx.decodeAudioData(arrayBuffer);
+    decoded = await decodeAudioBlob(videoBlob);
   } catch (err) {
     // Trình duyệt không giải mã được audio track của container này.
     // Video vẫn gửi được, chỉ là không có tiếng.
     console.error('Không giải mã được audio track của video', err);
     return null;
-  } finally {
-    decodeCtx.close();
   }
 
   if (onProgress) onProgress(40);
@@ -245,12 +289,23 @@ export const extractAudioFromVideo = async (videoBlob, onProgress) => {
     return null;
   }
 
-  // Resample về 8kHz mono. OfflineAudioContext lo cả downmix (destination 1 kênh)
-  // lẫn nội suy tần số, chính xác hơn tự viết tay.
-  const duration = Math.min(decoded.duration, AUDIO_MAX_SECONDS);
-  const frames = Math.ceil(duration * AUDIO_SAMPLE_RATE);
+  // Cùng đoạn với phần hình (encodeVideoToBin) để tiếng khớp khung.
+  const { start, duration } = segmentOf(decoded.duration, range);
+  const rendered = await renderSegment(decoded, start, duration, AUDIO_SAMPLE_RATE);
+
+  if (onProgress) onProgress(100);
+
+  return audioBufferToWavBlob(rendered);
+};
+
+/**
+ * Resample về `rate` mono. OfflineAudioContext lo cả downmix (destination 1
+ * kênh) lẫn nội suy tần số, chính xác hơn tự viết tay.
+ */
+async function renderSegment(decoded, start, duration, rate) {
+  const frames = Math.max(1, Math.ceil(duration * rate));
   const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const offlineCtx = new OfflineCtx(1, frames, AUDIO_SAMPLE_RATE);
+  const offlineCtx = new OfflineCtx(1, frames, rate);
 
   const source = offlineCtx.createBufferSource();
   source.buffer = decoded;
@@ -268,15 +323,12 @@ export const extractAudioFromVideo = async (videoBlob, onProgress) => {
 
   source.connect(compressor);
   compressor.connect(offlineCtx.destination);
-  source.start(0);
+  source.start(0, start, duration);
 
   const rendered = await offlineCtx.startRendering();
   logAndCapPeak(rendered);
-
-  if (onProgress) onProgress(100);
-
-  return audioBufferToWavBlob(rendered);
-};
+  return rendered;
+}
 
 // Trần biên độ gửi xuống box. Chỉ hạ xuống, KHÔNG bao giờ nâng lên: nâng đỉnh
 // là nâng đúng dòng đỉnh đang gây sụt áp.

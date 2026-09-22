@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import VideoInput from '../components/sender/VideoInput';
 import ImageInput from '../components/sender/ImageInput';
@@ -6,16 +6,23 @@ import VoiceInput from '../components/sender/VoiceInput';
 import EncodingProgress from '../components/sender/EncodingProgress';
 import Icon from '../components/ui/Icon';
 import { Screen, AppBar, Body, Actions, Button, Header, Tips } from '../components/ui/Screen';
+import { getBoxDetails } from '../api/box';
+import { useAuth } from '../context/AuthContext';
 import { encodeVideoToBin, encodeImageToBin, extractAudioFromVideo } from '../utils/mediaEncoder';
 import { uploadMessage } from '../utils/mediaUploader';
+import { MAX_BIN_BYTES, MAX_SECONDS, maxSecondsFor } from '../utils/boxStatus';
 
+/** Thẻ loại nội dung; hint là hàm vì trần thời lượng phụ thuộc loại hộp. */
 const TYPES = [
-  { key: 'video', icon: 'video', label: 'Video', hint: 'Tối đa 15 giây' },
-  { key: 'image', icon: 'image', label: 'Ảnh', hint: 'Khung vuông' },
-  { key: 'voice', icon: 'mic', label: 'Ghi âm', hint: 'Tối đa 15 giây' },
-  { key: 'text', icon: 'text', label: 'Văn bản', hint: 'Gửi được ngay' },
-  { key: 'static', icon: 'image', label: 'Tin nhắn tĩnh', hint: 'Ảnh, chữ, nhạc nền' },
+  { key: 'video', icon: 'video', label: 'Video', hint: (max) => `Tối đa ${max} giây` },
+  { key: 'image', icon: 'image', label: 'Ảnh', hint: () => 'Khung vuông' },
+  { key: 'voice', icon: 'mic', label: 'Ghi âm', hint: (max) => `Thu hoặc chọn file · ${max} giây` },
+  { key: 'text', icon: 'text', label: 'Văn bản', hint: () => 'Gửi được ngay' },
+  { key: 'static', icon: 'layers', label: 'Tin nhắn tĩnh', hint: () => 'Ảnh, chữ, nhạc nền' },
 ];
+
+/** Lỗi đọc được cho người dùng; lỗi lạ thì rơi về câu mặc định của EncodingProgress. */
+class SendError extends Error {}
 
 const STEP2_TITLE = {
   video: 'Gửi một đoạn video',
@@ -49,8 +56,21 @@ export default function SenderUI() {
   // Mỗi lần gửi có một số thứ tự; promise của lần cũ không được ghi đè
   // trạng thái của lần mới (xảy ra khi người dùng bấm "Để sau" rồi gửi tiếp).
   const sendIdRef = useRef(0);
+  const [errorText, setErrorText] = useState(null);
 
-  const boxName = `Hộp ${boxId}`;
+  const { profile } = useAuth();
+  const boxName = profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`;
+
+  // Trần thời lượng theo loại bộ nhớ của hộp. Chưa đọc được hộp thì tạm dùng
+  // mức NAND (thấp hơn) — an toàn cho mọi hộp; đọc xong mới nới lên.
+  const [maxSeconds, setMaxSeconds] = useState(MAX_SECONDS.nand);
+  useEffect(() => {
+    let alive = true;
+    getBoxDetails(boxId)
+      .then((res) => { if (alive && res.success) setMaxSeconds(maxSecondsFor(res.data)); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [boxId]);
 
   const handleTypeSelect = (selectedType) => {
     setType(selectedType);
@@ -65,15 +85,16 @@ export default function SenderUI() {
     setStaticAudioData(null);
   };
 
-  const processAndUpload = async (mediaData) => {
+  const processAndUpload = async (mediaData, range) => {
     const sendId = ++sendIdRef.current;
     const alive = () => sendIdRef.current === sendId;
     const setProgressIfAlive = (v) => { if (alive()) setProgress(v); };
 
-    setLastMedia(mediaData);
+    setLastMedia({ mediaData, range });
     setStep(3);
     setPhase('encoding');
     setProgress(0);
+    setErrorText(null);
 
     try {
       let payload = { type, text };
@@ -81,10 +102,16 @@ export default function SenderUI() {
       if (type === 'video') {
         const file = mediaData;
         setSummary({ fileName: file.name, duration: 0 });
-        const encodeRes = await encodeVideoToBin(file, setProgressIfAlive);
+        const encodeRes = await encodeVideoToBin(file, setProgressIfAlive, range);
+        if (encodeRes.binBlob.size > MAX_BIN_BYTES) {
+          throw new SendError(
+            `Đoạn video sau khi nén nặng ${(encodeRes.binBlob.size / 1048576).toFixed(1)} MB, quá mức `
+            + `${MAX_BIN_BYTES / 1048576} MB máy chủ nhận. Chọn một đoạn ngắn hơn rồi gửi lại.`,
+          );
+        }
         setSummary({ fileName: file.name, duration: encodeRes.duration });
         setProgress(0); // Reset progress cho bước trích xuất âm thanh
-        const voiceBlob = await extractAudioFromVideo(file, setProgressIfAlive);
+        const voiceBlob = await extractAudioFromVideo(file, setProgressIfAlive, range);
 
         payload = {
           ...payload,
@@ -145,7 +172,9 @@ export default function SenderUI() {
 
         payload = {
           ...payload,
-          type: 'image',
+          // Chỉ có chữ thì gửi đúng là tin chữ — type 'image' không kèm ảnh nào
+          // làm lịch sử và hộp tưởng có ảnh.
+          type: imageBlob || audioData?.wavBlob ? 'image' : 'text',
           ...extra,
         };
       }
@@ -158,7 +187,10 @@ export default function SenderUI() {
       if (alive()) setPhase('done');
     } catch (err) {
       console.error(err);
-      if (alive()) setPhase('error');
+      if (!alive()) return;
+      // Lỗi từ backend (vd. vượt rate limit 100 tin/ngày) có message riêng.
+      setErrorText(err instanceof SendError ? err.message : err.response?.data?.error?.message || null);
+      setPhase('error');
     }
   };
 
@@ -173,9 +205,10 @@ export default function SenderUI() {
         fileName={summary.fileName}
         boxName={boxName}
         onHome={() => navigate('/dashboard')}
-        onRetry={() => processAndUpload(lastMedia)}
+        onRetry={() => processAndUpload(lastMedia?.mediaData, lastMedia?.range)}
         onSendAnother={handleCancel}
         onLeave={handleCancel}
+        errorText={errorText}
       />
     );
   }
@@ -200,7 +233,7 @@ export default function SenderUI() {
                   <Icon name={t.icon} size={24} />
                 </span>
                 <span className="sl-label-s">{t.label}</span>
-                <span className="sl-caption">{t.hint}</span>
+                <span className="sl-caption">{t.hint(maxSeconds)}</span>
               </button>
             ))}
           </div>
@@ -239,9 +272,9 @@ export default function SenderUI() {
           </div>
         )}
 
-        {type === 'video' && <VideoInput onVideoSelect={processAndUpload} onCancel={handleCancel} />}
+        {type === 'video' && <VideoInput onVideoSelect={processAndUpload} onCancel={handleCancel} maxSeconds={maxSeconds} />}
         {type === 'image' && <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} />}
-        {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} />}
+        {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} maxSeconds={maxSeconds} />}
 
         {type === 'text' && (
           <>
@@ -292,13 +325,13 @@ export default function SenderUI() {
 
             {/* Nhạc nền (tuỳ chọn) */}
             {!staticAudioData ? (
-              <VoiceInput onRecordComplete={setStaticAudioData} onCancel={handleCancel} />
+              <VoiceInput onRecordComplete={setStaticAudioData} onCancel={handleCancel} maxSeconds={maxSeconds} purpose="music" />
             ) : (
               <div className="sl-card sl-card--center">
                 <span className="sl-chip"><Icon name="mic" size={24} /></span>
-                <span className="sl-caption">Đã ghi nhạc nền {staticAudioData.duration}s</span>
+                <span className="sl-caption">Đã chọn nhạc nền {staticAudioData.duration}s</span>
                 <Actions>
-                  <Button kind="gho" onClick={() => setStaticAudioData(null)}>Ghi lại</Button>
+                  <Button kind="gho" onClick={() => setStaticAudioData(null)}>Đổi nhạc nền</Button>
                 </Actions>
               </div>
             )}

@@ -7,6 +7,7 @@ import Icon from '../components/ui/Icon';
 import MessageDetail from '../components/MessageDetail';
 import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Screen';
 import { iconOf, timeAgo, titleOf } from '../utils/messageFormat';
+import { fwVersion, lastSeenMs } from '../utils/boxStatus';
 
 /**
  * Màn 09 "box status + history-part" trong file Figma.
@@ -79,7 +80,8 @@ export default function ReceiverUI() {
   }, [boxId]);
 
   const status = box?.status;
-  const tone = TONE[syncTone(status?.last_seen)];
+  const seenAt = lastSeenMs(status);
+  const tone = TONE[syncTone(seenAt)];
 
   return (
     <Screen>
@@ -93,8 +95,8 @@ export default function ReceiverUI() {
             <CircleIcon size={44} bg={tone.bg} color={tone.fg} icon={tone.icon} iconSize={20} />
             <div className="sl-listcard__mid">
               <span className="sl-label-s" style={{ fontSize: 15 }}>
-                {status?.last_seen
-                  ? `Đồng bộ ${timeAgo(status.last_seen)}`
+                {seenAt
+                  ? `Đồng bộ ${timeAgo(seenAt)}`
                   : loading ? 'Đang đọc trạng thái…' : 'Chưa rõ lần đồng bộ gần nhất'}
               </span>
               <span className="sl-caption">Hộp thức dậy mỗi 5 phút để tìm tin mới.</span>
@@ -113,7 +115,7 @@ export default function ReceiverUI() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--neutral-500)' }}>
                   <Icon name="gear" size={16} />
                   <span className="sl-caption" style={{ fontWeight: 500, color: 'var(--caramel-800)' }}>
-                    Firmware {status.fw_version}
+                    Firmware {fwVersion(status) || '—'}
                   </span>
                 </span>
               </div>

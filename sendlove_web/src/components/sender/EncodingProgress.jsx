@@ -52,6 +52,7 @@ const EncodingProgress = ({
   onRetry,
   onSendAnother,
   onLeave,
+  errorText,
 }) => {
   // ---- 04 / 05: màn kết quả, không có appbar theo thiết kế ----
   if (phase === 'done' || phase === 'error') {
@@ -73,12 +74,12 @@ const EncodingProgress = ({
           <p className="sl-body">
             {ok
               ? `${boxName} sẽ hiện nội dung này trong lần thức dậy kế tiếp — thường trong vòng 5 phút.`
-              : 'Việc tải lên dừng giữa chừng. Chưa có gì tới hộp, nội dung của bạn vẫn còn ở đây.'}
+              : 'Việc gửi dừng giữa chừng. Chưa có gì tới hộp, nội dung của bạn vẫn còn ở đây.'}
           </p>
 
           {!ok && (
             <div className="sl-reason">
-              Mất kết nối khi đang tải lên. Kiểm tra mạng rồi thử lại.
+              {errorText || 'Mất kết nối khi đang tải lên. Kiểm tra mạng rồi thử lại.'}
             </div>
           )}
 

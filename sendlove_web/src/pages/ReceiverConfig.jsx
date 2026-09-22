@@ -4,6 +4,7 @@ import { getBoxDetails, updateBoxConfig, updateWifi } from '../api/box';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
 import UnpairConfirm from '../components/UnpairConfirm';
+import { fwVersion } from '../utils/boxStatus';
 import { Screen, AppBar, Body, Header, Button, CircleIcon } from '../components/ui/Screen';
 
 /**
@@ -217,7 +218,7 @@ export default function ReceiverConfig() {
             <div className="sl-listcard">
               <CircleIcon size={40} bg="var(--caramel-50)" color="var(--caramel-700)" icon="gear" iconSize={20} />
               <div className="sl-listcard__mid">
-                <span className="sl-label-s">Firmware {box?.status?.fw_version || '—'}</span>
+                <span className="sl-label-s">Firmware {fwVersion(box?.status) || '—'}</span>
                 <span className="sl-caption">
                   {box?.flags?.ota_flag ? 'Có bản mới đang chờ — hộp tự cài lấy.' : 'Đang là bản mới nhất.'}
                 </span>

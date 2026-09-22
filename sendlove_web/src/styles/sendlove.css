@@ -691,3 +691,39 @@
   cursor: pointer;
 }
 .sl-filter[aria-pressed="true"] { background: var(--rose-200); border-color: var(--rose-300); color: var(--rose-800); font-weight: 600; }
+
+/* ---------- chọn đoạn video/âm thanh: hai range chồng nhau ----------
+   Thumb 20px nên vạch ray thụt vào 10px mỗi bên — tâm thumb chạy đúng từ đầu
+   tới cuối ray, vùng chọn tô bằng % khớp với vị trí thumb. */
+.sl-trimwrap { display: flex; flex-direction: column; gap: var(--sp-1); width: 100%; }
+.sl-trim { position: relative; height: 32px; }
+.sl-trim__track {
+  position: absolute; left: 10px; right: 10px; top: 12px; height: 8px;
+  border-radius: var(--r-full); background: var(--neutral-100);
+}
+.sl-trim__sel { position: absolute; top: 0; bottom: 0; border-radius: var(--r-full); background: var(--rose-300); }
+.sl-trim__input {
+  position: absolute; inset: 0; width: 100%; height: 32px; margin: 0;
+  appearance: none; -webkit-appearance: none; background: transparent;
+  pointer-events: none;
+}
+.sl-trim__input::-webkit-slider-runnable-track { background: transparent; height: 32px; }
+.sl-trim__input::-moz-range-track { background: transparent; }
+.sl-trim__input::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none; pointer-events: auto; cursor: grab;
+  width: 20px; height: 20px; margin-top: 6px;
+  border-radius: var(--r-full); background: var(--rose-400); border: 2px solid var(--neutral-0);
+  box-shadow: 0 0 0 1px var(--rose-400);
+}
+.sl-trim__input::-moz-range-thumb {
+  pointer-events: auto; cursor: grab;
+  width: 16px; height: 16px;
+  border-radius: var(--r-full); background: var(--rose-400); border: 2px solid var(--neutral-0);
+  box-shadow: 0 0 0 1px var(--rose-400);
+}
+.sl-trim__input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--rose-200); }
+.sl-trim__input:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--rose-200); }
+.sl-trim__meta { display: flex; justify-content: space-between; align-items: center; font-variant-numeric: tabular-nums; }
+
+/* nút chọn nguồn âm thanh: thu trực tiếp / chọn file */
+.sl-srcpick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); width: 100%; }

@@ -35,12 +35,26 @@ describe('sanitizeWidgets', () => {
   });
 });
 
-describe('ThemeService.saveTheme', () => {
-  const make = () => {
-    const boxRepo: any = { getById: jest.fn(), update: jest.fn(), updateFlags: jest.fn() };
-    const storageRepo: any = { fileExists: jest.fn(), getFileMetadata: jest.fn(), generateUploadPolicy: jest.fn() };
-    return { boxRepo, storageRepo, svc: new ThemeService(boxRepo, storageRepo) };
+const make = () => {
+  const boxRepo: any = { getById: jest.fn(), update: jest.fn(), updateFlags: jest.fn() };
+  const storageRepo: any = {
+    fileExists: jest.fn(), getFileMetadata: jest.fn(), generateUploadPolicy: jest.fn(),
+    generateDownloadUrl: jest.fn(async (p: string) => `https://signed/${p}`),
   };
+  return { boxRepo, storageRepo, svc: new ThemeService(boxRepo, storageRepo) };
+};
+
+describe('ThemeService.getTheme', () => {
+  it('null khi chưa lưu, kèm URL ký khi có nền', async () => {
+    const { boxRepo, svc } = make();
+    boxRepo.getById.mockResolvedValueOnce({ config: {} });
+    expect(await svc.getTheme('b')).toBeNull();
+    boxRepo.getById.mockResolvedValueOnce({ config: { theme: { theme_name: 'A', widgets: [], background: 'media/b/theme/bg_1.bin' } } });
+    expect((await svc.getTheme('b'))?.background_url).toBe('https://signed/media/b/theme/bg_1.bin');
+  });
+});
+
+describe('ThemeService.saveTheme', () => {
 
   it('ghi config/theme và bật theme_flag', async () => {
     const { boxRepo, svc } = make();

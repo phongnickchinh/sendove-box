@@ -91,10 +91,21 @@ export class ThemeService {
 
   private bgPrefix = (boxId: string) => `media/${boxId}/theme/`;
 
-  async getTheme(boxId: string): Promise<BoxTheme | null> {
+  /** Theme đã lưu (null = chưa lưu lần nào), kèm URL ký 15 phút để web xem trước ảnh nền. */
+  async getTheme(boxId: string): Promise<(BoxTheme & { background_url: string | null }) | null> {
     const box = await this.boxRepo.getById(boxId);
     if (!box) throw new AppError(404, 'box_not_found', 'Box not found');
-    return ((box.config as any)?.theme as BoxTheme) || null;
+    const theme = box.config?.theme;
+    if (!theme) return null;
+    let background_url: string | null = null;
+    if (theme.background) {
+      try {
+        background_url = await this.storageRepo.generateDownloadUrl(theme.background, 15);
+      } catch (error) {
+        console.error(`[ThemeService] Failed to sign ${theme.background}`, error);
+      }
+    }
+    return { ...theme, background_url };
   }
 
   /** Cấp signed POST policy để web tải ảnh nền lên thẳng Storage. */

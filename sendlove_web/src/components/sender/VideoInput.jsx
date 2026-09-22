@@ -104,7 +104,11 @@ const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
         )}
       </div>
 
-      <Tips>Khung vuông 240x240, 15 hình/giây, kèm âm thanh 8 kHz mono — chỉ đoạn đã chọn được gửi.</Tips>
+      {/* FW_AUDIO_PCM_BYTES (utils/boxStatus): quá 37s ở 8 kHz hộp bỏ tiếng. */}
+      <Tips>
+        Khung vuông 240x240, 15 hình/giây, kèm âm thanh 8 kHz mono — chỉ đoạn đã chọn được gửi.
+        {maxSeconds > 37 && ' Hộp hiện chỉ phát tiếng của đoạn dài tới 37 giây.'}
+      </Tips>
 
       <Actions>
         {previewUrl ? (

@@ -10,7 +10,7 @@ import { getBoxDetails } from '../api/box';
 import { useAuth } from '../context/AuthContext';
 import { encodeVideoToBin, encodeImageToBin, extractAudioFromVideo } from '../utils/mediaEncoder';
 import { uploadMessage } from '../utils/mediaUploader';
-import { MAX_BIN_BYTES, MAX_SECONDS, maxSecondsFor } from '../utils/boxStatus';
+import { FW_MAX_MEDIA_BYTES, MAX_SECONDS, maxAudioSecondsFor, maxBinBytesFor, maxSecondsFor } from '../utils/boxStatus';
 
 /** Thẻ loại nội dung; hint là hàm vì trần thời lượng phụ thuộc loại hộp. */
 const TYPES = [
@@ -64,10 +64,20 @@ export default function SenderUI() {
   // Trần thời lượng theo loại bộ nhớ của hộp. Chưa đọc được hộp thì tạm dùng
   // mức NAND (thấp hơn) — an toàn cho mọi hộp; đọc xong mới nới lên.
   const [maxSeconds, setMaxSeconds] = useState(MAX_SECONDS.nand);
+  const [maxBinBytes, setMaxBinBytes] = useState(FW_MAX_MEDIA_BYTES);
+  // Tin thoại / nhạc nền: âm thanh là toàn bộ nội dung, vượt trần PCM hộp phát
+  // câm — nên trần của chúng là min(trần loại hộp, trần âm thanh firmware).
+  const [maxAudioSeconds, setMaxAudioSeconds] = useState(maxAudioSecondsFor(null));
+  const voiceMax = Math.min(maxSeconds, maxAudioSeconds);
   useEffect(() => {
     let alive = true;
     getBoxDetails(boxId)
-      .then((res) => { if (alive && res.success) setMaxSeconds(maxSecondsFor(res.data)); })
+      .then((res) => {
+        if (!alive || !res.success) return;
+        setMaxSeconds(maxSecondsFor(res.data));
+        setMaxBinBytes(maxBinBytesFor(res.data));
+        setMaxAudioSeconds(maxAudioSecondsFor(res.data));
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, [boxId]);
@@ -103,10 +113,14 @@ export default function SenderUI() {
         const file = mediaData;
         setSummary({ fileName: file.name, duration: 0 });
         const encodeRes = await encodeVideoToBin(file, setProgressIfAlive, range);
-        if (encodeRes.binBlob.size > MAX_BIN_BYTES) {
+        // Chặn TRƯỚC khi tải lên: tin quá trần của hộp sẽ kẹt ở hộp và chặn
+        // mọi tin sau nó (xem FW_MAX_MEDIA_BYTES).
+        if (encodeRes.binBlob.size > maxBinBytes) {
+          const mb = (b) => (b / 1e6).toFixed(1).replace('.', ',');
+          const fitSecs = Math.max(1, Math.floor(encodeRes.duration * (maxBinBytes / encodeRes.binBlob.size)));
           throw new SendError(
-            `Đoạn video sau khi nén nặng ${(encodeRes.binBlob.size / 1048576).toFixed(1)} MB, quá mức `
-            + `${MAX_BIN_BYTES / 1048576} MB máy chủ nhận. Chọn một đoạn ngắn hơn rồi gửi lại.`,
+            `Đoạn video sau khi nén nặng ${mb(encodeRes.binBlob.size)} MB, hộp hiện chỉ nhận tối đa `
+            + `${mb(maxBinBytes)} MB mỗi tin. Chọn đoạn ngắn hơn — khoảng ${fitSecs} giây là vừa.`,
           );
         }
         setSummary({ fileName: file.name, duration: encodeRes.duration });
@@ -233,7 +247,7 @@ export default function SenderUI() {
                   <Icon name={t.icon} size={24} />
                 </span>
                 <span className="sl-label-s">{t.label}</span>
-                <span className="sl-caption">{t.hint(maxSeconds)}</span>
+                <span className="sl-caption">{t.hint(t.key === 'voice' ? voiceMax : maxSeconds)}</span>
               </button>
             ))}
           </div>
@@ -274,7 +288,7 @@ export default function SenderUI() {
 
         {type === 'video' && <VideoInput onVideoSelect={processAndUpload} onCancel={handleCancel} maxSeconds={maxSeconds} />}
         {type === 'image' && <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} />}
-        {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} maxSeconds={maxSeconds} />}
+        {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} maxSeconds={voiceMax} />}
 
         {type === 'text' && (
           <>
@@ -325,7 +339,7 @@ export default function SenderUI() {
 
             {/* Nhạc nền (tuỳ chọn) */}
             {!staticAudioData ? (
-              <VoiceInput onRecordComplete={setStaticAudioData} onCancel={handleCancel} maxSeconds={maxSeconds} purpose="music" />
+              <VoiceInput onRecordComplete={setStaticAudioData} onCancel={handleCancel} maxSeconds={voiceMax} purpose="music" />
             ) : (
               <div className="sl-card sl-card--center">
                 <span className="sl-chip"><Icon name="mic" size={24} /></span>

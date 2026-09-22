@@ -35,7 +35,9 @@ export class MessageService {
 
     // Map loại file → đường dẫn Storage, content type, giới hạn dung lượng
     const typeMap: Record<string, { path: string; contentType: string; maxSize: number }> = {
-      bin:            { path: `${basePath}/video.bin`,  contentType: 'application/octet-stream', maxSize: 15 * 1024 * 1024 }, // 15MB
+      // 25MB: hộp thẻ SD cho video tới 60s × 15 fps JPEG 240×240 (~10-25KB/khung).
+      // Trần phía hộp (MAX_MEDIA_BYTES 5,5MB) còn thấp hơn — việc của firmware.
+      bin:            { path: `${basePath}/video.bin`,  contentType: 'application/octet-stream', maxSize: 25 * 1024 * 1024 }, // 25MB
       voice:          { path: `${basePath}/voice.wav`,  contentType: 'audio/wav',                maxSize: 2 * 1024 * 1024 },  // 2MB
       original_video: { path: `${basePath}/original.mp4`, contentType: 'video/mp4',              maxSize: 50 * 1024 * 1024 }, // 50MB
       original_image: { path: `${basePath}/original.jpg`, contentType: 'image/jpeg',             maxSize: 10 * 1024 * 1024 }, // 10MB

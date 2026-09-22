@@ -47,7 +47,21 @@ export interface BoxStatus {
   charging: boolean;
   battery: number;          // Phần trăm pin (0-100)
   fw_version: string;
-  last_seen: number;        // Timestamp lần cuối ESP32 liên lạc
+  /**
+   * Timestamp lần cuối ESP32 liên lạc. CHÚ Ý hai đơn vị: /device/heartbeat ghi
+   * mili-giây (Date.now()), còn firmware hiện tại PATCH thẳng status.json với
+   * time(nullptr) = GIÂY (NetworkManager.cpp heartbeat). Web chuẩn hoá lại.
+   */
+  last_seen: number;
+  /** Firmware PATCH thẳng dùng khoá "fw" (không phải fw_version) và "is_charging". */
+  fw?: string;
+  is_charging?: boolean;
+  /**
+   * Loại bộ nhớ chứa tin nhắn. Quyết định trần thời lượng video/âm thanh web
+   * cho phép gửi (NAND: 3 slot ~5,3 MB → 15s; thẻ SD → 60s). Firmware CHƯA
+   * gửi trường này — thiếu thì web coi là 'sd' (bản build hiện tại là SD).
+   */
+  storage_type?: 'sd' | 'nand';
 }
 
 export interface Box extends BaseModel {

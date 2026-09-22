@@ -192,6 +192,7 @@ export class DeviceService {
     battery?: number;
     charging?: boolean;
     fw_version?: string;
+    storage_type?: 'sd' | 'nand';
   }): Promise<void> {
     await this.boxRepo.updateStatus(boxId, {
       online: true,
@@ -199,6 +200,7 @@ export class DeviceService {
       ...(data.battery !== undefined && { battery: data.battery }),
       ...(data.charging !== undefined && { charging: data.charging }),
       ...(data.fw_version !== undefined && { fw_version: data.fw_version }),
+      ...(data.storage_type !== undefined && { storage_type: data.storage_type }),
     });
   }
 

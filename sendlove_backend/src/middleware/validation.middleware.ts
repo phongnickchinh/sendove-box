@@ -180,4 +180,5 @@ export const heartbeatSchema: ValidationSchema = {
   battery: { type: 'number', min: 0, max: 100 },
   charging: { type: 'boolean' },
   fw_version: { type: 'string', maxLength: 20 },
+  storage_type: { type: 'string', enum: ['sd', 'nand'] },
 };

@@ -201,7 +201,7 @@ export default function ReceiverConfig() {
               {savingCfg ? 'Đang lưu…' : 'Lưu đèn, màn hình và âm lượng'}
             </Button>
 
-            {/* --- giao diện màn hình hộp: dựng trước backend, xem theme/layout.js --- */}
+            {/* --- giao diện màn hình hộp: lưu lên tài khoản, xem theme/layout.js --- */}
             <button
               type="button" className="sl-listcard" style={{ cursor: 'pointer' }}
               onClick={() => navigate(`/box/${boxId}/receiver/theme`)}

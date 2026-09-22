@@ -1,94 +1,204 @@
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, Header, Button, Modal } from '../components/ui/Screen';
+import { Screen, AppBar, Body, Actions, Header, Button, Modal } from '../components/ui/Screen';
 import BoxScreen from '../components/theme/BoxScreen';
-import { DEFAULT_WIDGETS, FONTS, ALIGNS, MIN_SIZE, SCREEN } from '../theme/layout';
+import { getTheme } from '../api/theme';
+import { imageToRgb565 } from '../utils/rgb565';
+import {
+  ALIGNS, DEFAULT_WIDGETS, FONTS_BY_TYPE, MAX_WIDGETS, SCREEN, WIDGET_TYPES,
+  newWidget, toEditorWidgets, widgetProblem,
+} from '../theme/layout';
 
 /**
  * Màn 20 "theme editor".
  *
  * Mỗi ô trong bảng thuộc tính chỉ có mặt nếu LayoutEngine.cpp THẬT SỰ đọc
- * trường đó:
- *   font    -> drawClockTime/drawClockDate, if-chain 3 nhánh cứng
+ * trường đó cho loại widget này (WIDGET_TYPES trong theme/layout.js):
+ *   font    -> drawClockTime/drawClockDate, hai if-chain KHÁC NHAU
  *   color   -> hexToColor, bắt buộc đúng 7 ký tự #RRGGBB
  *   align   -> drawTextWidget: center / right / còn lại = trái
  *   x,y,w,h -> drawBackgroundPatch xoá đúng ô w×h trước khi vẽ
  *
- * CỐ Ý KHÔNG CÓ: "format" (đọc vào cfg.format rồi không ai dùng), "src", widget
- * ảnh (case WIDGET_IMAGE: break;), và ô chọn màu cho pin (drawBatteryIcon bỏ
- * qua cfg.color). Bày ra một control mà firmware bỏ qua là hứa suông.
+ * CỐ Ý KHÔNG CÓ: "format" (firmware đọc rồi bỏ), widget ảnh (case
+ * WIDGET_IMAGE: break;), màu cho pin (drawBatteryIcon bỏ qua cfg.color).
+ *
+ * Bản nháp nhận từ ThemePicker qua location.state; mở thẳng URL thì tự đọc
+ * bản đã lưu, không có thì dùng bố cục mặc định của firmware.
  */
 export default function ThemeEditor() {
   const { boxId } = useParams();
   const navigate = useNavigate();
-  const [widgets, setWidgets] = useState(DEFAULT_WIDGETS);
-  const [selectedId, setSelectedId] = useState('clock_time');
+  const { state } = useLocation();
+
+  const [name, setName] = useState(state?.name || 'Mặc định');
+  const [widgets, setWidgets] = useState(state?.widgets || DEFAULT_WIDGETS);
+  const [bg, setBg] = useState(state?.bg || null);
+  const [selectedId, setSelectedId] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [bgBusy, setBgBusy] = useState(false);
+  const [bgError, setBgError] = useState(null);
+
+  // Mở thẳng /theme/edit (không qua picker): nạp bản đã lưu nếu có.
+  useEffect(() => {
+    if (state) return undefined;
+    let alive = true;
+    getTheme(boxId).then((res) => {
+      if (!alive || !res.data) return;
+      setName(res.data.theme_name);
+      setWidgets(toEditorWidgets(res.data.widgets));
+      if (res.data.background) setBg({ path: res.data.background, url: res.data.background_url });
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [boxId, state]);
 
   const sel = widgets.find((w) => w.id === selectedId);
+  const meta = sel ? WIDGET_TYPES[sel.type] : null;
   const patch = (fields) =>
     setWidgets((prev) => prev.map((w) => (w.id === selectedId ? { ...w, ...fields } : w)));
 
-  const min = sel ? MIN_SIZE[sel.type] : null;
-  const tooSmall = sel && min && !sel.fixed && (sel.w < min.w || sel.h < min.h);
-  /* hexToColor: strlen(hex) < 7 || hex[0] != '#' -> trả TFT_WHITE, im lặng. */
-  const badHex = sel && !sel.fixed && !/^#[0-9A-Fa-f]{6}$/.test(sel.color || '');
+  const tooSmall = sel && meta && (sel.w < meta.min.w || sel.h < meta.min.h);
+  const badHex = sel && meta?.color && !/^#[0-9A-Fa-f]{6}$/.test(sel.color || '');
+  const problems = widgets.map(widgetProblem).filter(Boolean);
+
+  const addWidget = (type) => {
+    const w = newWidget(type, widgets);
+    setWidgets((prev) => [...prev, w]);
+    setAdding(false);
+    setSelectedId(w.id);
+  };
+
+  const removeSelected = () => {
+    setWidgets((prev) => prev.filter((w) => w.id !== selectedId));
+    setSelectedId(null);
+  };
+
+  const pickBackground = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setBgBusy(true);
+    setBgError(null);
+    try {
+      setBg(await imageToRgb565(file));
+    } catch {
+      setBgError('Không đọc được ảnh này. Thử một ảnh JPG hoặc PNG khác.');
+    } finally {
+      setBgBusy(false);
+    }
+  };
+
+  const bgUrl = bg?.url || bg?.previewUrl || null;
+  const goSend = () => navigate(`/box/${boxId}/receiver/theme/send`, { state: { name, widgets, bg } });
 
   return (
     <Screen>
       <AppBar onBack={() => navigate(`/box/${boxId}/receiver/theme`)} />
       <Body>
-        <Header title="Sửa giao diện" to="Mặc định" />
+        <Header title="Sửa giao diện" to={name} />
 
         <div className="sl-card" style={{ padding: 10, gap: 10 }}>
-          <BoxScreen widgets={widgets} selectedId={selectedId} onSelect={setSelectedId} showBoxes />
-          {sel && !sel.fixed && (
-            <span className="sl-caption" style={{ alignSelf: 'center', fontWeight: 600, color: 'var(--rose-700)' }}>
-              {sel.w} × {sel.h} tại {sel.x}, {sel.y}
-            </span>
-          )}
+          <BoxScreen widgets={widgets} selectedId={selectedId} onSelect={setSelectedId} showBoxes background={bgUrl} />
+          <span className="sl-caption" style={{ alignSelf: 'center' }}>Chạm một ô trên màn để sửa</span>
         </div>
 
+        {/* --- ảnh nền --- */}
+        <div className="sl-listcard">
+          <Icon name="image" size={20} style={{ color: 'var(--rose-800)' }} />
+          <div className="sl-listcard__mid">
+            <span className="sl-label-s">Ảnh nền</span>
+            <span className="sl-caption">
+              {bgBusy ? 'Đang xử lý ảnh…' : bg ? 'Ảnh riêng · 240 × 240 RGB565, 115,2 KB' : 'Nền dựng sẵn trong firmware'}
+            </span>
+          </div>
+          {bg && (
+            <button type="button" className="sl-iconbtn" onClick={() => setBg(null)} aria-label="Bỏ ảnh nền">
+              <Icon name="trash" size={18} />
+            </button>
+          )}
+          <label className="sl-btn sl-btn--gho" style={{ minHeight: 36, padding: '0 var(--sp-3)', cursor: 'pointer' }}>
+            {bg ? 'Đổi' : 'Chọn ảnh'}
+            <input type="file" accept="image/*" onChange={pickBackground} disabled={bgBusy} style={{ display: 'none' }} />
+          </label>
+        </div>
+        {bgError && <div className="sl-reason">{bgError}</div>}
+        {bg?.previewUrl && (
+          <span className="sl-caption" style={{ color: 'var(--neutral-400)', marginTop: -8 }}>
+            Ảnh được cắt vuông ở giữa. Màn hộp chỉ có 65 nghìn màu nên dải màu mịn sẽ hơi bậc thang — xem trước ở trên đã tính cả điều đó.
+          </span>
+        )}
+
+        {/* --- danh sách widget --- */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <Icon name="layers" size={16} style={{ color: 'var(--neutral-500)' }} />
           <span className="sl-label" style={{ flex: 1 }}>Widget</span>
-          <span className="sl-caption" style={{ fontWeight: 500 }}>{widgets.length}</span>
+          <span className="sl-caption" style={{ fontWeight: 500 }}>{widgets.length}/{MAX_WIDGETS}</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
           {widgets.map((w) => {
-            const on = w.id === selectedId;
+            const bad = widgetProblem(w);
             return (
               <button
-                key={w.id} type="button" className="sl-listcard" onClick={() => setSelectedId(w.id)}
-                style={{
-                  cursor: 'pointer',
-                  background: on ? 'var(--rose-50)' : 'var(--neutral-0)',
-                  borderColor: on ? 'var(--rose-400)' : 'var(--caramel-300)',
-                  borderWidth: on ? 1 : 0.5,
-                }}
+                key={w.id} type="button" className="sl-listcard sl-msgrow" onClick={() => setSelectedId(w.id)}
+                style={bad ? { borderColor: 'var(--error-fill)' } : undefined}
               >
-                <Icon name={w.icon} size={20} style={{ color: on ? 'var(--rose-700)' : 'var(--caramel-700)' }} />
-                <div className="sl-listcard__mid">
+                <Icon name={w.icon} size={20} style={{ color: 'var(--caramel-700)' }} />
+                <span className="sl-listcard__mid">
                   <span className="sl-label-s">{w.label}</span>
-                  <span className="sl-caption">
-                    {w.fixed ? `Biểu tượng cố định · ${w.w} × ${w.h}` : `${w.w} × ${w.h} tại ${w.x}, ${w.y}`}
+                  <span className="sl-caption" style={bad ? { color: 'var(--error-text)' } : undefined}>
+                    {bad || `${w.w} × ${w.h} tại ${w.x}, ${w.y}`}
                   </span>
-                </div>
-                <Icon name="move" size={16} style={{ color: 'var(--neutral-400)' }} />
+                </span>
+                <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
               </button>
             );
           })}
+          {widgets.length === 0 && (
+            <span className="sl-caption">Chưa có widget nào — màn hộp sẽ chỉ có ảnh nền.</span>
+          )}
         </div>
 
-        <button type="button" className="sl-addrow" disabled>
+        <button type="button" className="sl-addrow" disabled={widgets.length >= MAX_WIDGETS} onClick={() => setAdding(true)}>
           <Icon name="plus" size={20} />
-          Thêm widget — cần firmware mới
+          {widgets.length >= MAX_WIDGETS ? `Tối đa ${MAX_WIDGETS} widget` : 'Thêm widget'}
         </button>
+
+        {problems.length > 0 && (
+          <div className="sl-note sl-note--err">
+            <Icon name="alert" size={16} />
+            <span>Còn {problems.length} widget chưa hợp lệ — sửa xong mới gửi được.</span>
+          </div>
+        )}
+
+        <Actions>
+          <Button kind="pri" disabled={problems.length > 0 || widgets.length === 0 || bgBusy} onClick={goSend}>
+            Xong — xem phần sẽ gửi
+          </Button>
+        </Actions>
       </Body>
 
-      {sel && (
-        <Modal>
+      {adding && (
+        <Modal onClose={() => setAdding(false)}>
+          <span className="sl-heading">Thêm widget</span>
+          {Object.entries(WIDGET_TYPES).map(([type, m]) => (
+            <button key={type} type="button" className="sl-listcard sl-msgrow" onClick={() => addWidget(type)}>
+              <Icon name={m.icon} size={20} style={{ color: 'var(--rose-800)' }} />
+              <span className="sl-listcard__mid">
+                <span className="sl-label-s">{m.label}</span>
+                <span className="sl-caption">
+                  {type === 'battery_icon' ? 'Ảnh cố định, mức pin chưa đọc pin thật' : `Tối thiểu ${m.min.w} × ${m.min.h}`}
+                </span>
+              </span>
+              <Icon name="plus" size={16} style={{ color: 'var(--neutral-400)' }} />
+            </button>
+          ))}
+          <Button kind="gho" onClick={() => setAdding(false)}>Đóng</Button>
+        </Modal>
+      )}
+
+      {sel && meta && (
+        <Modal onClose={() => setSelectedId(null)}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
             <Icon name={sel.icon} size={20} style={{ color: 'var(--rose-700)' }} />
             <span className="sl-heading" style={{ flex: 1 }}>{sel.label}</span>
@@ -96,53 +206,54 @@ export default function ThemeEditor() {
               padding: '3px 8px', borderRadius: 999, background: 'var(--caramel-100)',
               fontSize: 12, fontWeight: 500, color: 'var(--caramel-800)',
             }}>{sel.type}</span>
-            {/* Không có nút này thì bảng thuộc tính mở vĩnh viễn và danh sách
-                widget bên dưới không bao giờ chạm tới được. */}
             <button type="button" className="sl-iconbtn" onClick={() => setSelectedId(null)} aria-label="Đóng">
               <Icon name="x" size={20} />
             </button>
           </div>
 
-          {sel.fixed ? (
-            /* drawBatteryIcon: pushImage một ảnh nhiều màu, bỏ qua cfg.color; và
-               mức pin là `int state = 3;` viết cứng. Không có gì để sửa. */
+          {sel.type === 'battery_icon' && (
             <div className="sl-note">
               <Icon name="alert" size={16} />
               <span>
-                Biểu tượng pin không đổi được màu hay kích thước: firmware vẽ nó bằng một ảnh
-                nhiều màu có sẵn, và mức pin đang viết cứng chứ chưa đọc pin thật.
+                Biểu tượng pin không đổi được màu: firmware vẽ nó bằng một ảnh nhiều màu có sẵn,
+                và mức pin đang viết cứng chứ chưa đọc pin thật. Chỉ đổi được vị trí.
               </span>
             </div>
-          ) : (
-            <>
-              <div className="sl-field">
-                <span className="sl-label">Phông chữ</span>
-                <div className="sl-seg" style={{ flexWrap: 'wrap' }}>
-                  {FONTS.map((f) => (
-                    <button key={f.value} type="button" className="sl-seg__cell"
-                      aria-pressed={sel.font === f.value}
-                      onClick={() => patch({ font: f.value })}
-                      style={{ flexBasis: '30%', fontSize: 12 }}>
-                      {f.label}
-                    </button>
-                  ))}
-                </div>
-                <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                  Ba phông này nằm trong firmware. Tên khác sẽ âm thầm rơi về Chakra Petch 48.
-                </span>
-              </div>
+          )}
 
-              <div style={{ display: 'flex', gap: 10 }}>
+          {FONTS_BY_TYPE[sel.type] && (
+            <div className="sl-field">
+              <span className="sl-label">Phông chữ</span>
+              <div className="sl-seg" style={{ flexWrap: 'wrap' }}>
+                {FONTS_BY_TYPE[sel.type].map((f) => (
+                  <button key={f.value} type="button" className="sl-seg__cell"
+                    aria-pressed={sel.font === f.value}
+                    onClick={() => patch({ font: f.value })}
+                    style={{ flexBasis: '30%', fontSize: 12 }}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
+                Chỉ những phông nằm sẵn trong firmware. Chữ trên hộp là chữ Latin không dấu.
+              </span>
+            </div>
+          )}
+
+          {(meta.color || meta.align) && (
+            <div style={{ display: 'flex', gap: 10 }}>
+              {meta.color && (
                 <label className="sl-field" style={{ flex: 1 }}>
                   <span className="sl-label">Màu</span>
-                  <span className="sl-input" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '9px 10px' }}>
-                    <span style={{
-                      width: 18, height: 18, borderRadius: '50%', flex: '0 0 auto',
-                      background: /^#[0-9A-Fa-f]{6}$/.test(sel.color) ? sel.color : '#FFFFFF',
-                      border: '0.5px solid var(--neutral-100)',
-                    }} />
+                  <span className="sl-input" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '6px 10px' }}>
                     <input
-                      value={sel.color} maxLength={7} spellCheck={false}
+                      type="color" aria-label="Chọn màu"
+                      value={/^#[0-9A-Fa-f]{6}$/.test(sel.color || '') ? sel.color : '#000000'}
+                      onChange={(e) => patch({ color: e.target.value.toUpperCase() })}
+                      style={{ width: 24, height: 24, padding: 0, border: 'none', background: 'none', flex: '0 0 auto', cursor: 'pointer' }}
+                    />
+                    <input
+                      value={sel.color || ''} maxLength={7} spellCheck={false} aria-label="Mã màu"
                       onChange={(e) => patch({ color: e.target.value })}
                       style={{
                         border: 'none', outline: 'none', background: 'none', width: '100%',
@@ -151,7 +262,9 @@ export default function ThemeEditor() {
                     />
                   </span>
                 </label>
+              )}
 
+              {meta.align && (
                 <div className="sl-field" style={{ flex: 1 }}>
                   <span className="sl-label">Căn lề</span>
                   <div className="sl-seg">
@@ -164,60 +277,58 @@ export default function ThemeEditor() {
                     ))}
                   </div>
                 </div>
-              </div>
-
-              {badHex ? (
-                <div className="sl-note sl-note--err">
-                  <Icon name="alert" size={16} />
-                  <span>
-                    Viết đủ bảy ký tự. #000 không phải viết tắt của #000000 — hộp sẽ vẽ chữ màu trắng.
-                  </span>
-                </div>
-              ) : (
-                <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                  Viết đủ bảy ký tự dạng #RRGGBB.
-                </span>
               )}
-
-              <div className="sl-field">
-                <span className="sl-label">Ô trên màn hình</span>
-                <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-                  {['x', 'y', 'w', 'h'].map((k) => (
-                    <label key={k} className="sl-input" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px' }}>
-                      <span className="sl-caption" style={{ textTransform: 'uppercase' }}>{k}</span>
-                      <input
-                        type="number" min={0} max={SCREEN} value={sel[k]}
-                        onChange={(e) => patch({ [k]: Number(e.target.value) })}
-                        style={{
-                          border: 'none', outline: 'none', background: 'none', width: '100%',
-                          font: 'inherit', fontSize: 15, fontWeight: 600, color: 'var(--caramel-900)',
-                        }}
-                      />
-                    </label>
-                  ))}
-                </div>
-                {/* Ghi chú xám khi giá trị hợp lệ, dải đỏ khi thật sự vi phạm:
-                    cảnh báo trên một giá trị đúng thì lần sau người dùng bỏ qua
-                    cả cảnh báo thật. */}
-                {tooSmall ? (
-                  <span className="sl-note sl-note--err">
-                    <Icon name="alert" size={16} />
-                    <span>
-                      Ô nhỏ hơn {min.w} × {min.h}. Hộp xoá đúng ô này trước khi vẽ lại, nên ô hẹp
-                      hơn sẽ để lại chữ cũ dính trên màn.
-                    </span>
-                  </span>
-                ) : (
-                  <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                    Tối thiểu {min.w} × {min.h}. Hộp xoá đúng ô này trước khi vẽ lại.
-                  </span>
-                )}
-              </div>
-            </>
+            </div>
           )}
 
-          <Button kind="pri" onClick={() => navigate(`/box/${boxId}/receiver/theme/send`)}>
-            Xong — xem phần sẽ gửi
+          {badHex && (
+            <div className="sl-note sl-note--err">
+              <Icon name="alert" size={16} />
+              <span>Viết đủ bảy ký tự. #000 không phải viết tắt của #000000 — hộp sẽ vẽ chữ màu trắng.</span>
+            </div>
+          )}
+
+          <div className="sl-field">
+            <span className="sl-label">Ô trên màn hình</span>
+            <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+              {['x', 'y', 'w', 'h'].map((k) => (
+                <label key={k} className="sl-input" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px' }}>
+                  <span className="sl-caption" style={{ textTransform: 'uppercase' }}>{k}</span>
+                  <input
+                    type="number" min={0} max={SCREEN} step={1} value={sel[k]}
+                    disabled={meta.fixedSize && (k === 'w' || k === 'h')}
+                    onChange={(e) => patch({ [k]: Math.round(Number(e.target.value)) || 0 })}
+                    style={{
+                      border: 'none', outline: 'none', background: 'none', width: '100%',
+                      font: 'inherit', fontSize: 15, fontWeight: 600, color: 'var(--caramel-900)',
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+            {widgetProblem(sel) ? (
+              <span className="sl-note sl-note--err">
+                <Icon name="alert" size={16} />
+                <span>{widgetProblem(sel)}</span>
+              </span>
+            ) : tooSmall ? (
+              <span className="sl-note sl-note--warn">
+                <Icon name="alert" size={16} />
+                <span>
+                  Ô nhỏ hơn {meta.min.w} × {meta.min.h}. Hộp xoá đúng ô này trước khi vẽ lại, nên ô hẹp
+                  hơn sẽ để lại chữ cũ dính trên màn.
+                </span>
+              </span>
+            ) : (
+              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
+                Tối thiểu {meta.min.w} × {meta.min.h}. Hộp xoá đúng ô này trước khi vẽ lại.
+              </span>
+            )}
+          </div>
+
+          <Button kind="pri" onClick={() => setSelectedId(null)}>Xong</Button>
+          <Button kind="gho" onClick={removeSelected} style={{ color: 'var(--error-text)' }}>
+            Xoá widget này
           </Button>
         </Modal>
       )}

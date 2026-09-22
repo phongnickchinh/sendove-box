@@ -1,109 +1,131 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Icon from '../components/ui/Icon';
 import { Screen, AppBar, Body, Actions, Header, Button, Tips, CircleIcon, Modal } from '../components/ui/Screen';
-import { FILES, NEEDS_FW } from '../theme/layout';
+import BoxScreen from '../components/theme/BoxScreen';
+import { saveTheme, uploadBackground } from '../api/theme';
+import { toApiWidgets } from '../theme/layout';
 
 /**
- * Màn 21 "theme send".
+ * Màn 21 "theme send" — lưu bản nháp lên tài khoản.
  *
- * Màn này nói rõ HỢP ĐỒNG ĐỀ XUẤT, vì hôm nay chưa có gì trong số này:
- *   - chưa có route nhận theme (NetworkManager chỉ có provisioning AP)
- *   - IStorageProvider.h không có API ghi file tuỳ ý
- *   - SDStorageProvider.cpp:5-14 mới chỉ sinh đường dẫn /media/*.bin
- * Nên phải liệt kê ĐÚNG tên file và ĐÚNG dung lượng: đó là phần firmware sẽ
- * phải dựng.
+ *   1. Có ảnh nền mới → POST /theme/background lấy signed POST, tải 115.200 B lên
+ *   2. PUT /theme {theme_name, widgets, background} → backend lọc lại widgets,
+ *      ghi boxes/{id}/config/theme và bật flags/theme_flag
+ *
+ * Hộp chỉ áp dụng khi firmware đọc theme_flag — bản hiện tại CHƯA đọc
+ * (memory sendlove-fw-todo-tu-fe mục 3). Nói thẳng điều đó, không hứa "hộp
+ * sẽ nhận ở lần thức dậy kế tiếp".
  */
-
-const STEPS = [
-  'Giao diện được xếp hàng trên tài khoản của bạn.',
-  'Hộp lấy về ở lần thức dậy kế tiếp — cùng chuyến nó đi lấy tin nhắn.',
-  'Cả hai file nằm lên thẻ, hộp nạp lại bố cục. Không cần khởi động lại.',
-];
-
 export default function ThemeSend() {
   const { boxId } = useParams();
   const navigate = useNavigate();
-  const [queued, setQueued] = useState(false);
+  const { state: draft } = useLocation();
+  const [name, setName] = useState(draft?.name || 'Giao diện của tôi');
+  const [phase, setPhase] = useState('idle'); // idle | uploading | saving | done
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState(null);
+
+  // Mở thẳng URL mà không có bản nháp → quay về trình sửa.
+  if (!draft?.widgets) return <Navigate to={`/box/${boxId}/receiver/theme/edit`} replace />;
+
+  const bg = draft.bg;
+  const hasNewBg = !!bg?.bytes;
+  const busy = phase === 'uploading' || phase === 'saving';
+  const nameOk = name.trim().length >= 1 && name.trim().length <= 40;
+
+  const submit = async () => {
+    setError(null);
+    try {
+      let background = bg?.path || null;
+      if (hasNewBg) {
+        setPhase('uploading');
+        setProgress(0);
+        background = await uploadBackground(boxId, bg.bytes, (p) => setProgress(Math.round(p)));
+      }
+      setPhase('saving');
+      await saveTheme(boxId, { theme_name: name.trim(), widgets: toApiWidgets(draft.widgets), background });
+      setPhase('done');
+    } catch (err) {
+      setPhase('idle');
+      setError(err.response?.data?.error?.message || 'Không lưu được giao diện. Kiểm tra kết nối rồi thử lại.');
+    }
+  };
 
   return (
     <Screen>
-      <AppBar onBack={() => navigate(`/box/${boxId}/receiver/theme/edit`)} />
+      <AppBar onBack={() => navigate(`/box/${boxId}/receiver/theme/edit`, { state: draft })} />
       <Body>
-        <Header title="Gửi giao diện xuống hộp" to={`Hộp ${boxId}`} />
+        <Header title="Lưu giao diện" to={`${draft.widgets.length} widget${bg ? ' · có ảnh nền' : ''}`} />
 
-        {/* --- những gì thật sự được ghi lên thẻ --- */}
+        <div className="sl-card" style={{ padding: 10 }}>
+          <BoxScreen widgets={draft.widgets} background={bg?.url || bg?.previewUrl} />
+        </div>
+
+        <label className="sl-field">
+          <span className="sl-label">Tên giao diện</span>
+          <input className="sl-input" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} disabled={busy} />
+        </label>
+
         <div className="sl-card" style={{ padding: '14px var(--sp-4)', gap: 'var(--sp-3)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <Icon name="sd" size={20} style={{ color: 'var(--caramel-700)' }} />
-            <span className="sl-label-s" style={{ flex: 1 }}>Ghi lên thẻ nhớ</span>
-            <span className="sl-caption" style={{ fontWeight: 500 }}>116,4 KB</span>
+            <Icon name="layers" size={18} style={{ color: 'var(--caramel-700)' }} />
+            <span className="sl-label-s" style={{ flex: 1 }}>Bố cục</span>
+            <span className="sl-caption" style={{ fontWeight: 500 }}>{draft.widgets.length} widget · ~1 KB</span>
           </div>
-
-          {FILES.map((f, i) => (
-            <React.Fragment key={f.path}>
-              {i > 0 && <span style={{ height: 0.5, background: 'var(--neutral-100)' }} />}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-                  <span className="sl-label-s" style={{ flex: 1 }}>{f.path}</span>
-                  <span className="sl-caption" style={{ fontWeight: 500 }}>{f.size}</span>
-                </span>
-                <span className="sl-caption">{f.what}</span>
-              </div>
-            </React.Fragment>
-          ))}
+          <span style={{ height: 0.5, background: 'var(--neutral-100)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+            <Icon name="image" size={18} style={{ color: 'var(--caramel-700)' }} />
+            <span className="sl-label-s" style={{ flex: 1 }}>Ảnh nền</span>
+            <span className="sl-caption" style={{ fontWeight: 500 }}>
+              {hasNewBg ? 'Ảnh mới · 115,2 KB' : bg ? 'Giữ ảnh đã lưu' : 'Nền dựng sẵn'}
+            </span>
+          </div>
         </div>
 
         <div className="sl-note sl-note--warn">
           <Icon name="alert" size={16} />
           <span>
-            Hộp đang chạy firmware cũ nên vẫn vẽ giao diện dựng sẵn bên trong.
-            Đọc được hai file này cần firmware {NEEDS_FW}.
+            Giao diện được lưu lên tài khoản ngay. Hộp chỉ đổi màn chờ khi chạy bản firmware đọc
+            được giao diện từ tài khoản — bản hiện tại vẫn hiện giao diện dựng sẵn.
           </span>
         </div>
 
-        {/* --- đường đi của file --- */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px var(--sp-4)', borderRadius: 'var(--r-md)', background: 'var(--caramel-50)' }}>
-          <span className="sl-label-s">Đường đi tới hộp</span>
-          {STEPS.map((s, i) => (
-            <span key={i} style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'flex-start' }}>
-              <span style={{
-                flex: '0 0 auto', width: 20, height: 20, borderRadius: 999,
-                background: 'var(--caramel-100)', color: 'var(--caramel-800)',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 12, fontWeight: 600,
-              }}>{i + 1}</span>
-              <span style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--caramel-700)' }}>{s}</span>
-            </span>
-          ))}
-        </div>
+        {error && <div className="sl-reason">{error}</div>}
 
-        <Tips>
-          Không có gì bị ghi đè cho tới khi cả hai file tới nơi. Truyền dở dang thì
-          giao diện cũ vẫn chạy.
-        </Tips>
+        {phase === 'uploading' && (
+          <div className="sl-progress">
+            <div className="sl-track"><div className="sl-track__bar" style={{ width: `${progress}%` }} /></div>
+            <span className="sl-caption-s">Đang tải ảnh nền {progress}%</span>
+          </div>
+        )}
+
+        <Tips>Lưu đè lên giao diện cũ của hộp này. Giao diện cũ không được giữ lại.</Tips>
 
         <Actions>
-          <Button kind="pri" onClick={() => setQueued(true)}>Gửi xuống hộp</Button>
-          <Button kind="gho" onClick={() => navigate(`/box/${boxId}/receiver/theme`)}>
-            Lưu mà chưa gửi
+          <Button kind="pri" onClick={submit} disabled={busy || !nameOk}>
+            {phase === 'uploading' ? 'Đang tải ảnh nền…' : phase === 'saving' ? 'Đang lưu…' : 'Lưu giao diện'}
+          </Button>
+          <Button kind="gho" disabled={busy}
+            onClick={() => navigate(`/box/${boxId}/receiver/theme/edit`, { state: { ...draft, name } })}>
+            Sửa tiếp
           </Button>
         </Actions>
       </Body>
 
-      {queued && (
+      {phase === 'done' && (
         <Modal>
           <span style={{ alignSelf: 'center' }}>
-            <CircleIcon size={72} bg="var(--rose-50)" color="var(--rose-400)" icon="download" iconSize={32} sw={2} />
+            <CircleIcon size={72} bg="var(--success-bg)" color="var(--success-fill)" icon="check" iconSize={32} sw={2} />
           </span>
-          <span className="sl-heading" style={{ textAlign: 'center' }}>Đã xếp hàng — chờ hộp thức dậy</span>
+          <span className="sl-heading" style={{ textAlign: 'center' }}>Đã lưu “{name.trim()}”</span>
           <span className="sl-body" style={{ textAlign: 'center' }}>
-            Chạm vào hộp để đánh thức ngay, hoặc cứ để đó — giao diện sẽ có ở lần sau.
+            Giao diện nằm trên tài khoản của hộp. Khi hộp chạy bản firmware hỗ trợ, nó sẽ tự tải về ở
+            lần đồng bộ kế tiếp.
           </span>
-          <Tips>
-            Nếu hộp không có thẻ nhớ, việc truyền dừng ở đây và giao diện dựng sẵn vẫn chạy.
-          </Tips>
-          <Button kind="gho" onClick={() => setQueued(false)}>Đóng</Button>
+          <Button kind="pri" onClick={() => navigate(`/box/${boxId}/receiver/theme`, { replace: true })}>
+            Về danh sách giao diện
+          </Button>
         </Modal>
       )}
     </Screen>

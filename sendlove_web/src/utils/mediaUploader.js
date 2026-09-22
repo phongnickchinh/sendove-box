@@ -10,7 +10,7 @@ const ORIGINAL_MAX_BYTES = {
 /**
  * Upload files via POST to signed policy URLs and track progress
  */
-const uploadToSignedPolicy = (policyObj, blob, contentType, onProgress) => {
+export const uploadToSignedPolicy = (policyObj, blob, onProgress) => {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', policyObj.url, true);
@@ -109,7 +109,7 @@ export const uploadMessage = async (boxId, data, onProgress) => {
   await Promise.all(blobsToUpload.map(item => {
     const policyObj = upload_urls[item.type];
     if (!policyObj) return Promise.resolve();
-    return uploadToSignedPolicy(policyObj, item.blob, item.contentType, (percent) => handleProgress(item.type, percent, item.blob.size));
+    return uploadToSignedPolicy(policyObj, item.blob, (percent) => handleProgress(item.type, percent, item.blob.size));
   }));
 
   // 3. Confirm

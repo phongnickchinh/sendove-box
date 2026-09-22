@@ -6,10 +6,11 @@ import { SCREEN } from '../../theme/layout';
  * Màn hình thật của hộp, vẽ 1:1 ở 240 × 240 để x/y/w/h trong theme đọc thẳng
  * được trên hình, không phải quy đổi.
  *
- * Nền ở đây là màu thay thế: nền thật là mảng StandbyBackground[] biên dịch
- * trong firmware (LayoutEngine.cpp pushImage), KHÔNG phải file đọc từ thẻ.
+ * background: ảnh nền đã lượng tử RGB565 (utils/rgb565.js). Không có thì tô
+ * màu thay thế — nền mặc định thật là mảng StandbyBackground[] biên dịch trong
+ * firmware, web không có bản sao của nó.
  */
-export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes }) {
+export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes, background }) {
   return (
     <div
       style={{
@@ -18,7 +19,7 @@ export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes }) 
         maxWidth: '100%',
         borderRadius: 8,
         overflow: 'hidden',
-        background: 'var(--caramel-100)',
+        background: background ? `center / cover no-repeat url(${background})` : 'var(--caramel-100)',
         alignSelf: 'center',
         flex: '0 0 auto',
       }}
@@ -42,18 +43,25 @@ export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes }) 
             }
           : {};
 
-        const inner = w.type === 'battery_icon'
-          ? <Icon name="battery" size={16} style={{ color: '#3D2A20' }} />
-          : (
+        let inner;
+        if (w.type === 'battery_icon') {
+          // Ảnh pin nhiều màu của firmware — màu cố định, không theo cfg.color.
+          inner = <Icon name="battery" size={16} style={{ color: '#3D2A20' }} />;
+        } else if (w.type === 'wifi_icon') {
+          inner = <Icon name="wifi" size={18} style={{ color: w.color }} />;
+        } else {
+          const big = w.type === 'clock_time';
+          inner = (
             <span style={{
-              fontFamily: 'var(--font)',
-              fontSize: w.type === 'clock_time' ? 40 : 12,
-              fontWeight: w.type === 'clock_time' ? 700 : 600,
-              lineHeight: w.type === 'clock_time' ? 1.1 : 1.3,
+              fontFamily: w.font === 'Orbitron_32' ? "'Orbitron', var(--font)" : 'var(--font)',
+              fontSize: big ? (w.font === 'Orbitron_32' ? 32 : 40) : 12,
+              fontWeight: big ? 700 : 600,
+              lineHeight: big ? 1.1 : 1.3,
               color: w.color,
               whiteSpace: 'nowrap',
             }}>{w.sample}</span>
           );
+        }
 
         if (!onSelect) return <div key={w.id} style={{ ...common, ...box }}>{inner}</div>;
         return (
@@ -70,19 +78,23 @@ export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes }) 
   );
 }
 
-/** Thu nhỏ 240 xuống size — chỉ để nhận mặt, không đọc chữ nên vẽ bằng khối đặc. */
-export function Thumb({ bars, size = 40 }) {
-  const pad = Math.round(size / 8);
+/**
+ * Thu nhỏ 240 xuống size — chỉ để nhận mặt, không đọc chữ nên mỗi widget là
+ * một khối đặc đặt đúng toạ độ đã quy đổi.
+ */
+export function Thumb({ widgets, size = 40 }) {
+  const k = size / SCREEN;
   return (
     <span style={{
-      flex: '0 0 auto',
-      width: size, height: size, padding: pad,
-      display: 'flex', flexDirection: 'column', gap: Math.round(pad / 2),
-      borderRadius: 8, background: 'var(--caramel-100)',
+      flex: '0 0 auto', position: 'relative',
+      width: size, height: size,
+      borderRadius: 8, background: 'var(--caramel-100)', overflow: 'hidden',
     }}>
-      {bars.map(([w, h], i) => (
+      {widgets.map((w, i) => (
         <span key={i} style={{
-          width: Math.round((w / 40) * size), height: Math.round((h / 40) * size),
+          position: 'absolute',
+          left: w.x * k, top: w.y * k,
+          width: Math.max(2, w.w * k), height: Math.max(2, w.h * k * 0.7),
           background: 'var(--caramel-700)', borderRadius: 1,
         }} />
       ))}

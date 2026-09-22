@@ -34,7 +34,7 @@ function App() {
           <Route path="/box/:boxId/receiver/alarm" element={<ReceiverAlarms />} />
           <Route path="/box/:boxId/receiver/config" element={<ReceiverConfig />} />
 
-          {/* Theme: dựng trước backend. Chạy trên src/theme/layout.js, không gọi API nào. */}
+          {/* Theme màn chờ: lưu qua /boxes/:boxId/theme (chỉ người nhận). Firmware chưa tải về — xem theme/layout.js. */}
           <Route path="/box/:boxId/receiver/theme" element={<ThemePicker />} />
           <Route path="/box/:boxId/receiver/theme/edit" element={<ThemeEditor />} />
           <Route path="/box/:boxId/receiver/theme/send" element={<ThemeSend />} />

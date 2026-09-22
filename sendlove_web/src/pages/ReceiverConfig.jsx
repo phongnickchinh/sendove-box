@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getBoxDetails, updateBoxConfig, updateWifi, unpairBox } from '../api/box';
+import { getBoxDetails, updateBoxConfig, updateWifi } from '../api/box';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal } from '../components/ui/Screen';
+import UnpairConfirm from '../components/UnpairConfirm';
+import { Screen, AppBar, Body, Header, Button, CircleIcon } from '../components/ui/Screen';
 
 /**
  * Màn 11 "box config page" + màn 14 "unpair confirm".
@@ -29,7 +30,7 @@ const LED_OPTIONS = [
 export default function ReceiverConfig() {
   const { boxId } = useParams();
   const navigate = useNavigate();
-  const { profile, refreshProfile } = useAuth();
+  const { profile } = useAuth();
 
   const [box, setBox] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -45,7 +46,6 @@ export default function ReceiverConfig() {
   const [savingCfg, setSavingCfg] = useState(false);
 
   const [confirmUnpair, setConfirmUnpair] = useState(false);
-  const [unpairing, setUnpairing] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -77,7 +77,7 @@ export default function ReceiverConfig() {
     try {
       await updateWifi(boxId, { ssid: ssid.trim(), password });
       setPassword('');
-      flash('Đã lưu Wi-Fi. Hộp sẽ nhận ở lần thức dậy kế tiếp.');
+      flash('Đã lưu Wi-Fi lên tài khoản.');
     } catch (err) {
       setError(err.response?.data?.error?.message || 'Không lưu được Wi-Fi.');
     } finally {
@@ -89,25 +89,11 @@ export default function ReceiverConfig() {
     setSavingCfg(true); setError(null);
     try {
       await updateBoxConfig(boxId, cfg);
-      flash('Đã lưu. Hộp sẽ nhận ở lần thức dậy kế tiếp.');
+      flash('Đã lưu lên tài khoản.');
     } catch (err) {
       setError(err.response?.data?.error?.message || 'Không lưu được cài đặt.');
     } finally {
       setSavingCfg(false);
-    }
-  };
-
-  const doUnpair = async () => {
-    setUnpairing(true);
-    try {
-      await unpairBox(boxId);
-      await refreshProfile();
-      navigate('/dashboard', { replace: true });
-    } catch (err) {
-      setConfirmUnpair(false);
-      setError(err.response?.data?.error?.message || 'Không huỷ ghép đôi được.');
-    } finally {
-      setUnpairing(false);
     }
   };
 
@@ -164,9 +150,15 @@ export default function ReceiverConfig() {
               </span>
             </label>
 
-            <div className="sl-note">
+            {/* Firmware hiện tại chỉ đọc a_flag + alarm_list từ DB (NetworkManager
+                syncWakeup) — wifi_config và config_flag không ai đọc. Không hứa
+                "hộp sẽ nhận" khi thật ra nó không nhận. */}
+            <div className="sl-note sl-note--warn">
               <Icon name="wifi" size={16} />
-              <span>Wi-Fi mới tới hộp ở lần thức dậy kế tiếp — trong vòng 5 phút.</span>
+              <span>
+                Phiên bản firmware hiện tại của hộp chưa đọc Wi-Fi lưu ở đây. Muốn đổi
+                ngay, dùng trang cài đặt khi hộp phát Wi-Fi riêng.
+              </span>
             </div>
 
             <Button kind="gho" onClick={saveWifi} disabled={savingWifi}>
@@ -198,6 +190,11 @@ export default function ReceiverConfig() {
               onChange={(v) => setCfg({ ...cfg, display_brightness: v })} />
             <Slider label="Âm lượng phát" value={cfg.playback_volume}
               onChange={(v) => setCfg({ ...cfg, playback_volume: v })} />
+
+            <div className="sl-note sl-note--warn">
+              <Icon name="alert" size={16} />
+              <span>Firmware hiện tại chưa áp dụng đèn, độ sáng và âm lượng lưu từ đây.</span>
+            </div>
 
             <Button kind="gho" onClick={saveConfig} disabled={savingCfg}>
               {savingCfg ? 'Đang lưu…' : 'Lưu đèn, màn hình và âm lượng'}
@@ -246,34 +243,7 @@ export default function ReceiverConfig() {
       </Body>
 
       {confirmUnpair && (
-        <Modal>
-          <span style={{ alignSelf: 'center' }}>
-            <CircleIcon size={56} bg="var(--error-bg)" color="var(--error-fill)" icon="alert" iconSize={24} sw={2} />
-          </span>
-          <span className="sl-heading" style={{ textAlign: 'center' }}>Huỷ ghép đôi hộp này?</span>
-          <span className="sl-body" style={{ textAlign: 'center' }}>
-            Hộp sẽ rời khỏi tài khoản của bạn ngay lập tức.
-          </span>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px var(--sp-4)', borderRadius: 'var(--r-md)', background: 'var(--caramel-50)' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', color: 'var(--caramel-700)', fontSize: 12, lineHeight: 1.4 }}>
-              <Icon name="chat" size={16} /> Tin nhắn mới sẽ không về hộp này nữa.
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', color: 'var(--caramel-700)', fontSize: 12, lineHeight: 1.4 }}>
-              <Icon name="bell" size={16} /> Báo thức và Wi-Fi bị xoá khỏi tài khoản này.
-            </span>
-          </div>
-
-          {/* Ghép lại phải có mã trên hộp (pairingCode /^[SR][A-Z0-9]{6,9}$/) */}
-          <span className="sl-caption" style={{ textAlign: 'center', color: 'var(--neutral-400)' }}>
-            Muốn dùng lại thì cần mã ghép đôi hiện trên màn hình hộp.
-          </span>
-
-          <Button kind="dan" onClick={doUnpair} disabled={unpairing}>
-            {unpairing ? 'Đang huỷ…' : 'Huỷ ghép đôi'}
-          </Button>
-          <Button kind="gho" onClick={() => setConfirmUnpair(false)} disabled={unpairing}>Giữ nguyên</Button>
-        </Modal>
+        <UnpairConfirm boxId={boxId} role="receiver" onClose={() => setConfirmUnpair(false)} onError={setError} />
       )}
     </Screen>
   );

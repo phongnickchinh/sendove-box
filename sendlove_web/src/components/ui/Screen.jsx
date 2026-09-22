@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import Icon from './Icon';
 import '../../styles/tokens.css';
 import '../../styles/sendlove.css';
@@ -119,11 +119,22 @@ export function CircleIcon({ size, bg, color, icon, iconSize, sw }) {
   );
 }
 
-/** scrim(frame) + modal(frame) — lớp phủ và popup, chỗ duy nhất có đổ bóng */
-export function Modal({ children }) {
+/**
+ * scrim(frame) + modal(frame) — lớp phủ và popup, chỗ duy nhất có đổ bóng.
+ * onClose (tuỳ chọn): bấm ra ngoài hoặc Esc thì đóng. Bỏ trống khi popup đang
+ * chạy việc không được ngắt (đang huỷ ghép, đang mã hoá).
+ */
+export function Modal({ children, onClose, className = '' }) {
+  useEffect(() => {
+    if (!onClose) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
-    <div className="sl-scrim">
-      <div className="sl-modal">{children}</div>
+    <div className="sl-scrim" onClick={onClose ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined}>
+      <div className={`sl-modal ${className}`} role="dialog" aria-modal="true">{children}</div>
     </div>
   );
 }

@@ -4,7 +4,9 @@ import { getMessages } from '../api/message';
 import { getBoxDetails } from '../api/box';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
+import MessageDetail from '../components/MessageDetail';
 import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Screen';
+import { iconOf, timeAgo, titleOf } from '../utils/messageFormat';
 
 /**
  * Màn 09 "box status + history-part" trong file Figma.
@@ -18,17 +20,6 @@ import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Scree
  */
 
 const MINUTE = 60 * 1000;
-
-/** Khoảng cách thời gian, đọc được bằng tiếng Việt. */
-function timeAgo(ts) {
-  const diff = Date.now() - ts;
-  if (diff < MINUTE) return 'vừa xong';
-  const mins = Math.floor(diff / MINUTE);
-  if (mins < 60) return `${mins} phút trước`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} giờ trước`;
-  return `${Math.floor(hours / 24)} ngày trước`;
-}
 
 /**
  * Hộp thức mỗi 5 phút. Trễ tới 15 phút vẫn là bình thường (lỡ một hai nhịp);
@@ -49,8 +40,6 @@ const TONE = {
   unknown: { bg: 'var(--neutral-100)', fg: 'var(--neutral-500)', icon: 'sync' },
 };
 
-const MSG_ICON = { video: 'video', image: 'image', gif: 'image', voice: 'mic', text: 'text' };
-const MSG_LABEL = { video: 'Video', image: 'Ảnh', gif: 'Ảnh động', voice: 'Lời nhắn', text: 'Dòng chữ' };
 
 export default function ReceiverUI() {
   const { boxId } = useParams();
@@ -60,6 +49,7 @@ export default function ReceiverUI() {
   const [box, setBox] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [openMsg, setOpenMsg] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -76,6 +66,9 @@ export default function ReceiverUI() {
         if (boxRes.status === 'fulfilled' && boxRes.value.success) setBox(boxRes.value.data);
         if (msgRes.status === 'rejected' && boxRes.status === 'rejected') {
           setError('Không đọc được dữ liệu hộp. Kiểm tra kết nối rồi thử lại.');
+        } else if (msgRes.status === 'rejected') {
+          // Không báo thì danh sách rỗng trông y như "chưa có tin nào".
+          setError('Không tải được danh sách tin nhắn.');
         }
       } finally {
         if (alive) setLoading(false);
@@ -153,21 +146,23 @@ export default function ReceiverUI() {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {messages.map((msg) => (
-              <div className="sl-listcard" key={msg.id}>
+            {[...messages].sort((a, b) => b.timestamp - a.timestamp).map((msg) => (
+              <button type="button" className="sl-listcard sl-msgrow" key={msg.id} onClick={() => setOpenMsg(msg)}>
                 <span className="sl-chip">
-                  <Icon name={MSG_ICON[msg.type] || 'chat'} size={20} />
+                  <Icon name={iconOf(msg)} size={20} />
                 </span>
-                <div className="sl-listcard__mid">
-                  <span className="sl-label-s">{MSG_LABEL[msg.type] || 'Tin nhắn'}</span>
+                <span className="sl-listcard__mid">
+                  <span className="sl-label-s">{titleOf(msg)}</span>
                   <span className="sl-caption">{timeAgo(msg.timestamp)}</span>
-                </div>
+                </span>
                 <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
-              </div>
+              </button>
             ))}
           </div>
         )}
       </Body>
+
+      {openMsg && <MessageDetail boxId={boxId} message={openMsg} onClose={() => setOpenMsg(null)} />}
     </Screen>
   );
 }

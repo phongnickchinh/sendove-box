@@ -26,5 +26,8 @@ export const getMessages = async (boxId, limit = 20) => {
 
 export const getMessageDetails = async (boxId, messageId) => {
   const response = await apiClient.get(`/boxes/${boxId}/messages/${messageId}`);
-  return response.data; // { success: true, data: Message }
+  // { success, data: Message & { media: { video?, image?, thumbnail?, voice?, bg_music? } } }
+  // media là signed URL đọc được 15 phút (message.service.ts getMessageDetails);
+  // các trường *_url còn lại vẫn là storage path thô, trình duyệt không mở được.
+  return response.data;
 };

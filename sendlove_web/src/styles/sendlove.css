@@ -514,9 +514,12 @@
   color: var(--caramel-800);
   font-size: 15px; line-height: 1.4;
   background: none; border: none; width: 100%; cursor: pointer; text-align: left;
+  font-family: var(--font); /* <button> không thừa hưởng font của trang */
 }
 .sl-popover__row--muted { color: var(--neutral-400); cursor: default; }
 .sl-popover__row--rose { color: var(--rose-700); }
+/* Hành động phá huỷ (huỷ ghép) — cùng lý do với .sl-btn--dan: không mượn hồng. */
+.sl-popover__row--danger { color: var(--error-text); font-weight: 600; }
 .sl-popover__divider { height: 0.5px; background: var(--caramel-300); border: none; margin: 2px 0; }
 
 /* ---------- Login: ảnh nền tràn viền + card nổi (frame "login signup") ----------
@@ -630,3 +633,61 @@
    bậc" của Figma). */
 .sl-boxcard__chevron--sender { color: var(--rose-500); }
 .sl-boxcard__chevron--receiver { color: var(--caramel-700); }
+
+/* ---------- dòng tin nhắn bấm được (lịch sử người gửi, danh sách người nhận) ---------- */
+.sl-msgrow {
+  font-family: var(--font);
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease;
+}
+.sl-msgrow:hover { border-color: var(--rose-300); background: var(--rose-50); }
+.sl-msgrow:focus-visible { outline: 2px solid var(--rose-400); outline-offset: 2px; }
+
+/* ---------- popup chi tiết tin nhắn (message-detail-popup) ----------
+   Chưa đối chiếu Figma — xem MessageDetail.jsx. Dựng trên .sl-modal có sẵn. */
+.sl-msgdetail { gap: var(--sp-4); }
+.sl-msgdetail__head { display: flex; align-items: center; gap: var(--sp-3); }
+.sl-msgdetail__media {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--caramel-100);
+  display: flex; align-items: center; justify-content: center;
+}
+.sl-msgdetail__media > video,
+.sl-msgdetail__media > img { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+.sl-msgdetail__media > img { background: transparent; }
+.sl-msgdetail__audio {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--caramel-50);
+}
+.sl-msgdetail__audio--big { padding: var(--sp-5) var(--sp-4); }
+.sl-msgdetail__audio audio { width: 100%; }
+.sl-msgdetail__text {
+  margin: 0;
+  padding: var(--sp-5) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--caramel-50);
+  font-size: 17px; line-height: 1.5; color: var(--caramel-900);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.sl-msgdetail__note { display: flex; flex-direction: column; gap: var(--sp-1); }
+
+/* ---------- chip lọc (lịch sử tin nhắn) ---------- */
+.sl-filters { display: flex; gap: var(--sp-2); overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.sl-filters::-webkit-scrollbar { display: none; }
+.sl-filter {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 var(--sp-3);
+  border-radius: var(--r-full);
+  border: 0.5px solid var(--caramel-300);
+  background: var(--neutral-0);
+  font-family: var(--font); font-size: 13px; font-weight: 500; line-height: 1;
+  color: var(--caramel-800);
+  cursor: pointer;
+}
+.sl-filter[aria-pressed="true"] { background: var(--rose-200); border-color: var(--rose-300); color: var(--rose-800); font-weight: 600; }

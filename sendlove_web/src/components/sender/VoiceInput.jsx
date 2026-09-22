@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { VoiceRecorder } from '../../utils/voiceRecorder';
 import Icon from '../ui/Icon';
 import { Actions, Button, Tips } from '../ui/Screen';
@@ -17,22 +17,46 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
   const recorderRef = useRef(null);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
+  // Vòng requestAnimationFrame đọc ref, không đọc state: state trong closure
+  // của drawWaveform là giá trị lúc bắt đầu thu (false), nên vòng vẽ dừng ngay.
+  const isRecordingRef = useRef(false);
+
+  // PHẢI khai báo trước mọi useEffect dùng nó trong deps: mảng deps được đọc
+  // ngay khi render, đọc một const chưa khởi tạo là ReferenceError (TDZ) —
+  // đúng lỗi "Cannot access 'p' before initialization" làm sập thẻ voice/tĩnh.
+  const stopRecording = useCallback(async () => {
+    if (!recorderRef.current || !isRecordingRef.current) return;
+    isRecordingRef.current = false;
+    setIsRecording(false);
+    cancelAnimationFrame(animationRef.current);
+
+    const data = await recorderRef.current.stop();
+    setRecordedData(data);
+  }, []);
 
   useEffect(() => {
-    let interval;
-    if (isRecording) {
-      interval = setInterval(() => {
-        setTime((prev) => {
-          if (prev >= 15) {
-            stopRecording();
-            return 15;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    }
+    if (!isRecording) return undefined;
+    const interval = setInterval(() => setTime((prev) => Math.min(prev + 1, 15)), 1000);
     return () => clearInterval(interval);
-  }, [isRecording, stopRecording]);
+  }, [isRecording]);
+
+  // Dừng ở effect riêng, không gọi trong updater của setTime: updater phải
+  // thuần (StrictMode gọi nó hai lần).
+  useEffect(() => {
+    if (isRecording && time >= 15) stopRecording();
+  }, [isRecording, time, stopRecording]);
+
+  // Tắt mic nếu rời màn khi đang thu.
+  useEffect(() => () => {
+    cancelAnimationFrame(animationRef.current);
+    if (isRecordingRef.current) recorderRef.current?.stop();
+  }, []);
+
+  const audioUrl = useMemo(
+    () => (recordedData ? URL.createObjectURL(recordedData.wavBlob) : null),
+    [recordedData],
+  );
+  useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
 
   const drawWaveform = () => {
     if (!recorderRef.current || !canvasRef.current) return;
@@ -53,7 +77,7 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
       x += barWidth + 1;
     }
 
-    if (isRecording) {
+    if (isRecordingRef.current) {
       animationRef.current = requestAnimationFrame(drawWaveform);
     }
   };
@@ -61,23 +85,12 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
   const startRecording = async () => {
     recorderRef.current = new VoiceRecorder();
     await recorderRef.current.start();
+    isRecordingRef.current = true;
     setIsRecording(true);
     setTime(0);
     setRecordedData(null);
     drawWaveform();
   };
-
-  // useCallback: identity chỉ đổi khi isRecording đổi — CÙNG nhịp với effect
-  // bên dưới. Nếu để hàm thường (đổi identity mỗi render) rồi thêm vào deps
-  // effect, interval đếm giờ sẽ bị lập lại mỗi lần component render lại.
-  const stopRecording = useCallback(async () => {
-    if (!recorderRef.current || !isRecording) return;
-    setIsRecording(false);
-    cancelAnimationFrame(animationRef.current);
-
-    const data = await recorderRef.current.stop();
-    setRecordedData(data);
-  }, [isRecording]);
 
   const handleConfirm = () => {
     if (recordedData && onRecordComplete) {
@@ -117,7 +130,7 @@ const VoiceInput = ({ onRecordComplete, onCancel }) => {
           <>
             <span className="sl-chip"><Icon name="mic" size={24} /></span>
             <span className="sl-label-s">Đã thu {recordedData.duration}s</span>
-            <audio controls src={URL.createObjectURL(recordedData.wavBlob)} style={{ width: '100%' }} />
+            <audio controls src={audioUrl} style={{ width: '100%' }} />
           </>
         )}
       </div>

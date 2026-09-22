@@ -184,7 +184,7 @@ export default function SenderUI() {
   if (step === 1) {
     return (
       <Screen>
-        <AppBar step="Bước 1/3" />
+        <AppBar step="Bước 1/3" onBack={() => navigate('/dashboard')} />
         <Body>
           <Header title="Gửi yêu thương" to={boxName} />
 
@@ -208,7 +208,7 @@ export default function SenderUI() {
           <Tips>Nội dung chỉ hiện trên hộp của bạn, không đăng ở đâu khác.</Tips>
 
           <Actions>
-            <Button kind="gho" onClick={() => navigate('/dashboard')}>
+            <Button kind="gho" onClick={() => navigate(`/box/${boxId}/sender/dashboard`)}>
               Lịch sử tin nhắn
             </Button>
           </Actions>

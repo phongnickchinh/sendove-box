@@ -33,11 +33,12 @@ const round = (x) => Math.round(x * 10) / 10;
 
 /** 75.4 → "1:15.4", 9 → "0:09" */
 export function fmtTime(sec) {
-  const s = Math.max(0, sec);
-  const m = Math.floor(s / 60);
-  const rest = s - m * 60;
-  const whole = Math.floor(rest);
-  const tenth = Math.round((rest - whole) * 10);
+  // Làm tròn tổng số phần mười TRƯỚC khi tách phút/giây: tách trước rồi mới
+  // làm tròn thì 59.96 ra "0:59" thay vì "1:00".
+  const tenths = Math.round(Math.max(0, sec) * 10);
+  const m = Math.floor(tenths / 600);
+  const whole = Math.floor((tenths % 600) / 10);
+  const tenth = tenths % 10;
   const base = `${m}:${String(whole).padStart(2, '0')}`;
-  return tenth && tenth < 10 ? `${base}.${tenth}` : base;
+  return tenth ? `${base}.${tenth}` : base;
 }

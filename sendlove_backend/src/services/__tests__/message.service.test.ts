@@ -1,0 +1,74 @@
+import { MessageService } from '../message.service';
+import { AppError } from '../../middleware/error-handler.middleware';
+
+const makeRepos = () => {
+  const msgRepo = {
+    createMessage: jest.fn(),
+    getMessage: jest.fn(),
+    listMessages: jest.fn(),
+    countMessagesSince: jest.fn(),
+    softDelete: jest.fn(),
+  };
+  const storageRepo = {
+    generateUploadPolicy: jest.fn(),
+    generateDownloadUrl: jest.fn(async (path: string) => `https://signed/${path}`),
+    deleteFile: jest.fn(),
+    deleteDirectory: jest.fn(),
+    downloadToLocal: jest.fn(),
+    uploadFromLocal: jest.fn(),
+    getFileMetadata: jest.fn(),
+    fileExists: jest.fn(),
+  };
+  return { msgRepo, storageRepo, service: new MessageService(msgRepo as any, storageRepo as any) };
+};
+
+describe('MessageService.getMessageDetails', () => {
+  it('ký URL cho file trình duyệt phát được, không ký bin', async () => {
+    const { msgRepo, storageRepo, service } = makeRepos();
+    msgRepo.getMessage.mockResolvedValue({
+      id: 'msg_1', type: 'video', timestamp: 1,
+      bin_url: 'media/b/msg_1/video.bin',
+      video_url: 'media/b/msg_1/original.mp4',
+      thumbnail_url: 'media/b/msg_1/thumb.jpg',
+      voice_url: 'media/b/msg_1/voice.wav',
+    });
+
+    const res = await service.getMessageDetails('b', 'msg_1');
+
+    expect(res.media).toEqual({
+      video: 'https://signed/media/b/msg_1/original.mp4',
+      thumbnail: 'https://signed/media/b/msg_1/thumb.jpg',
+      voice: 'https://signed/media/b/msg_1/voice.wav',
+    });
+    expect(storageRepo.generateDownloadUrl).not.toHaveBeenCalledWith('media/b/msg_1/video.bin', expect.anything());
+    expect(storageRepo.generateDownloadUrl).toHaveBeenCalledWith('media/b/msg_1/original.mp4', 15);
+    // Path thô vẫn giữ nguyên, không bị ghi đè bằng URL.
+    expect(res.video_url).toBe('media/b/msg_1/original.mp4');
+  });
+
+  it('dùng gif khi không có ảnh gốc', async () => {
+    const { msgRepo, service } = makeRepos();
+    msgRepo.getMessage.mockResolvedValue({ id: 'm', type: 'gif', timestamp: 1, gif_url: 'g.gif' });
+    const res = await service.getMessageDetails('b', 'm');
+    expect(res.media).toEqual({ image: 'https://signed/g.gif' });
+  });
+
+  it('một file ký lỗi không làm hỏng cả kết quả', async () => {
+    const { msgRepo, storageRepo, service } = makeRepos();
+    msgRepo.getMessage.mockResolvedValue({ id: 'm', type: 'image', timestamp: 1, image_url: 'a.jpg', bg_music_url: 'm.wav' });
+    storageRepo.generateDownloadUrl.mockImplementation(async (p: string) => {
+      if (p === 'a.jpg') throw new Error('boom');
+      return `https://signed/${p}`;
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await service.getMessageDetails('b', 'm');
+    expect(res.media).toEqual({ bg_music: 'https://signed/m.wav' });
+  });
+
+  it('404 khi không có tin', async () => {
+    const { msgRepo, service } = makeRepos();
+    msgRepo.getMessage.mockResolvedValue(null);
+    await expect(service.getMessageDetails('b', 'x')).rejects.toBeInstanceOf(AppError);
+  });
+});

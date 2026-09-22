@@ -5,6 +5,17 @@ import { FirebaseStorageRepository } from '../repositories/firebase/firebase-sto
 import { Message } from '../types/message.types';
 import { AppError } from '../middleware/error-handler.middleware';
 
+/** Signed URL đọc media cho web, hết hạn sau 15 phút (cùng mức /device/poll). */
+const MEDIA_URL_MINUTES = 15;
+
+export interface MessageMedia {
+  video?: string;
+  image?: string;
+  thumbnail?: string;
+  voice?: string;
+  bg_music?: string;
+}
+
 export class MessageService {
   constructor(
     private msgRepo: IMessageRepository = new FirebaseMessageRepository(),
@@ -138,11 +149,39 @@ export class MessageService {
   }
 
   /**
-   * Lấy chi tiết 1 tin nhắn
+   * Lấy chi tiết 1 tin nhắn, kèm signed URL đọc được cho web xem lại.
+   *
+   * Các trường *_url trong RTDB là storage path thô (confirmMessage), trình
+   * duyệt không mở được vì storage.rules chặn mọi thứ trừ box. Chỉ ký các file
+   * trình duyệt phát được — KHÔNG ký bin_url (định dạng SLBX riêng của hộp).
    */
-  async getMessageDetails(boxId: string, messageId: string): Promise<Message> {
+  async getMessageDetails(boxId: string, messageId: string): Promise<Message & { media: MessageMedia }> {
     const msg = await this.msgRepo.getMessage(boxId, messageId);
     if (!msg) throw new AppError(404, 'message_not_found', 'Message not found');
-    return msg;
+
+    const sources: Record<keyof MessageMedia, string | undefined> = {
+      video: msg.video_url,
+      image: msg.image_url || msg.gif_url,
+      thumbnail: msg.thumbnail_url,
+      voice: msg.voice_url,
+      bg_music: msg.bg_music_url,
+    };
+
+    const media: MessageMedia = {};
+    await Promise.all(
+      (Object.keys(sources) as (keyof MessageMedia)[]).map(async (key) => {
+        const path = sources[key];
+        if (!path) return;
+        try {
+          media[key] = await this.storageRepo.generateDownloadUrl(path, MEDIA_URL_MINUTES);
+        } catch (error) {
+          // Một file hỏng không được làm hỏng cả popup — thiếu file nào thì
+          // web ẩn đúng phần đó.
+          console.error(`[MessageService] Failed to sign ${path}`, error);
+        }
+      })
+    );
+
+    return { ...msg, media };
   }
 }

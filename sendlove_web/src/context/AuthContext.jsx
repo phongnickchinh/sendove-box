@@ -11,6 +11,9 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null); // Data from backend (e.g. boxes_list)
   const [loading, setLoading] = useState(true);
+  // Profile không tải được (mất mạng, backend tắt). Không báo thì Dashboard
+  // hiện "chưa có hộp nào" — người dùng tưởng mất hết hộp đã ghép.
+  const [profileError, setProfileError] = useState(false);
 
   // Lấy dữ liệu profile từ backend sau khi có auth token
   const fetchProfile = async () => {
@@ -18,9 +21,11 @@ export const AuthProvider = ({ children }) => {
       const res = await apiClient.get('/users/me');
       if (res.data.success) {
         setProfile(res.data.data);
+        setProfileError(false);
       }
     } catch (error) {
       console.error("Failed to fetch user profile:", error);
+      setProfileError(true);
       // Nếu user chưa tồn tại trên backend (vừa đăng ký xong), backend middleware 'requireAuth'
       // tự động gọi userRepository.createOrUpdate để tạo user mới nên thường sẽ không lỗi 404,
       // nhưng cứ an toàn catch lỗi ở đây.
@@ -44,6 +49,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user,
     profile,
+    profileError,
     loading,
     refreshProfile: fetchProfile // Export để component khác gọi lại khi thêm box mới
   };

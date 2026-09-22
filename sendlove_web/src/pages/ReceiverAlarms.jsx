@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAlarms, createAlarm, updateAlarm, deleteAlarm } from '../api/alarm';
+import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal } from '../components/ui/Screen';
+import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal, Tips } from '../components/ui/Screen';
 
 /**
  * Màn 10 "alarm config dialog" + màn 12 "alarm config full".
@@ -20,6 +21,7 @@ const MAX_ALARMS = 10;
 export default function ReceiverAlarms() {
   const { boxId } = useParams();
   const navigate = useNavigate();
+  const { profile } = useAuth();
 
   const [alarms, setAlarms] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +93,7 @@ export default function ReceiverAlarms() {
     <Screen>
       <AppBar onBack={() => navigate(`/box/${boxId}/receiver`)} />
       <Body>
-        <Header title="Báo thức" to={`Hộp ${boxId}`} />
+        <Header title="Báo thức" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
         {/* Đếm số đã dùng — đổi sang giọng cảnh báo khi chạm trần 10 */}
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -157,16 +159,11 @@ export default function ReceiverAlarms() {
           {full ? 'Danh sách báo thức đã đầy' : 'Thêm báo thức'}
         </button>
 
-        {full && (
-          <div className="sl-tips">
-            <Icon name="shield" size={16} />
-            <span>Hộp chứa được 10 báo thức. Xoá bớt một cái để có chỗ cho cái mới.</span>
-          </div>
-        )}
+        {full && <Tips>Hộp chứa được 10 báo thức. Xoá bớt một cái để có chỗ cho cái mới.</Tips>}
       </Body>
 
       {editing && (
-        <Modal>
+        <Modal onClose={saving ? undefined : () => setEditing(null)}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--sp-2)' }}>
             <div className="sl-listcard__mid">
               <span className="sl-heading">{editing.id ? 'Sửa báo thức' : 'Thêm báo thức'}</span>

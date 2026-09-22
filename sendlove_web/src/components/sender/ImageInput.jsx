@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
 import Icon from '../ui/Icon';
 import { Actions, Button, Tips } from '../ui/Screen';
+import useObjectUrl from '../../utils/useObjectUrl';
 
 const createImage = (url) =>
   new Promise((resolve, reject) => {
@@ -40,17 +41,17 @@ async function getCroppedImg(imageSrc, pixelCrop) {
 }
 
 const ImageInput = ({ onImageSelect, onCancel }) => {
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const [file, setFile] = useState(null);
+  const previewUrl = useObjectUrl(file);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
   const [isCropping, setIsCropping] = useState(false);
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setPreviewUrl(URL.createObjectURL(file));
-    }
+    const picked = e.target.files[0];
+    e.target.value = ''; // chọn lại đúng file cũ vẫn phải bắn onChange
+    if (picked) setFile(picked);
   };
 
   const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
@@ -110,7 +111,7 @@ const ImageInput = ({ onImageSelect, onCancel }) => {
             <Button kind="pri" onClick={handleConfirm} disabled={isCropping}>
               {isCropping ? 'Đang xử lý...' : 'Cắt & xác nhận'}
             </Button>
-            <Button kind="gho" onClick={() => setPreviewUrl(null)} disabled={isCropping}>
+            <Button kind="gho" onClick={() => setFile(null)} disabled={isCropping}>
               Chọn lại
             </Button>
           </>

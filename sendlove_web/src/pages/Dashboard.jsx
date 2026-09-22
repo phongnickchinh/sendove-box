@@ -1,12 +1,48 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { logOut } from '../api/auth';
+import { getBoxDetails } from '../api/box';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, CircleIcon } from '../components/ui/Screen';
+import { Screen, AppBar, Body, Button, CircleIcon } from '../components/ui/Screen';
+import { lastSeenMs, syncTone } from '../utils/boxStatus';
+import { timeAgo } from '../utils/messageFormat';
 
 const ROLE_LABEL = { sender: 'Người gửi', receiver: 'Người nhận' };
+
+const TONE_DOT = {
+  ok: 'var(--success-fill)',
+  late: 'var(--warning-fill)',
+  lost: 'var(--error-fill)',
+  unknown: 'var(--neutral-400)',
+};
+
+/**
+ * Hàng trạng thái dưới tên hộp: chấm màu + lần đồng bộ gần nhất, rồi % pin.
+ * Suy từ last_seen chứ không từ status.online (hộp ngủ gần như suốt).
+ */
+function BoxStatusRow({ status }) {
+  if (status === undefined) {
+    return <div className="sl-boxcard__status"><span className="sl-boxcard__statusitem">Đang đọc…</span></div>;
+  }
+  const seenAt = lastSeenMs(status);
+  const tone = syncTone(seenAt);
+  return (
+    <div className="sl-boxcard__status">
+      <span className="sl-boxcard__statusitem">
+        <span className="sl-boxcard__dot" style={{ background: TONE_DOT[tone] }} />
+        {status === null ? 'Không đọc được' : seenAt ? timeAgo(seenAt) : 'Chưa đồng bộ'}
+      </span>
+      {typeof status?.battery === 'number' && (
+        <span className="sl-boxcard__statusitem">
+          <Icon name="battery" size={13} />
+          {status.battery}%
+        </span>
+      )}
+    </div>
+  );
+}
 
 /** Ảnh đại diện 44px viền, hoặc chữ cái đầu tên nếu không có ảnh. */
 function Avatar({ user }) {
@@ -16,7 +52,13 @@ function Avatar({ user }) {
 }
 
 export default function Dashboard() {
-  const { user, profile } = useAuth();
+  const { user, profile, profileError, refreshProfile } = useAuth();
+  const [retrying, setRetrying] = useState(false);
+  const retryProfile = async () => {
+    setRetrying(true);
+    await refreshProfile();
+    setRetrying(false);
+  };
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [notifOpen, setNotifOpen] = useState(false);
@@ -29,6 +71,24 @@ export default function Dashboard() {
   };
 
   const boxes = Object.entries(profile?.boxes_list || {});
+  const boxIds = boxes.map(([id]) => id).join(',');
+
+  // boxId → status (undefined = đang đọc, null = không đọc được)
+  const [statuses, setStatuses] = useState({});
+  useEffect(() => {
+    if (!boxIds) return undefined;
+    let alive = true;
+    const ids = boxIds.split(',');
+    Promise.allSettled(ids.map((id) => getBoxDetails(id))).then((results) => {
+      if (!alive) return;
+      const next = {};
+      results.forEach((r, i) => {
+        next[ids[i]] = r.status === 'fulfilled' && r.value.success ? (r.value.data?.status || {}) : null;
+      });
+      setStatuses(next);
+    });
+    return () => { alive = false; };
+  }, [boxIds]);
   const firstName = user?.displayName?.split(' ').slice(-1)[0] || 'bạn';
   const popoverOpen = notifOpen || accountOpen;
 
@@ -56,7 +116,16 @@ export default function Dashboard() {
         }
       />
       <Body>
-        {boxes.length === 0 ? (
+        {profileError && boxes.length === 0 ? (
+          <div className="sl-card sl-card--center">
+            <CircleIcon size={56} bg="var(--error-bg)" color="var(--error-fill)" icon="alert" iconSize={24} />
+            <span className="sl-heading">Chưa tải được danh sách hộp</span>
+            <span className="sl-body">Kiểm tra kết nối mạng rồi thử lại. Các hộp đã ghép vẫn còn nguyên.</span>
+            <Button kind="gho" block={false} onClick={retryProfile} disabled={retrying}>
+              {retrying ? 'Đang thử lại…' : 'Thử lại'}
+            </Button>
+          </div>
+        ) : boxes.length === 0 ? (
           <>
             <span className="sl-section-label">Hộp của bạn</span>
             {/* Màu caramel-700 xác nhận từ Figma (#83513E) — riêng câu này,
@@ -87,18 +156,10 @@ export default function Dashboard() {
                         <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.3, color: 'var(--caramel-800)' }}>
                           {box.box_name}
                         </span>
-                        {/* Chưa có API trạng thái/pin cho danh sách hộp (gọi riêng từng hộp
-                            tốn N request) — mặc định cứng, xem sendlove-api-con-thieu.md. */}
-                        <div className="sl-boxcard__status">
-                          <span className="sl-boxcard__statusitem">
-                            <span className="sl-boxcard__dot" style={{ background: 'var(--success-fill)' }} />
-                            Online
-                          </span>
-                          <span className="sl-boxcard__statusitem">
-                            <Icon name="battery" size={13} />
-                            100%
-                          </span>
-                        </div>
+                        {/* Trạng thái thật, đọc riêng từng hộp (GET /boxes/:id — người
+                            dùng thường chỉ có 1-3 hộp). Trước đây viết cứng "Online /
+                            100%" cho mọi hộp — đúng loại dữ liệu giả không được hiện. */}
+                        <BoxStatusRow status={statuses[boxId]} />
                       </div>
                     </div>
 

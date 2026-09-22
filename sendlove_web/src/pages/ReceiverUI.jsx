@@ -7,7 +7,7 @@ import Icon from '../components/ui/Icon';
 import MessageDetail from '../components/MessageDetail';
 import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Screen';
 import { iconOf, timeAgo, titleOf } from '../utils/messageFormat';
-import { fwVersion, lastSeenMs } from '../utils/boxStatus';
+import { fwVersion, lastSeenMs, syncTone } from '../utils/boxStatus';
 
 /**
  * Màn 09 "box status + history-part" trong file Figma.
@@ -20,19 +20,6 @@ import { fwVersion, lastSeenMs } from '../utils/boxStatus';
  *              báo sạc. Chỉ hiện phần trăm pin.
  */
 
-const MINUTE = 60 * 1000;
-
-/**
- * Hộp thức mỗi 5 phút. Trễ tới 15 phút vẫn là bình thường (lỡ một hai nhịp);
- * quá 2 tiếng thì mới đáng gọi là mất liên lạc.
- */
-function syncTone(lastSeen) {
-  if (!lastSeen) return 'unknown';
-  const diff = Date.now() - lastSeen;
-  if (diff < 15 * MINUTE) return 'ok';
-  if (diff < 2 * 60 * MINUTE) return 'late';
-  return 'lost';
-}
 
 const TONE = {
   ok:      { bg: 'var(--success-bg)', fg: 'var(--success-fill)', icon: 'sync' },

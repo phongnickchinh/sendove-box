@@ -1,5 +1,14 @@
 import React from 'react';
+import { Screen, Body, Actions, Button, CircleIcon } from './ui/Screen';
 
+/**
+ * Lưới an toàn cuối cùng khi một trang ném lỗi lúc render.
+ *
+ * Trước đây là chữ đỏ tiếng Anh "Something went wrong" kèm stack trace và
+ * không có lối ra — người dùng chỉ còn cách tự tải lại. Giờ nói tiếng Việt,
+ * đúng phong cách, có hai lối thoát; chi tiết kỹ thuật gập lại để còn chụp
+ * gửi khi báo lỗi.
+ */
 export class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -16,18 +25,35 @@ export class ErrorBoundary extends React.Component {
   }
 
   render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{ padding: '20px', background: '#fff', color: 'red' }}>
-          <h2>Something went wrong.</h2>
-          <details style={{ whiteSpace: 'pre-wrap' }}>
-            {this.state.error && this.state.error.toString()}
-            <br />
-            {this.state.errorInfo && this.state.errorInfo.componentStack}
+    if (!this.state.hasError) return this.props.children;
+
+    const goHome = () => {
+      window.location.hash = '#/dashboard';
+      window.location.reload();
+    };
+
+    return (
+      <Screen>
+        <Body center>
+          <CircleIcon size={88} bg="var(--error-bg)" color="var(--error-fill)" icon="alert" iconSize={40} sw={2.5} />
+          <h1 className="sl-title">Có lỗi khi hiện trang này</h1>
+          <p className="sl-body" style={{ margin: 0 }}>
+            Dữ liệu của bạn không bị ảnh hưởng. Tải lại trang thường là đủ; nếu lỗi lặp lại, hãy chụp
+            phần chi tiết bên dưới gửi cho người phát triển.
+          </p>
+          <details style={{ alignSelf: 'stretch', textAlign: 'left' }}>
+            <summary className="sl-caption" style={{ cursor: 'pointer' }}>Chi tiết kỹ thuật</summary>
+            <pre className="sl-caption" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0 0' }}>
+              {this.state.error && this.state.error.toString()}
+              {this.state.errorInfo && this.state.errorInfo.componentStack}
+            </pre>
           </details>
-        </div>
-      );
-    }
-    return this.props.children;
+          <Actions>
+            <Button kind="pri" onClick={() => window.location.reload()}>Tải lại trang</Button>
+            <Button kind="gho" onClick={goHome}>Về trang chủ</Button>
+          </Actions>
+        </Body>
+      </Screen>
+    );
   }
 }

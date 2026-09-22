@@ -15,6 +15,22 @@ export function lastSeenMs(status) {
 
 export const fwVersion = (status) => status?.fw_version || status?.fw || null;
 
+const MINUTE = 60 * 1000;
+
+/**
+ * Tình trạng liên lạc suy từ last_seen — KHÔNG dùng status.online (hộp ngủ
+ * gần như suốt, online=false không có nghĩa là hỏng; xem memory
+ * sendlove-truong-chet). Hộp thức mỗi ~5 phút: trễ tới 15 phút vẫn bình
+ * thường, quá 2 tiếng mới đáng gọi là mất liên lạc.
+ */
+export function syncTone(seenAtMs) {
+  if (!seenAtMs) return 'unknown';
+  const diff = Date.now() - seenAtMs;
+  if (diff < 15 * MINUTE) return 'ok';
+  if (diff < 2 * 60 * MINUTE) return 'late';
+  return 'lost';
+}
+
 /**
  * Trần thời lượng video/âm thanh theo loại bộ nhớ của hộp.
  * NAND: 3 slot cố định ~5,3 MB → giữ 15s như trước.

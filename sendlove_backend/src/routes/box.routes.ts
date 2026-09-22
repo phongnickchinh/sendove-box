@@ -6,7 +6,8 @@ import { validate, pairBoxSchema, updateWifiSchema, updateBoxConfigSchema } from
 export default function boxRoutes(
   controller: BoxController,
   messageRouter: Router,
-  alarmRouter: Router
+  alarmRouter: Router,
+  themeRouter: Router
 ) {
   const router = Router();
 
@@ -21,6 +22,7 @@ export default function boxRoutes(
   // Mount nested routes
   router.use('/:boxId/messages', messageRouter);
   router.use('/:boxId/alarms', alarmRouter);
+  router.use('/:boxId/theme', themeRouter);
 
   return router;
 }

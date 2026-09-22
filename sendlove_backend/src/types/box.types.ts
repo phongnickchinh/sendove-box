@@ -1,5 +1,6 @@
 import { BaseModel } from './base.types';
 import { Alarm } from './alarm.types';
+import { BoxTheme } from './theme.types';
 
 // ==================================================
 // Box — Node: boxes/{box_id}
@@ -32,6 +33,9 @@ export interface BoxConfig {
   led_state?: LedState;
   display_brightness?: number; // 0-100
   playback_volume?: number;    // 0-100
+
+  /** Bố cục màn chờ, ghi qua PUT /boxes/:boxId/theme */
+  theme?: BoxTheme;
 }
 
 export interface BoxFlags {
@@ -40,6 +44,7 @@ export interface BoxFlags {
   ota_flag: boolean; /** Cờ báo có OTA firmware đang chờ */
   p_flag: boolean; /** Cờ báo có thay đổi pairing (thêm/ngắt kết nối) */
   config_flag: boolean; /** Cờ báo led_state/display_brightness/playback_volume đã thay đổi — ESP32 cần đọc lại */
+  theme_flag?: boolean; /** Cờ báo config/theme (màn chờ) đã đổi — firmware CHƯA đọc cờ này */
 }
 
 export interface BoxStatus {

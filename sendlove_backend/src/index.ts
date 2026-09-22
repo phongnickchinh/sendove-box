@@ -15,6 +15,7 @@ import deviceRoutes from './routes/device.routes';
 import musicRoutes from './routes/music.routes';
 import messageRoutes from './routes/message.routes';
 import alarmRoutes from './routes/alarm.routes';
+import themeRoutes from './routes/theme.routes';
 
 // Import DI Container
 import { createContainer } from './di/container';
@@ -47,7 +48,8 @@ app.use('/users', userRoutes(container.userController));
 
 const msgRouter = messageRoutes(container.messageController);
 const alrmRouter = alarmRoutes(container.alarmController);
-app.use('/boxes', boxRoutes(container.boxController, msgRouter, alrmRouter));
+const themeRouter = themeRoutes(container.themeController);
+app.use('/boxes', boxRoutes(container.boxController, msgRouter, alrmRouter, themeRouter));
 
 app.use('/device', deviceRoutes(container.deviceController));
 app.use('/music', musicRoutes(container.musicController));

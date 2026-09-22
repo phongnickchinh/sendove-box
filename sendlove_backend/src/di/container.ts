@@ -23,6 +23,7 @@ import { MessageService } from '../services/message.service';
 import { DeviceService } from '../services/device.service';
 import { AlarmService } from '../services/alarm.service';
 import { MusicService } from '../services/music.service';
+import { ThemeService } from '../services/theme.service';
 
 import { BoxController } from '../controllers/box.controller';
 import { AuthController } from '../controllers/auth.controller';
@@ -31,6 +32,7 @@ import { MessageController } from '../controllers/message.controller';
 import { DeviceController } from '../controllers/device.controller';
 import { AlarmController } from '../controllers/alarm.controller';
 import { MusicController } from '../controllers/music.controller';
+import { ThemeController } from '../controllers/theme.controller';
 
 export interface AppContainer {
   // Repositories
@@ -51,6 +53,7 @@ export interface AppContainer {
   deviceService: DeviceService;
   alarmService: AlarmService;
   musicService: MusicService;
+  themeService: ThemeService;
 
   // Controllers
   boxController: BoxController;
@@ -60,6 +63,7 @@ export interface AppContainer {
   deviceController: DeviceController;
   alarmController: AlarmController;
   musicController: MusicController;
+  themeController: ThemeController;
 }
 
 export function createContainer(): AppContainer {
@@ -81,6 +85,7 @@ export function createContainer(): AppContainer {
   const deviceService = new DeviceService(boxRepo, messageRepo, alarmRepo, fwRepo, otaRepo);
   const alarmService = new AlarmService(alarmRepo);
   const musicService = new MusicService(); // No deps
+  const themeService = new ThemeService(boxRepo, storageRepo);
 
   // 3. Instantiating Controllers with dependencies injected
   const boxController = new BoxController(boxService);
@@ -90,13 +95,14 @@ export function createContainer(): AppContainer {
   const deviceController = new DeviceController(deviceService);
   const alarmController = new AlarmController(alarmService);
   const musicController = new MusicController(musicService);
+  const themeController = new ThemeController(themeService);
 
   return {
     boxRepo, userRepo, messageRepo, rateLimitRepo,
     storageRepo, alarmRepo, otaRepo, fwRepo,
     boxService, authService, userService,
-    messageService, deviceService, alarmService, musicService,
+    messageService, deviceService, alarmService, musicService, themeService,
     boxController, authController, userController,
-    messageController, deviceController, alarmController, musicController
+    messageController, deviceController, alarmController, musicController, themeController
   };
 }

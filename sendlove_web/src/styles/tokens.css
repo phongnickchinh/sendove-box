@@ -25,11 +25,13 @@
   --caramel-800: #603A2C;
   --caramel-900: #3D2A20;
 
-  /* --- Neutral --- */
+  /* --- Neutral ---
+     400/500 sẫm hơn bản Figma gốc (#A89689 / #8A7767) để chữ đạt WCAG AA:
+     chữ mờ 2,69 → 4,80:1, chữ phụ 4,27 → 5,32:1 trên nền trang. */
   --neutral-0:   #FFFFFF;
   --neutral-100: #EAE0D6;
-  --neutral-400: #A89689;
-  --neutral-500: #8A7767;
+  --neutral-400: #7E6B5C;
+  --neutral-500: #76645A;
   --neutral-700: #5C4A3E;
 
   /* --- Semantic --- */
@@ -67,34 +69,86 @@
      không được trỏ token này về --caramel-900, vì --caramel-900 tự đảo màu
      trong dark mode và sẽ phá vỡ luật. */
   --on-accent: #3D2A20;
+
+  /* ============================================================
+     Token theo VAI TRÒ — component dùng lớp này, hai theme trỏ nó vào bảng
+     màu của mình. Luật màu:
+       rose     = hành động + thương hiệu (nút chính, toggle bật, focus, nút
+                  dạng chữ, pill người gửi) — KHÔNG làm viền/trang trí/chữ phụ
+       caramel  = đánh dấu người nhận (pill, nền avatar)
+       còn lại  = trung tính ấm (viền, chip danh sách, Tips, chevron)
+     ============================================================ */
+  --bg-page:   var(--caramel-50);
+  --bg-card:   var(--neutral-0);
+  --bg-sunken: #F3EAE1;          /* rãnh thanh chọn, nền chip trung tính */
+
+  --line-card:  #E6D6C6;         /* viền trang trí — thay caramel cam #E7AE75 */
+  --line-input: #9C8672;         /* viền điều khiển, ≥3:1 so với thẻ (3,46) */
+
+  --text-1:      var(--caramel-900);
+  --text-label:  var(--caramel-800);
+  --text-2:      var(--neutral-500);
+  --text-3:      var(--neutral-400);
+  --text-accent: var(--rose-700); /* chữ hồng CHỈ cho hành động */
+
+  --input-accent: var(--rose-800);
+  --toggle-track: #9C8672;        /* rãnh toggle tắt — cũ #EAE0D6 gần trắng trên trắng (1,30) */
+  --toggle-knob:  #FFFFFF;
+  --seg-track:    var(--bg-sunken);
+  --seg-on:       var(--neutral-0);
+
+  --chip-bg: var(--bg-sunken);     /* chip trong danh sách: trung tính */
+  --chip-fg: var(--caramel-700);
+  --chip-accent-bg: var(--rose-200); /* chip điểm nhấn: chọn loại tin, popup */
+  --chip-accent-fg: var(--rose-800);
+
+  --role-recv-bg: var(--caramel-100);
+  --role-recv-fg: var(--caramel-800);
 }
 
 /* ============================================================
-   Dark mode — override tầng BỀ MẶT (nền trang/thẻ, chữ, viền, đường kẻ).
-   KHÔNG đổi rose-*: đó là màu thương hiệu, giữ nguyên ở cả hai theme.
+   Dark mode — phương án C "rượu vang hồng" (review 2026-09-23).
+   Đổi tầng BỀ MẶT và các token vai trò. Bảng rose-* giữ nguyên (thương
+   hiệu); chỗ nào dùng rose làm CHỮ đi qua --text-accent / --chip-*.
    Áp dụng khi document có [data-theme="dark"] (ThemeContext đặt trên <html>).
    ============================================================ */
 :root[data-theme='dark'] {
-  --caramel-50:  #201810;  /* nền trang */
-  --caramel-100: #3A2C1E;  /* nền pill/chip nhạt */
-  --caramel-300: #4A3928;  /* viền thẻ/input */
-  --caramel-700: #C9A98A;  /* chữ phụ đậm (nhãn, icon) */
-  --caramel-800: #DAB998;  /* chữ nhãn trên thẻ */
-  --caramel-900: #F3E7DA;  /* chữ chính */
+  --caramel-50:  #1C1216;  /* nền trang */
+  --caramel-100: #3A2830;  /* nền pill/khối nhạt */
+  --caramel-300: #52394A;  /* viền */
+  --caramel-700: #D8B8C0;  /* chữ phụ đậm (nhãn, icon) */
+  --caramel-800: #EFD0D6;  /* chữ nhãn trên thẻ */
+  --caramel-900: #FAEEF0;  /* chữ chính */
 
-  --neutral-0:   #2C2117;  /* nền thẻ/modal */
-  --neutral-100: #3A2C20;  /* đường kẻ phân cách */
-  --neutral-400: #7C6A59;  /* chữ mờ nhất */
-  --neutral-500: #A9927E;  /* chữ phụ */
-  --neutral-700: #D8C6B4;  /* chữ nhãn */
+  --neutral-0:   #2E1E25;  /* nền thẻ/modal */
+  --neutral-100: #3A2830;  /* đường kẻ phân cách */
+  --neutral-400: #A68A93;  /* chữ mờ nhất — 5,82:1 trên nền */
+  --neutral-500: #C9ACB4;  /* chữ phụ — 7,56:1 trên thẻ */
+  --neutral-700: #E6CCD3;  /* chữ nhãn */
 
-  --rose-50: rgba(224, 117, 142, 0.16);  /* nền tint icon — rose trong suốt trên nền tối */
+  --rose-50: rgba(242, 138, 161, 0.14);  /* nền tint — rose trong suốt trên nền tối */
 
-  --success-bg: rgba(74, 124, 89, 0.18);  --success-text: #7FBF93;
-  --error-bg:   rgba(196, 68, 60, 0.18);  --error-text:   #E8897F;
+  --success-bg: rgba(74, 124, 89, 0.2);   --success-text: #86C79C;
+  --error-bg:   rgba(196, 68, 60, 0.2);   --error-text:   #EE958B;
   --warning-bg: rgba(216, 155, 60, 0.18); --warning-text: #E8B968;
 
   --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --bg-sunken: #140C10;
+  --line-card:  #52394A;
+  --line-input: #86667A;
+  --text-accent: #F7BCBE;
+  --input-accent: #F28AA1;
+  --toggle-track: #5A404C;
+  --toggle-knob:  #FAEEF0;
+  --seg-on:       #3A2830;
+  /* Chip hồng ĐẶC trên nền rượu vang là over color — dùng hồng trong suốt. */
+  --chip-bg: rgba(242, 138, 161, 0.14);
+  --chip-fg: #F4A3AF;
+  --chip-accent-bg: rgba(242, 138, 161, 0.22);
+  --chip-accent-fg: #F7BCBE;
+  --role-recv-bg: #4A3526;
+  --role-recv-fg: #F2CFA8;
 }
 
 /* ============================================================
@@ -106,4 +160,4 @@
 .sl-label   { font-size: 14px; font-weight: 500; line-height: 1.4;  color: var(--neutral-700); }
 .sl-label-s { font-size: 14px; font-weight: 600; line-height: 1.4;  color: var(--caramel-800); }
 .sl-caption { font-size: 12px; font-weight: 400; line-height: 1.4;  color: var(--neutral-500); }
-.sl-caption-s { font-size: 12px; font-weight: 600; line-height: 1.4; color: var(--rose-700); }
+.sl-caption-s { font-size: 12px; font-weight: 600; line-height: 1.4; color: var(--text-accent); }

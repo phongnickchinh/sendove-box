@@ -1,7 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import VideoInput from '../components/sender/VideoInput';
-import ImageInput from '../components/sender/ImageInput';
+// Kéo theo react-easy-crop — chỉ tải khi chọn thẻ Ảnh / Tin tĩnh.
+const ImageInput = lazy(() => import('../components/sender/ImageInput'));
+const loadingInput = <span className="sl-body">Đang tải…</span>;
 import VoiceInput from '../components/sender/VoiceInput';
 import EncodingProgress from '../components/sender/EncodingProgress';
 import Icon from '../components/ui/Icon';
@@ -287,7 +289,11 @@ export default function SenderUI() {
         )}
 
         {type === 'video' && <VideoInput onVideoSelect={processAndUpload} onCancel={handleCancel} maxSeconds={maxSeconds} />}
-        {type === 'image' && <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} />}
+        {type === 'image' && (
+          <Suspense fallback={loadingInput}>
+            <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} />
+          </Suspense>
+        )}
         {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} maxSeconds={voiceMax} />}
 
         {type === 'text' && (
@@ -326,7 +332,9 @@ export default function SenderUI() {
           <>
             {/* Ảnh (tuỳ chọn) */}
             {!staticImageBlob ? (
-              <ImageInput onImageSelect={setStaticImageBlob} onCancel={handleCancel} />
+              <Suspense fallback={loadingInput}>
+                <ImageInput onImageSelect={setStaticImageBlob} onCancel={handleCancel} />
+              </Suspense>
             ) : (
               <div className="sl-card sl-card--center">
                 <span className="sl-chip"><Icon name="image" size={24} /></span>

@@ -1,7 +1,5 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, FacebookAuthProvider } from "firebase/auth";
-import { getDatabase } from "firebase/database";
-import { getStorage } from "firebase/storage";
 
 // Cấu hình Firebase từ biến môi trường Vite
 const firebaseConfig = {
@@ -19,8 +17,9 @@ const app = initializeApp(firebaseConfig);
 
 // Khởi tạo các dịch vụ
 export const auth = getAuth(app);
-export const database = getDatabase(app);
-export const storage = getStorage(app);
+// Web không đọc RTDB hay Storage trực tiếp — mọi thứ đi qua backend (api/*),
+// media dùng signed URL. Khởi tạo getDatabase/getStorage chỉ để thừa từng làm
+// bundle nặng thêm ~123 kB (645 → 522 kB), nên đã bỏ.
 
 // Provider cho Google Sign-in
 export const googleProvider = new GoogleAuthProvider();

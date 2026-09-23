@@ -46,34 +46,3 @@ export function maxSecondsFor(box) {
 
 /** Trần kích thước file bin backend chấp nhận (message.service.ts initiateMessage). */
 export const MAX_BIN_BYTES = 25 * 1024 * 1024;
-
-/**
- * Trần MỘT file media firmware hiện tại tải được (MAX_MEDIA_BYTES, config.h).
- * Vượt trần, firmware huỷ tải và KHÔNG tăng last_download_ts
- * (NetworkManager.cpp "ts fail" → break) — nên tin quá cỡ bị tải lại mãi ở mọi
- * lần đồng bộ và chặn luôn MỌI tin gửi sau nó. Không được để lọt.
- */
-export const FW_MAX_MEDIA_BYTES = 5500000;
-
-/**
- * Trần kích thước file bin gửi được cho hộp này: firmware báo
- * status.max_media_bytes (khi đã nâng trần) thì dùng số đó, không thì trần của
- * bản firmware hiện tại. Không bao giờ vượt trần backend.
- */
-/**
- * Trần âm thanh firmware PHÁT được: AUDIO_MAX_PCM_BYTES = 600000 (config.h).
- * Lớn hơn thì AudioPlayer báo "AUDC invalid size" và im lặng — tải về vẫn
- * được, nên không kẹt hàng đợi, nhưng tin thoại thành tin câm. Ở 8 kHz mono
- * 16-bit trần này là 37 giây (mediaEncoder tự hạ 8 kHz khi quá 18,7s).
- */
-export const FW_AUDIO_PCM_BYTES = 600000;
-
-export function maxAudioSecondsFor(box) {
-  const pcm = Number(box?.status?.max_audio_pcm_bytes) || FW_AUDIO_PCM_BYTES;
-  return Math.floor(pcm / (8000 * 2));
-}
-
-export function maxBinBytesFor(box) {
-  const fw = Number(box?.status?.max_media_bytes) || FW_MAX_MEDIA_BYTES;
-  return Math.min(fw, MAX_BIN_BYTES);
-}

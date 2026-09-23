@@ -72,7 +72,7 @@ export default function ThemePicker() {
 
         <div className="sl-card" style={{ padding: 'var(--sp-3)', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <Icon name="palette" size={16} style={{ color: 'var(--rose-700)' }} />
+            <Icon name="palette" size={16} style={{ color: 'var(--text-2)' }} />
             <span className="sl-caption" style={{ flex: 1, fontWeight: 500 }}>Xem trước 240 × 240</span>
             <span className="sl-caption" style={{ fontWeight: 600, color: 'var(--caramel-900)' }}>
               {current?.name || '…'}
@@ -98,7 +98,7 @@ export default function ThemePicker() {
                   aria-pressed={on}
                   style={{
                     padding: '10px var(--sp-4)', cursor: 'pointer',
-                    borderColor: on ? 'var(--rose-400)' : 'var(--caramel-300)',
+                    borderColor: on ? 'var(--rose-400)' : 'var(--line-card)',
                     borderWidth: on ? 1 : 0.5,
                   }}
                 >
@@ -108,7 +108,7 @@ export default function ThemePicker() {
                     <span className="sl-caption">{t.what}</span>
                   </div>
                   {on
-                    ? <Icon name="check" size={20} style={{ color: 'var(--rose-700)' }} />
+                    ? <Icon name="check" size={20} style={{ color: 'var(--text-accent)' }} />
                     : <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />}
                 </button>
               );

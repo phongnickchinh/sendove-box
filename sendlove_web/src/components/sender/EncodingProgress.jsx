@@ -24,7 +24,7 @@ function StepRow({ state, label }) {
   if (state === 'done') {
     dot = <CircleIcon size={20} bg="var(--success-bg)" color="var(--success-fill)" icon="check" iconSize={16} />;
   } else if (state === 'now') {
-    dot = <CircleIcon size={20} bg="var(--rose-200)" color="var(--rose-800)" icon="up" iconSize={16} />;
+    dot = <CircleIcon size={20} bg="var(--chip-accent-bg)" color="var(--chip-accent-fg)" icon="up" iconSize={16} />;
   } else {
     dot = (
       <span

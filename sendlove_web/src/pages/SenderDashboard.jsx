@@ -93,8 +93,8 @@ export default function SenderDashboard() {
       <Body>
         <Header title="Lịch sử tin nhắn" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
-        <div className="sl-note" style={{ border: '0.5px solid var(--caramel-300)', alignItems: 'center' }}>
-          <Icon name="sync" size={16} style={{ color: 'var(--rose-700)' }} />
+        <div className="sl-note" style={{ border: '0.5px solid var(--line-card)', alignItems: 'center' }}>
+          <Icon name="sync" size={16} style={{ color: 'var(--text-2)' }} />
           <span style={{ fontWeight: 500, color: 'var(--neutral-500)' }}>
             {lastSeen ? `Hộp thức dậy lần cuối ${timeAgo(lastSeen)}` : 'Chưa rõ lần hộp thức gần nhất'}
           </span>
@@ -142,7 +142,7 @@ export default function SenderDashboard() {
                   )}
                   <button type="button" className="sl-listcard sl-msgrow" style={{ alignItems: 'flex-start' }}
                     onClick={() => setOpenMsg(msg)}>
-                    <span className="sl-chip">
+                    <span className="sl-chip sl-chip--muted">
                       <Icon name={iconOf(msg)} size={20} />
                     </span>
                     <span className="sl-listcard__mid">

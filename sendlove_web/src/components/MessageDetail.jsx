@@ -112,7 +112,7 @@ function AudioRow({ label, src, big = false }) {
     <div className={`sl-msgdetail__audio${big ? ' sl-msgdetail__audio--big' : ''}`}>
       {label && (
         <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-          <Icon name="mic" size={16} style={{ color: 'var(--rose-700)' }} />
+          <Icon name="mic" size={16} style={{ color: 'var(--text-accent)' }} />
           <span className="sl-label-s">{label}</span>
         </span>
       )}

@@ -3,6 +3,14 @@ import Icon from '../ui/Icon';
 import { SCREEN } from '../../theme/layout';
 
 /**
+ * Màu của MÀN HỘP THẬT — cố định, KHÔNG theo theme web. Dùng var(--caramel-*)
+ * thì ở dark mode nền xem trước thành nâu/rượu vang tối, còn chữ giờ vẫn
+ * #000000 theo theme của hộp → biến mất. Màn hộp là vật thật, một màu duy nhất.
+ */
+const BOX_BG = '#F6DFB3';
+const BOX_INK = '#83513E';
+
+/**
  * Màn hình thật của hộp, vẽ 1:1 ở 240 × 240 để x/y/w/h trong theme đọc thẳng
  * được trên hình, không phải quy đổi.
  *
@@ -19,7 +27,7 @@ export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes, ba
         maxWidth: '100%',
         borderRadius: 8,
         overflow: 'hidden',
-        background: background ? `center / cover no-repeat url(${background})` : 'var(--caramel-100)',
+        background: background ? `center / cover no-repeat url(${background})` : BOX_BG,
         alignSelf: 'center',
         flex: '0 0 auto',
       }}
@@ -38,7 +46,7 @@ export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes, ba
         const box = showBoxes
           ? {
               borderRadius: 4,
-              border: sel ? '1.5px solid var(--rose-500)' : '0.5px dashed var(--caramel-700)',
+              border: sel ? '1.5px solid var(--rose-500)' : `0.5px dashed ${BOX_INK}`,
               background: sel ? 'rgba(253,240,239,.35)' : 'transparent',
             }
           : {};
@@ -88,14 +96,14 @@ export function Thumb({ widgets, size = 40 }) {
     <span style={{
       flex: '0 0 auto', position: 'relative',
       width: size, height: size,
-      borderRadius: 8, background: 'var(--caramel-100)', overflow: 'hidden',
+      borderRadius: 8, background: BOX_BG, overflow: 'hidden',
     }}>
       {widgets.map((w, i) => (
         <span key={i} style={{
           position: 'absolute',
           left: w.x * k, top: w.y * k,
           width: Math.max(2, w.w * k), height: Math.max(2, w.h * k * 0.7),
-          background: 'var(--caramel-700)', borderRadius: 1,
+          background: BOX_INK, borderRadius: 1,
         }} />
       ))}
     </span>

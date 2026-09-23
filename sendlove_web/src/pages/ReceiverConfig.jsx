@@ -116,6 +116,17 @@ export default function ReceiverConfig() {
           <span className="sl-body">Đang tải…</span>
         ) : (
           <>
+            {/* Firmware hiện tại chỉ đọc a_flag + alarm_list từ DB (NetworkManager
+                syncWakeup) — wifi_config và config_flag không ai đọc. Nói MỘT lần ở
+                đầu trang, trung tính: hai dải vàng cạnh nhau làm trang rối mắt. */}
+            <div className="sl-note">
+              <Icon name="info" size={16} />
+              <span>
+                Bản firmware hiện tại chưa áp dụng Wi-Fi, đèn, độ sáng và âm lượng lưu từ đây.
+                Muốn đổi Wi-Fi ngay, dùng trang cài đặt khi hộp phát Wi-Fi riêng.
+              </span>
+            </div>
+
             {/* --- Wi-Fi --- */}
             <label className="sl-field">
               <span className="sl-label">Tên Wi-Fi (SSID)</span>
@@ -151,17 +162,6 @@ export default function ReceiverConfig() {
               </span>
             </label>
 
-            {/* Firmware hiện tại chỉ đọc a_flag + alarm_list từ DB (NetworkManager
-                syncWakeup) — wifi_config và config_flag không ai đọc. Không hứa
-                "hộp sẽ nhận" khi thật ra nó không nhận. */}
-            <div className="sl-note sl-note--warn">
-              <Icon name="wifi" size={16} />
-              <span>
-                Phiên bản firmware hiện tại của hộp chưa đọc Wi-Fi lưu ở đây. Muốn đổi
-                ngay, dùng trang cài đặt khi hộp phát Wi-Fi riêng.
-              </span>
-            </div>
-
             <Button kind="gho" onClick={saveWifi} disabled={savingWifi}>
               {savingWifi ? 'Đang lưu…' : 'Lưu Wi-Fi'}
             </Button>
@@ -192,11 +192,6 @@ export default function ReceiverConfig() {
             <Slider label="Âm lượng phát" value={cfg.playback_volume}
               onChange={(v) => setCfg({ ...cfg, playback_volume: v })} />
 
-            <div className="sl-note sl-note--warn">
-              <Icon name="alert" size={16} />
-              <span>Firmware hiện tại chưa áp dụng đèn, độ sáng và âm lượng lưu từ đây.</span>
-            </div>
-
             <Button kind="gho" onClick={saveConfig} disabled={savingCfg}>
               {savingCfg ? 'Đang lưu…' : 'Lưu đèn, màn hình và âm lượng'}
             </Button>
@@ -206,7 +201,7 @@ export default function ReceiverConfig() {
               type="button" className="sl-listcard" style={{ cursor: 'pointer' }}
               onClick={() => navigate(`/box/${boxId}/receiver/theme`)}
             >
-              <Icon name="palette" size={20} style={{ color: 'var(--rose-800)' }} />
+              <Icon name="palette" size={20} style={{ color: 'var(--chip-fg)' }} />
               <div className="sl-listcard__mid">
                 <span className="sl-label-s">Giao diện màn hình hộp</span>
                 <span className="sl-caption">Bố cục, phông chữ và màu trên màn 240 × 240.</span>
@@ -216,28 +211,26 @@ export default function ReceiverConfig() {
 
             {/* --- firmware: chỉ đọc, hộp tự cài --- */}
             <div className="sl-listcard">
-              <CircleIcon size={40} bg="var(--caramel-50)" color="var(--caramel-700)" icon="gear" iconSize={20} />
+              <CircleIcon size={40} bg="var(--chip-bg)" color="var(--chip-fg)" icon="gear" iconSize={20} />
               <div className="sl-listcard__mid">
                 <span className="sl-label-s">Firmware {fwVersion(box?.status) || '—'}</span>
-                <span className="sl-caption">
-                  {box?.flags?.ota_flag ? 'Có bản mới đang chờ — hộp tự cài lấy.' : 'Đang là bản mới nhất.'}
-                </span>
+                {/* Không nói "đang là bản mới nhất / hộp tự cài": firmware không đọc
+                    ota_flag, OTA giờ do người dùng kích hoạt trên hộp. */}
+                <span className="sl-caption">Phiên bản hộp báo ở lần đồng bộ gần nhất.</span>
               </div>
             </div>
 
-            {/* --- vùng nguy hiểm --- */}
+            {/* --- vùng nguy hiểm: chữ + icon màu lỗi trên nền thẻ, không tô cả khối đỏ --- */}
             <button
               type="button" className="sl-listcard" onClick={() => setConfirmUnpair(true)}
-              style={{ background: 'var(--error-bg)', borderColor: 'var(--error-fill)', cursor: 'pointer' }}
+              style={{ cursor: 'pointer' }}
             >
-              <Icon name="unlink" size={20} style={{ color: 'var(--error-fill)' }} />
+              <Icon name="unlink" size={20} style={{ color: 'var(--error-text)' }} />
               <div className="sl-listcard__mid">
                 <span className="sl-label-s" style={{ color: 'var(--error-text)' }}>Huỷ ghép đôi hộp này</span>
-                <span className="sl-caption" style={{ color: 'var(--error-text)' }}>
-                  Dừng nhận tin nhắn và báo thức cho hộp.
-                </span>
+                <span className="sl-caption">Dừng nhận tin nhắn và báo thức cho hộp.</span>
               </div>
-              <Icon name="chevron" size={16} style={{ color: 'var(--error-fill)' }} />
+              <Icon name="chevron" size={16} style={{ color: 'var(--text-3)' }} />
             </button>
           </>
         )}

@@ -104,7 +104,7 @@ export default function ThemeEditor() {
 
         {/* --- ảnh nền --- */}
         <div className="sl-listcard">
-          <Icon name="image" size={20} style={{ color: 'var(--rose-800)' }} />
+          <Icon name="image" size={20} style={{ color: 'var(--chip-fg)' }} />
           <div className="sl-listcard__mid">
             <span className="sl-label-s">Ảnh nền</span>
             <span className="sl-caption">
@@ -183,7 +183,7 @@ export default function ThemeEditor() {
           <span className="sl-heading">Thêm widget</span>
           {Object.entries(WIDGET_TYPES).map(([type, m]) => (
             <button key={type} type="button" className="sl-listcard sl-msgrow" onClick={() => addWidget(type)}>
-              <Icon name={m.icon} size={20} style={{ color: 'var(--rose-800)' }} />
+              <Icon name={m.icon} size={20} style={{ color: 'var(--chip-fg)' }} />
               <span className="sl-listcard__mid">
                 <span className="sl-label-s">{m.label}</span>
                 <span className="sl-caption">
@@ -200,7 +200,7 @@ export default function ThemeEditor() {
       {sel && meta && (
         <Modal onClose={() => setSelectedId(null)}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <Icon name={sel.icon} size={20} style={{ color: 'var(--rose-700)' }} />
+            <Icon name={sel.icon} size={20} style={{ color: 'var(--text-accent)' }} />
             <span className="sl-heading" style={{ flex: 1 }}>{sel.label}</span>
             <span style={{
               padding: '3px 8px', borderRadius: 999, background: 'var(--caramel-100)',

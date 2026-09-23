@@ -137,7 +137,7 @@ export default function ReceiverUI() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[...messages].sort((a, b) => b.timestamp - a.timestamp).map((msg) => (
               <button type="button" className="sl-listcard sl-msgrow" key={msg.id} onClick={() => setOpenMsg(msg)}>
-                <span className="sl-chip">
+                <span className="sl-chip sl-chip--muted">
                   <Icon name={iconOf(msg)} size={20} />
                 </span>
                 <span className="sl-listcard__mid">
@@ -161,7 +161,7 @@ function NavTile({ icon, label, onClick }) {
   return (
     <button type="button" className="sl-listcard" onClick={onClick}
       style={{ height: 64, padding: '0 var(--sp-3)', gap: 10, cursor: 'pointer', flex: 1 }}>
-      <Icon name={icon} size={20} style={{ color: 'var(--rose-800)' }} />
+      <Icon name={icon} size={20} style={{ color: 'var(--chip-fg)' }} />
       <span className="sl-label-s" style={{ flex: 1, textAlign: 'left' }}>{label}</span>
       <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
     </button>

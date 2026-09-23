@@ -504,7 +504,7 @@
   border-radius: var(--r-sm);
   /* Xác nhận Figma (Frame 42 trong account-popover.json): nền caramel-50,
      KHÔNG phải trắng — trước đây dùng nhầm neutral-0. */
-  background: var(--caramel-50);
+  background: var(--bg-popover);
   box-shadow: var(--shadow-modal);
 }
 .sl-popover__row {

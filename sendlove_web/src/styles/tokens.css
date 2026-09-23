@@ -81,6 +81,7 @@
   --bg-page:   var(--caramel-50);
   --bg-card:   var(--neutral-0);
   --bg-sunken: #F3EAE1;          /* rãnh thanh chọn, nền chip trung tính */
+  --bg-popover: var(--caramel-50); /* Figma account-popover; dark nổi hơn nền */
 
   --line-card:  #E6D6C6;         /* viền trang trí — thay caramel cam #E7AE75 */
   --line-input: #9C8672;         /* viền điều khiển, ≥3:1 so với thẻ (3,46) */
@@ -135,6 +136,7 @@
   --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.5);
 
   --bg-sunken: #140C10;
+  --bg-popover: #3A2830;  /* trùng màu nền trang thì popover chìm vào trang */
   --line-card:  #52394A;
   --line-input: #86667A;
   --text-accent: #F7BCBE;

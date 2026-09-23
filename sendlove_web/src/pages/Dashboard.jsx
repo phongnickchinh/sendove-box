@@ -181,7 +181,7 @@ export default function Dashboard() {
                 <Icon name="palette" size={21} style={{ flex: '0 0 auto' }} />
                 <span style={{ flex: 1 }}>Giao diện tối</span>
                 <button
-                  type="button" className="sl-toggle" role="switch"
+                  type="button" className="sl-toggle sl-toggle--accent" role="switch"
                   aria-checked={theme === 'dark'} aria-label="Bật giao diện tối"
                   onClick={toggleTheme}
                 >

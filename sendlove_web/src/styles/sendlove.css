@@ -43,7 +43,7 @@
   .sl-page { background: var(--rose-50); padding: var(--sp-8) 0; }
   .sl-shell {
     min-height: min(932px, calc(100dvh - var(--sp-8) * 2));
-    border: 1px solid var(--line-card);
+    border: 1px solid var(--shell-line);
     border-radius: var(--r-lg);
     overflow: hidden;
   }
@@ -160,8 +160,9 @@
   background: var(--chip-accent-bg);
   color: var(--chip-accent-fg);
 }
-/* Chip trong DANH SÁCH (tin nhắn, widget, ô điều hướng): trung tính — một
-   hàng ô hồng đặc lặp mỗi dòng là thứ làm trang rối mắt nhất. */
+/* Chip trong DANH SÁCH (tin nhắn, widget, ô điều hướng). Light: hồng như
+   thiết kế gốc. Dark: hồng trong suốt — một hàng ô hồng ĐẶC trên nền rượu
+   vang là over color. */
 .sl-chip--muted { background: var(--chip-bg); color: var(--chip-fg); }
 
 /* ---------- circle(): vòng tròn icon ---------- */
@@ -174,10 +175,10 @@
 /* ---------- tips(): dải nhắc nhỏ ---------- */
 .sl-tips {
   display: flex; align-items: flex-start; gap: 5px;
-  color: var(--text-2);
+  color: var(--tip-text);
   font-size: 12px; line-height: 1.4;
 }
-.sl-tips svg { flex: 0 0 auto; margin-top: 1px; color: var(--text-accent); }
+.sl-tips svg { flex: 0 0 auto; margin-top: 1px; color: var(--tip-icon); }
 
 /* ---------- btn(): 390x44, r8. Chữ trên nút hồng là caramel/900 ---------- */
 .sl-btn {
@@ -324,6 +325,11 @@
   transition: background .18s ease;
 }
 .sl-toggle[aria-checked="true"] { background: var(--rose-400); justify-content: flex-end; }
+/* Toggle "Giao diện tối" trong account-popover: Figma dùng accent caramel
+   (#B87548, cùng tông chevron/pill receiver ở box-card), KHÔNG phải hồng như
+   toggle báo thức. Dark mode trỏ token này về hồng (caramel sáng trên nền
+   rượu vang không đủ tương phản với núm). */
+.sl-toggle--accent[aria-checked="true"] { background: var(--toggle-accent-on); }
 .sl-toggle__knob {
   width: 18px; height: 18px;
   border-radius: var(--r-full);
@@ -338,7 +344,7 @@
   width: 100%;
   padding: 14px var(--sp-4);
   border-radius: var(--r-md);
-  border: 1px dashed var(--line-input);
+  border: 1px dashed var(--add-line);
   background: transparent;
   color: var(--text-accent);
   font-family: var(--font);
@@ -437,15 +443,15 @@
   padding: var(--sp-6) var(--sp-4);
   border-radius: 16px;
   /* dash:[4,4] xác nhận từ Figma — viền đứt, không phải viền đặc. */
-  border: 1px dashed var(--line-input);
+  border: 1px dashed var(--add-line);
   background: transparent;
   cursor: pointer;
 }
 .sl-addbox__dot {
   width: 40px; height: 40px;
   border-radius: var(--r-full);
-  background: var(--chip-bg);
-  color: var(--text-accent);
+  background: var(--add-dot-bg);
+  color: var(--add-dot-fg);
   display: inline-flex; align-items: center; justify-content: center;
 }
 .sl-addbox__label { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text-accent); }
@@ -471,11 +477,11 @@
   flex: 0 0 auto;
   padding: 2px 10px;
   border-radius: var(--r-full);
-  color: var(--on-accent);
+  color: var(--rolepill-fg);
   font-size: 14px; font-weight: 600; line-height: 1.4; /* xác nhận Figma: 14/SemiBold, không phải 12 */
 }
 .sl-rolepill--sender { background: var(--rose-400); }
-.sl-rolepill--receiver { background: var(--role-recv-bg); color: var(--role-recv-fg); }
+.sl-rolepill--receiver { background: var(--rolepill-recv-bg); color: var(--rolepill-recv-fg); }
 
 /* ---------- avatar tròn: ảnh hoặc chữ cái đầu ---------- */
 .sl-avatar {
@@ -617,7 +623,8 @@
 }
 /* Viền KHÔNG theo vai trò nữa: viền + avatar + pill + chevron cùng hồng (hoặc
    cùng caramel) là bốn lần nói một điều. Vai trò giờ chỉ nằm ở pill + nền avatar. */
-.sl-boxcard--sender, .sl-boxcard--receiver { border-color: var(--line-card); }
+.sl-boxcard--sender { border-color: var(--boxcard-line-sender); }
+.sl-boxcard--receiver { border-color: var(--boxcard-line-recv); }
 
 .sl-boxcard__left { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 
@@ -643,7 +650,8 @@
 /* Chevron trong nhóm phải: rose-500 khớp tuyệt đối cho sender; receiver dùng
    caramel-700 (không có hex gốc trong thang, giữ đúng ý "đậm hơn pill một
    bậc" của Figma). */
-.sl-boxcard__chevron--sender, .sl-boxcard__chevron--receiver { color: var(--text-3); }
+.sl-boxcard__chevron--sender { color: var(--chevron-sender); }
+.sl-boxcard__chevron--receiver { color: var(--chevron-recv); }
 
 /* ---------- dòng tin nhắn bấm được (lịch sử người gửi, danh sách người nhận) ---------- */
 .sl-msgrow {
@@ -701,7 +709,7 @@
   color: var(--caramel-800);
   cursor: pointer;
 }
-.sl-filter[aria-pressed="true"] { background: var(--chip-accent-bg); border-color: transparent; color: var(--chip-accent-fg); font-weight: 600; }
+.sl-filter[aria-pressed="true"] { background: var(--chip-accent-bg); border-color: var(--boxcard-line-sender); color: var(--chip-accent-fg); font-weight: 600; }
 
 /* ---------- chọn đoạn video/âm thanh: hai range chồng nhau ----------
    Thumb 20px nên vạch ray thụt vào 10px mỗi bên — tâm thumb chạy đúng từ đầu

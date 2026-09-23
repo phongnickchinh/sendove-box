@@ -72,7 +72,7 @@ export default function ThemePicker() {
 
         <div className="sl-card" style={{ padding: 'var(--sp-3)', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <Icon name="palette" size={16} style={{ color: 'var(--text-2)' }} />
+            <Icon name="palette" size={16} style={{ color: 'var(--text-accent)' }} />
             <span className="sl-caption" style={{ flex: 1, fontWeight: 500 }}>Xem trước 240 × 240</span>
             <span className="sl-caption" style={{ fontWeight: 600, color: 'var(--caramel-900)' }}>
               {current?.name || '…'}

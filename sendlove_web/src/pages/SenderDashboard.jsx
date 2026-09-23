@@ -94,7 +94,7 @@ export default function SenderDashboard() {
         <Header title="Lịch sử tin nhắn" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
         <div className="sl-note" style={{ border: '0.5px solid var(--line-card)', alignItems: 'center' }}>
-          <Icon name="sync" size={16} style={{ color: 'var(--text-2)' }} />
+          <Icon name="sync" size={16} style={{ color: 'var(--text-accent)' }} />
           <span style={{ fontWeight: 500, color: 'var(--neutral-500)' }}>
             {lastSeen ? `Hộp thức dậy lần cuối ${timeAgo(lastSeen)}` : 'Chưa rõ lần hộp thức gần nhất'}
           </span>

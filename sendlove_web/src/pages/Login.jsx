@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithGoogle, signInWithFacebook } from '../api/auth';
+import { signInWithGoogle, signInWithFacebook, readRedirectError } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
 import { Screen } from '../components/ui/Screen';
 
@@ -38,6 +38,19 @@ function FacebookMark() {
   );
 }
 
+function messageOf(err) {
+  switch (err?.code) {
+    case 'auth/operation-not-allowed':
+      return 'Cách đăng nhập này chưa được bật cho ứng dụng. Thử Google, hoặc báo cho quản trị viên.';
+    case 'auth/account-exists-with-different-credential':
+      return 'Email này đã đăng ký bằng cách đăng nhập khác. Thử đăng nhập bằng Google.';
+    case 'auth/network-request-failed':
+      return 'Không kết nối được. Kiểm tra mạng rồi thử lại.';
+    default:
+      return 'Đăng nhập thất bại. Vui lòng thử lại.';
+  }
+}
+
 export default function Login() {
   const [loading, setLoading] = useState(null); // null | 'google' | 'facebook'
   const [error, setError] = useState(null);
@@ -48,20 +61,23 @@ export default function Login() {
     if (user) navigate('/dashboard', { replace: true });
   }, [user, navigate]);
 
+  // Vừa quay về từ lượt đăng nhập redirect (dự phòng khi popup bị chặn):
+  // thành công thì AuthContext đã có user; lỗi thì phải hiện, không im lặng.
+  useEffect(() => {
+    let alive = true;
+    readRedirectError().then((err) => { if (alive && err) setError(messageOf(err)); });
+    return () => { alive = false; };
+  }, []);
+
   const runLogin = async (provider, fn) => {
     setLoading(provider);
     setError(null);
     const res = await fn();
-    if (res.error) {
-      setError(
-        res.error.code === 'auth/operation-not-allowed'
-          ? 'Cách đăng nhập này chưa được bật cho ứng dụng. Thử Google, hoặc báo cho quản trị viên.'
-          : 'Đăng nhập thất bại. Vui lòng thử lại.'
-      );
-      setLoading(null);
-      return;
-    }
-    // Không tự điều hướng: useEffect ở trên chạy khi AuthContext có user.
+    if (res.redirecting) return; // trang đang chuyển sang Google/Facebook
+    if (res.error) setError(messageOf(res.error));
+    // Thành công: useEffect ở trên điều hướng khi AuthContext có user.
+    // Tự đóng cửa sổ (cancelled) hoặc lỗi: trả nút về, hết treo "Đang kết nối…".
+    if (res.error || res.cancelled) setLoading(null);
   };
 
   return (

@@ -23,22 +23,33 @@ bool SDCardManager::init(uint8_t csPin, SemaphoreHandle_t spiMutex) {
     _spiMutex = spiMutex;
     _mounted = false;
 
-    if (!acquireSPI()) return false;
+    // Reset mem (nut RST, OTA, WDT) KHONG ngat dien the: the co the dang do mot
+    // lenh doc thi chip reset, nen lan SD.begin() dau sau reset hay fail du the
+    // van tot. Fail la hop chay rong toi luc rut dien: isFull() = true va
+    // unread = 0 -> log "msg skip: het slot, unread=0" moi chu ky sync.
+    // SD.begin() fail tu don dep (_pdrv = 0xFF) nen goi lai duoc ngay.
+    bool ok = false;
+    uint32_t cardMB = 0;
+    uint8_t attempt = 0;
+    for (; attempt < 3 && !ok; attempt++) {
+        if (attempt > 0) delay(200); // Khong giu mutex luc cho.
+        if (!acquireSPI()) return false;
 
-    // SD.begin() mac dinh 4MHz -> qua cham cho video 15fps. Thu vien tu ha ve
-    // 400kHz trong lúc init roi moi dung con so nay. max_files = 5 du cho 3
-    // handle dong thoi (write + read tuan tu + read ngau nhien).
-    bool ok = SD.begin(_csPin, SPI, SD_SPI_FREQ_HZ, "/sd", 5, false);
-    uint32_t cardMB = ok ? (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL)) : 0;
+        // SD.begin() mac dinh 4MHz -> qua cham cho video 15fps. Thu vien tu ha ve
+        // 400kHz trong lúc init roi moi dung con so nay. max_files = 5 du cho 3
+        // handle dong thoi (write + read tuan tu + read ngau nhien).
+        ok = SD.begin(_csPin, SPI, SD_SPI_FREQ_HZ, "/sd", 5, false);
+        if (ok) cardMB = (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL));
 
-    releaseSPI();
+        releaseSPI();
+    }
 
     _mounted = ok;
     if (!ok) {
-        DLOG("[SD] mount FAIL");
+        DLOG("[SD] mount FAIL (%u lan)", (unsigned)attempt);
         return false;
     }
-    DLOG("[SD] mounted %lu MB", (unsigned long)cardMB);
+    DLOG("[SD] mounted %lu MB (lan %u)", (unsigned long)cardMB, (unsigned)attempt);
     return true;
 }
 

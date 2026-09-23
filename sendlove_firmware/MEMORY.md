@@ -2004,6 +2004,8 @@ hiếm khi tắt máy trúng lúc đang đầy.
 - `NetworkManager::syncWakeup()`, tại cổng `isFull()`: nâng sàn
   `if (_numOfNewMsg < storage->getUnreadCount()) _numOfNewMsg = ...` mỗi chu kỳ sync, và in
   `unread=<n>` vào log `het slot` để phân biệt "đầy thật" với "`writeSlotIndex` trỏ nhầm".
+  > **Đính chính 2026-09-24 (§26):** `unread=0` KHÔNG thể là "`writeSlotIndex` trỏ nhầm", vì
+  > `writeIndexSafe()` đã kẹp chỉ số. Trường hợp đó nghĩa là thẻ SD không mount được.
 - `src/main.cpp`, cả nhánh STANDBY lẫn nhánh VIDEO: câu hỏi "có tin để đọc không" hỏi thẳng
   `storage->getNextUnreadIdentifier()` thay vì `getNumOfNewMsg() > 0`; nhánh "Downloading..." nay
   kích hoạt bằng `network.hasPendingMessages()`. `getNumOfNewMsg()` không còn lời gọi nào — giữ
@@ -2230,3 +2232,38 @@ chờ `[OTA] ban moi da xac nhan`.
 8. Nạp **cáp** → **không** thấy `[OTA] ban moi dang thu thach`.
 9. Để báo thức kêu, giữ tay tắt rồi giữ tiếp → về STANDBY, **không** vào OTA.
 10. Vào/ra chế độ OTA liên tiếp 5 lần, mỗi lần gọi `/api/status` → luôn trả 200, không treo/reset.
+
+## 26. "msg skip: het slot, unread=0" sau reboot = thẻ SD không mount (2026-09-24)
+
+**Triệu chứng (user báo).** Sau khi reboot chip, mỗi chu kỳ sync đều in
+`[NET] msg skip: het slot, unread=0`, không tải thêm tin nào.
+
+**Nguyên nhân (suy từ code, CHƯA có log boot xác nhận).** Với bản SD, `unread=0` mà `isFull()`
+vẫn true thì chỉ có một khả năng: `_mounted == false`. Khi đó `SDStorageProvider::isFull()` trả
+true, còn `getUnreadCount()` trả 0. Nhánh "con trỏ ghi trỏ nhầm" mà comment ở §23 và
+`NetworkManager.cpp` từng gán cho trường hợp `unread == 0` là **SAI**: `writeIndexSafe()` kẹp
+chỉ số về 0..SD_SLOT_COUNT-1, `loadManifest()` cũng kẹp thêm một lần. `_mounted` chỉ được gán
+**một lần** lúc boot (`SD.begin()` gọi một lần, không retry, không remount). Mount fail thì hộp
+chạy rỗng đến tận lúc rút điện.
+
+Tại sao lại xảy ra sau reboot: reset mềm (nút RST, OTA, WDT) không ngắt điện thẻ. Nếu thẻ đang
+làm dở một lệnh đọc khi chip reset thì lần `SD.begin()` đầu tiên sau đó hay fail, dù thẻ không
+hỏng gì.
+
+**Đã sửa.** `SDCardManager::init()` thử `SD.begin()` tối đa 3 lần, mỗi lần cách 200 ms, và
+không giữ `spiMutex` trong lúc chờ. Không cần gọi `SD.end()` giữa hai lần thử, vì khi fail
+`SDFS::begin()` tự `sdcard_uninit` và đặt lại `_pdrv = 0xFF`. Log boot giờ in số lần thử:
+`[SD] mounted N MB (lan k)` hoặc `[SD] mount FAIL (3 lan)`. Comment ở `NetworkManager.cpp`
+đã sửa theo đúng nghĩa của `unread=0`.
+
+**Không làm:** remount định kỳ lúc đang chạy (cắm thẻ nóng). Đó là tính năng riêng, chỉ làm khi
+user yêu cầu.
+
+Build `pio run` OK: RAM 15.8%, Flash 69.0%. Chưa nạp lên máy.
+
+### Chưa kiểm chứng trên máy thật
+1. Log boot có `[BOOT] storage: SD`, sau đó là `[SD] mounted ... (lan k)`. Nếu k > 1 thì retry
+   đã cứu được lần boot đó.
+2. Nhấn RST nhiều lần, kể cả lúc đang phát video: không còn `het slot, unread=0`.
+3. Nếu vẫn `[SD] mount FAIL (3 lan)` thì nghi phần cứng: dây, nguồn 3.3V của module thẻ, hoặc
+   tốc độ `SD_SPI_FREQ_HZ`.

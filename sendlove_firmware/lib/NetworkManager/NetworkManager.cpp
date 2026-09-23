@@ -788,7 +788,10 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
             uint8_t unread = storage->getUnreadCount();
             if (_numOfNewMsg < unread) _numOfNewMsg = unread;
             // In kèm số slot chưa đọc: phân biệt "đầy thật" (unread > 0) với
-            // "con trỏ ghi trỏ nhầm" (unread == 0 mà vẫn báo đầy).
+            // "thẻ SD không mount được" (unread == 0 mà vẫn báo đầy: khi
+            // !_mounted, SDStorageProvider::isFull() trả true còn
+            // getUnreadCount() trả 0). Con trỏ ghi đã bị kẹp bởi
+            // writeIndexSafe() nên không thể là nguyên nhân (MEMORY.md §26).
             DLOG("[NET] msg skip: het slot, unread=%u", (unsigned)unread);
         } else {
             checkAndDownloadNewMessages(storage);

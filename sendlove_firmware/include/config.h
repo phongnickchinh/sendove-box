@@ -31,6 +31,9 @@ static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
 static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 60000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
+// Chạm ngắn lúc đang sync: lệnh phát tin được giữ chờ tối đa bấy nhiêu ms, sync xong
+// là tự phát (không bắt chạm lại). Quá hạn thì huỷ. User chốt 60s 2026-09-24.
+static constexpr uint32_t PENDING_PLAY_MAX_WAIT_MS = 60000;
 
 // Display Backlight
 static constexpr uint8_t BACKLIGHT_DAY_PERCENT = 100;
@@ -53,7 +56,7 @@ static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
 // tu truoc. Day la thoat som + log ro ly do: truoc do mot URL tra ve stream
 // vo tan (hoac Content-Length noi doi) khien box tai vai phut roi moi chet o
 // cho khac, khong ai biet vi sao.
-static constexpr uint32_t MAX_MEDIA_BYTES = 5500000;
+static constexpr uint32_t MAX_MEDIA_BYTES = 25500000;
 
 // Firebase Configuration (Lưu trong config_secrets.h để chống lộ API trên Git)
 #include "config_secrets.h"
@@ -108,7 +111,7 @@ static constexpr size_t FIREBASE_URL_MAX_LEN = 1792;
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";
-static constexpr const char *FW_VERSION = "2.1.0";
+static constexpr const char *FW_VERSION = "0.1.1";
 // Chuỗi chạm vào/ra chế độ OTA (user chốt 2026-09-21): giữ 3s → nhả → giữ 3s → nhả
 // (hiện nhắc "giữ thêm 6s") → giữ TOUCH_OTA_HOLD_MS. Không dùng một cú giữ dài duy nhất
 // vì TTP223 TỰ HIỆU CHUẨN sau 7-8s chạm liên tục và từ đó báo là đã nhả dù tay vẫn đặt

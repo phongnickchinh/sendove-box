@@ -2267,3 +2267,56 @@ Build `pio run` OK: RAM 15.8%, Flash 69.0%. Chưa nạp lên máy.
 2. Nhấn RST nhiều lần, kể cả lúc đang phát video: không còn `het slot, unread=0`.
 3. Nếu vẫn `[SD] mount FAIL (3 lan)` thì nghi phần cứng: dây, nguồn 3.3V của module thẻ, hoặc
    tốc độ `SD_SPI_FREQ_HZ`.
+
+## 27. Chạm phát tin lúc đang sync: xếp hàng thay vì phát chồng (2026-09-24)
+
+**Triệu chứng (user test trên máy thật, bản chưa có sửa đổi này).** Chạm ngắn để xem tin trong
+lúc sync đang chạy thì hộp **reboot** ngay. Trước đó user thấy video + tiếng giật khi sync/mạng
+chưa xong. Chưa có số `[BOOT] reset=` của lần reboot đó: `12` = panic (nghi hết heap), `9` =
+brownout (Wi-Fi TX + ampli + đèn nền cùng lúc, liên quan việc chọn LDO trên PCB).
+
+**Kẽ hở.** Cổng chặn chạm ở `Task_UIController` chỉ xét `isDownloadingMedia()`. Sync đang ở bước
+Wi-Fi/NTP/cờ/status, hoặc ở khe giữa hai tin (`_isDownloadingMedia` tạm về false,
+`NetworkManager.cpp` sau mỗi tin), thì chạm vẫn gọi `playItem()`. `syncWakeup()` chỉ tự dừng ở
+6 điểm kiểm tra `isPlaybackActive()` GIỮA các bước; bước đang dở (TLS handshake, GET) chạy tiếp
+song song. RAM: phát cần ~74KB (`_jpegBuffer` 32KB + `JPEGDEC` 17,9KB + DMA I2S 24KB), TLS cần
+35-45KB (§8, §21).
+
+**Đã sửa (`src/main.cpp`, `config.h`).**
+- Cờ `s_pendingPlay` (atomic) = hàng đợi 1 chỗ. Chạm ngắn ở STANDBY khi `isSyncing()` mà chưa tải
+  media → bật chờ, hiện "Dang dong bo, se tu phat...". Vòng `Task_MediaPlayer` quét mỗi vòng:
+  `!isSyncing()` thì phát, quá `PENDING_PLAY_MAX_WAIT_MS` thì huỷ.
+- Tách `startNextUnread(fromPending)` từ nhánh chạm STANDBY. Hai nhánh `hasPendingMessages()`
+  (STANDBY và cuối VIDEO) tự kích sync tải tiếp nên cũng bật chờ, nhưng **chỉ khi
+  `isSyncing()` đúng ngay sau `triggerFirebaseSync()`** (sync bị từ chối thì chờ là quay vòng).
+  Đang chạy từ lệnh chờ thì bật lại cờ mà **giữ hạn cũ**: mất Wi-Fi mà `_hasPendingMessages`
+  còn true thì mỗi vòng sync fail lại quay về nhánh này, gia hạn mỗi lần là thử mãi.
+  Bản đầu tiên (chưa nạp) bỏ hẳn việc bật lại khi `fromPending` → tải xong vẫn bắt chạm lại,
+  đúng lỗi user muốn bỏ.
+- Huỷ chờ: báo thức bắt đầu kêu, chạm giữ, hết hạn. Chặn ngủ khi đang chờ (`Task_UIController`
+  ưu tiên cao hơn, có thể cho ngủ trước khi lệnh chờ chạy).
+- Dòng nhắc vẽ lại sau mỗi lần render màn chờ, như `drawOtaPrompt`.
+
+**User chốt 2026-09-24:** hạn chờ **60s**; chạm lúc **đang tải media vẫn bỏ qua** như cũ (không
+xếp hàng); chế độ AP cấu hình Wi-Fi **không** tính là bận (AP có thể bật vô thời hạn, không TLS).
+
+**Đã loại:**
+- Đẩy lại `TOUCH_SHORT` vào `eventQueue`: vòng lặp nhận lại ngay, quay tròn.
+- Callback khi sync xong: `_isSyncing = false` nằm ở ~12 lối thoát của `syncWakeup()`.
+- Tính cờ chờ vào `isPlaybackActive()`: sync đang tải tự huỷ ở điểm kiểm tra kế tiếp mà không bật
+  `_hasPendingMessages` → chờ xong không có tin mới để phát.
+- Chặn theo `getMaxAllocHeap()`: phân mảnh kéo dài thì lệnh chờ không bao giờ chạy.
+
+**Lưu ý:** việc này bỏ một nguồn tranh chấp RAM/CPU, KHÔNG thay kết luận §14 (NAND 20MHz) và §24
+(DMA I2S cạn trên SD). Tin phát lúc không có sync mà vẫn giật thì nguyên nhân nằm ở §24.
+
+Build `pio run` OK: RAM 15.8%, Flash 69.0%. Chưa nạp lên máy.
+
+### Chưa kiểm chứng trên máy thật
+1. Chạm lúc log đang giữa `[NET] sync start` và `sync_done` → dòng nhắc, **không reboot**, rồi
+   `[PLAY] pending fire waited=Nms heap=… maxblk=…` và tin tự phát.
+2. Chạm lúc không sync → phát ngay như cũ.
+3. Chờ quá 60s (sync kẹt Wi-Fi) → `[PLAY] pending het han 60s`, dòng nhắc tắt, sau đó ngủ bình thường.
+4. Báo thức kêu lúc đang chờ → tắt báo thức xong không tự phát tin.
+5. Chạm giữ lúc đang chờ → `[PLAY] pending huy`.
+6. Đọc hết tin mà cloud còn tin (slot từng đầy) → "Downloading...", tải xong tự phát.

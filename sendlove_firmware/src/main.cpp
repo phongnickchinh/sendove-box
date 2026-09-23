@@ -49,6 +49,17 @@ static volatile bool forceStandbyRedraw = false;
 static SemaphoreHandle_t spiMutex = nullptr;
 static QueueHandle_t eventQueue = nullptr;
 
+// Lệnh phát tin đang chờ sync xong (hàng đợi 1 chỗ: nhiều cú chạm gộp làm một, vì
+// lệnh không mang tham số gì, chỉ là "phát tin chưa đọc kế tiếp"). Task_MediaPlayer
+// bật/tắt, Task_UIController đọc để không cho ngủ lúc đang chờ.
+//
+// Vì sao phải chờ: phát tin cấp ~74KB (_jpegBuffer 32KB + JPEGDEC 17,9KB + DMA I2S
+// 24KB), phiên TLS của sync cần 35-45KB (MEMORY.md §8, §21). Chạy chồng nhau trên
+// chip một lõi thì giật, và đã thấy REBOOT thật khi chạm lúc đang sync (2026-09-24).
+// KHÔNG tính cờ này vào isPlaybackActive(): sync đang tải sẽ tự huỷ ở điểm kiểm tra
+// kế tiếp mà không bật _hasPendingMessages -> chờ xong chẳng có tin mới nào để phát.
+static std::atomic<bool> s_pendingPlay{false};
+
 // ============================================================================
 // Rollback sau OTA
 // ============================================================================
@@ -234,6 +245,89 @@ void Task_MediaPlayer(void *pvParameters) {
       else if (currentAppState == AppState::STATE_OTA) drawOtaScreen();
   };
 
+  // ---- Lệnh phát đang chờ sync xong (xem s_pendingPlay) ----
+  uint32_t pendingPlaySinceMs = 0;
+  uint32_t pendingPlayDeadline = 0;
+
+  // Dải đáy y 200-239, cùng chỗ với toast. Render màn chờ đè mất nó nên vòng STANDBY
+  // vẽ lại sau mỗi lần render, như drawOtaPrompt.
+  auto drawPendingHint = []() {
+      if (!appCtx.display.acquireSPI()) return;
+      LGFX* tft = appCtx.display.getTFT();
+      tft->fillRect(0, 200, 240, 40, TFT_BLACK);
+      tft->setTextDatum(lgfx::middle_center);
+      tft->setTextSize(1);
+      tft->setTextColor(TFT_WHITE);
+      tft->drawString("Dang dong bo, se tu phat...", 120, 220);
+      appCtx.display.releaseSPI();
+  };
+
+  // Hạn tính từ cú chạm ĐẦU TIÊN; chạm thêm lúc đang chờ không gia hạn.
+  auto armPendingPlay = [&pendingPlaySinceMs, &pendingPlayDeadline]() {
+      if (s_pendingPlay) return;
+      pendingPlaySinceMs = millis();
+      pendingPlayDeadline = pendingPlaySinceMs + PENDING_PLAY_MAX_WAIT_MS;
+      s_pendingPlay = true;
+      DLOG("[PLAY] pending: sync dang chay");
+  };
+
+  auto cancelPendingPlay = []() {
+      if (!s_pendingPlay) return;
+      s_pendingPlay = false;
+      if (currentAppState == AppState::STATE_STANDBY) forceStandbyRedraw = true;
+      DLOG("[PLAY] pending huy");
+  };
+
+  // Phát tin chưa đọc kế tiếp từ STANDBY. fromPending = đang chạy lệnh chờ (xem nhánh
+  // hasPendingMessages() bên dưới).
+  auto startNextUnread = [&currentId, &playStartTime, &drawToast, &armPendingPlay](bool fromPending) {
+      char unreadId[32] = "";
+      // Hỏi THẺ, không hỏi biến đếm RAM. getNumOfNewMsg() từng là cổng ở
+      // đây, nhưng nó chỉ được gán bên trong checkAndDownloadNewMessages()
+      // — hàm nằm SAU cổng isFull() — nên sau một lần reset trong lúc đang
+      // đầy slot, nó kẹt ở 0 trong khi cờ unread trên thẻ vẫn còn: hộp vừa
+      // báo "No new messages" lúc chạm, vừa báo "het slot" lúc sync, và
+      // slot thì chỉ được trả lại bằng cách đọc -> không có đường ra.
+      if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
+         // Gán VIDEO TRƯỚC playItem(): triggerWakeupSync() thấy isPlaybackActive() thì
+         // từ chối, nên không sync mới nào chen vào lúc đang cấp phát bộ đệm phát.
+         currentAppState = AppState::STATE_VIDEO;
+         appCtx.display.clear();
+         strncpy(currentId, unreadId, sizeof(currentId) - 1);
+         if (appCtx.player.playItem(currentId)) {
+             playStartTime = millis();
+         } else {
+             DLOG("[PLAY] FAIL -> STANDBY");
+             currentAppState = AppState::STATE_STANDBY;
+             forceStandbyRedraw = true;
+         }
+      } else if (appCtx.network.hasPendingMessages()) {
+         // Hết tin chưa đọc trên thẻ nhưng vòng tải trước đã phải bỏ dở
+         // vì hết slot -> vừa đọc xong là có chỗ, kéo tiếp ngay.
+         DLOG("[PLAY] no local unread, downloading...");
+         appCtx.player.stop();
+         drawToast("Downloading...");
+         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
+         bool isCharging = appCtx.powerManager.isCharging();
+         appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+         // Tải xong tự phát, không bắt chạm lại. Chỉ chờ khi sync THẬT SỰ chạy:
+         // triggerWakeupSync() bật _isSyncing trong vùng găng trước khi trả về, bị từ
+         // chối hay tạo task lỗi thì isSyncing() = false -> chờ là quay vòng ngay.
+         if (appCtx.network.isSyncing()) {
+             // Đang chạy từ lệnh chờ: giữ HẠN CŨ, tính từ cú chạm đầu. Mất Wi-Fi mà
+             // _hasPendingMessages còn true thì mỗi vòng sync fail lại vào đây; gia hạn
+             // mỗi lần là thử lại mãi mãi.
+             if (fromPending) s_pendingPlay = true;
+             else armPendingPlay();
+         }
+      } else {
+         appCtx.display.turnOn();
+         drawToast("No new messages");
+         vTaskDelay(1000);
+         forceStandbyRedraw = true;
+      }
+  };
+
   for (;;) {
     // Báo thức: hỏi mỗi 500ms ở mọi trạng thái (kêu đè lên cả lúc đang xem tin),
     // trừ khi đang kêu sẵn, đang nạp OTA, hoặc đang ở CHẾ ĐỘ OTA (user chốt tắt hẳn
@@ -247,6 +341,8 @@ void Task_MediaPlayer(void *pvParameters) {
         currentAppState = AppState::STATE_ALARM;
         // Cú chạm xếp hàng từ trước không được tắt ngay báo thức vừa kêu.
         xQueueReset(eventQueue);
+        // Cũng không được tự phát tin sau khi tắt báo thức.
+        s_pendingPlay = false;
         // Thức dậy bằng timer thì màn hình còn tắt (turnOn chỉ gọi khi wake bằng chạm).
         appCtx.display.turnOn();
         appCtx.layoutEngine.renderAlarmScreen(&appCtx.display, alarmTime, ALARM_HINT);
@@ -285,6 +381,9 @@ void Task_MediaPlayer(void *pvParameters) {
         lastUserActivity = millis();
         continue;
       }
+
+      // Chạm giữ = người dùng thôi không muốn xem nữa. Vẫn đi tiếp xuống chuỗi OTA.
+      if (event == SystemEvent::TOUCH_LONG) cancelPendingPlay();
 
       // ---- Chuỗi chạm OTA (xem otaSeqStep) ----
       bool otaSeqState = (currentAppState == AppState::STATE_STANDBY ||
@@ -329,42 +428,20 @@ void Task_MediaPlayer(void *pvParameters) {
       if (event == SystemEvent::TOUCH_SHORT) {
         if (currentAppState == AppState::STATE_STANDBY) {
            if (appCtx.network.isDownloadingMedia()) {
+               // User chốt 2026-09-24: chạm lúc ĐANG TẢI vẫn bỏ qua như cũ, không xếp
+               // hàng. (Task_UIController vốn đã nuốt chạm lúc tải; nhánh này chỉ bắt
+               // trường hợp tải bắt đầu giữa lúc gửi và lúc nhận event.)
                appCtx.player.stop();
                drawToast("Downloading...");
+           } else if (appCtx.network.isSyncing()) {
+               // Sync chưa tải media (Wi-Fi, NTP, cờ, status, hoặc khe giữa hai tin)
+               // nhưng có thể đang giữ phiên TLS -> không phát chồng lên, xếp hàng.
+               // Thức bằng timer thì màn hình còn tắt.
+               armPendingPlay();
+               appCtx.display.turnOn();
+               drawToast("Dang dong bo, se tu phat...");
            } else {
-               char unreadId[32] = "";
-               // Hỏi THẺ, không hỏi biến đếm RAM. getNumOfNewMsg() từng là cổng ở
-               // đây, nhưng nó chỉ được gán bên trong checkAndDownloadNewMessages()
-               // — hàm nằm SAU cổng isFull() — nên sau một lần reset trong lúc đang
-               // đầy slot, nó kẹt ở 0 trong khi cờ unread trên thẻ vẫn còn: hộp vừa
-               // báo "No new messages" lúc chạm, vừa báo "het slot" lúc sync, và
-               // slot thì chỉ được trả lại bằng cách đọc -> không có đường ra.
-               if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
-                  currentAppState = AppState::STATE_VIDEO;
-                  appCtx.display.clear();
-                  strncpy(currentId, unreadId, sizeof(currentId) - 1);
-                  if (appCtx.player.playItem(currentId)) {
-                      playStartTime = millis();
-                  } else {
-                      DLOG("[PLAY] FAIL -> STANDBY");
-                      currentAppState = AppState::STATE_STANDBY;
-                      forceStandbyRedraw = true;
-                  }
-               } else if (appCtx.network.hasPendingMessages()) {
-                  // Hết tin chưa đọc trên thẻ nhưng vòng tải trước đã phải bỏ dở
-                  // vì hết slot -> vừa đọc xong là có chỗ, kéo tiếp ngay.
-                  DLOG("[PLAY] no local unread, downloading...");
-                  appCtx.player.stop();
-                  drawToast("Downloading...");
-                  uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
-                  bool isCharging = appCtx.powerManager.isCharging();
-                  appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
-               } else {
-                  appCtx.display.turnOn();
-                  drawToast("No new messages");
-                  vTaskDelay(1000);
-                  forceStandbyRedraw = true;
-               }
+               startNextUnread(false);
            }
         } else if (currentAppState == AppState::STATE_VIDEO) {
            if (event == SystemEvent::TOUCH_SHORT) {
@@ -391,6 +468,8 @@ void Task_MediaPlayer(void *pvParameters) {
                uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
                bool isCharging = appCtx.powerManager.isCharging();
                appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
+               // Tải xong tự phát tiếp, không bắt chạm lại (điều kiện như ở startNextUnread).
+               if (appCtx.network.isSyncing()) armPendingPlay();
            } else {
                appCtx.player.stop();
                if (appCtx.display.acquireSPI()) {
@@ -413,6 +492,25 @@ void Task_MediaPlayer(void *pvParameters) {
            forceStandbyRedraw = true;
            lastUserActivity = millis();
         }
+      }
+    }
+
+    // Lệnh phát đang chờ: quét mỗi vòng thay vì chờ callback, vì _isSyncing được hạ ở
+    // ~12 lối thoát khác nhau của syncWakeup(). isSyncing() gồm cả Wi-Fi, NTP, Firebase
+    // và tải media. Chế độ AP cấu hình Wi-Fi KHÔNG tính là bận (user chốt 2026-09-24):
+    // AP có thể bật vô thời hạn và không mở TLS.
+    if (s_pendingPlay && currentAppState == AppState::STATE_STANDBY) {
+      if (!appCtx.network.isSyncing()) {
+        s_pendingPlay = false;
+        DLOG("[PLAY] pending fire waited=%lums heap=%u maxblk=%u",
+             (unsigned long)(millis() - pendingPlaySinceMs), (unsigned)ESP.getFreeHeap(),
+             (unsigned)ESP.getMaxAllocHeap());
+        sleep(2000); // cho chip nghỉ 2s trước khi phát tin, tránh giật do vừa sync xong
+        startNextUnread(true);
+      } else if ((int32_t)(millis() - pendingPlayDeadline) > 0) {
+        s_pendingPlay = false;
+        forceStandbyRedraw = true;
+        DLOG("[PLAY] pending het han %lus", (unsigned long)(PENDING_PLAY_MAX_WAIT_MS / 1000));
       }
     }
 
@@ -439,6 +537,7 @@ void Task_MediaPlayer(void *pvParameters) {
         appCtx.layoutEngine.renderStandbyScreen(&appCtx.display, &appCtx.network, fullRedraw);
         lastClockRender = now;
         forceStandbyRedraw = false;
+        if (s_pendingPlay) drawPendingHint();
         // Render vừa rồi có thể đè mất lời nhắc. Không vẽ lúc đang giữ tay: sẽ xoá
         // thanh tiến trình của cú giữ cuối.
         if (otaSeqStep == 2 && appCtx.ui.getTouchHoldMs() == 0) drawOtaPrompt();
@@ -563,6 +662,9 @@ void Task_UIController(void *pvParameters) {
         // tiên 22) có thể bắn TRƯỚC khi task này kịp xác nhận -> reset oan một bản tốt.
         // INACTIVITY_SLEEP_TIMEOUT_MS cũng là 60s, tức rơi đúng cửa sổ đó.
         !s_otaPendingVerify &&
+        // Đang chờ phát: task này ưu tiên cao hơn Task_MediaPlayer, không chặn thì ngay
+        // lúc sync xong nó có thể cho chip ngủ trước khi lệnh chờ kịp chạy.
+        !s_pendingPlay &&
         (now - lastUserActivity >= activeSleepTimeoutMs) &&
         AlarmClock::instance().secondsToNext(time(nullptr)) > 2) {
       DLOG("[SLP] timeout -> sleeping");

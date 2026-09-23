@@ -324,11 +324,6 @@
   transition: background .18s ease;
 }
 .sl-toggle[aria-checked="true"] { background: var(--rose-400); justify-content: flex-end; }
-/* Toggle "Giao diện tối" trong account-popover: Figma dùng accent caramel
-   (#B87548, cùng tông chevron/pill receiver ở box-card), KHÔNG phải hồng như
-   toggle báo thức — modifier riêng, không đổi màu mặc định của .sl-toggle
-   dùng chung ở ReceiverAlarms. */
-.sl-toggle--accent[aria-checked="true"] { background: var(--caramel-700); }
 .sl-toggle__knob {
   width: 18px; height: 18px;
   border-radius: var(--r-full);
@@ -520,7 +515,6 @@
   background: none; border: none; width: 100%; cursor: pointer; text-align: left;
   font-family: var(--font); /* <button> không thừa hưởng font của trang */
 }
-.sl-popover__row--muted { color: var(--neutral-400); cursor: default; }
 .sl-popover__row--rose { color: var(--text-accent); }
 /* Hành động phá huỷ (huỷ ghép) — cùng lý do với .sl-btn--dan: không mượn hồng. */
 .sl-popover__row--danger { color: var(--error-text); font-weight: 600; }

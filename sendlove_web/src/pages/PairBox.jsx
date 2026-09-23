@@ -11,6 +11,9 @@ import { Screen, Body, Button, Tips } from '../components/ui/Screen';
  * kiến trúc điều hướng để có lớp nền mờ hiện Dashboard phía sau tốn công
  * không tương xứng), chỉ dựng đúng phong cách CARD của dialog đó.
  */
+/** Khớp pairBoxSchema của backend: S/R + 6–9 ký tự A-Z0-9. */
+const PAIRING_CODE = /^[SR][A-Z0-9]{6,9}$/;
+
 export default function PairBox() {
   const [pairingCode, setPairingCode] = useState('');
   const [boxName, setBoxName] = useState('');
@@ -20,16 +23,29 @@ export default function PairBox() {
   const navigate = useNavigate();
   const { refreshProfile } = useAuth();
 
+  const code = pairingCode.trim().toUpperCase();
+  const roleHint = code.startsWith('S') ? 'Mã S — bạn sẽ là người gửi.'
+    : code.startsWith('R') ? 'Mã R — bạn sẽ là người nhận.'
+      : null;
+
   const handlePair = async (e) => {
     e.preventDefault();
-    if (!pairingCode.trim()) { setError('Vui lòng nhập mã kết nối'); return; }
+    if (!code) { setError('Vui lòng nhập mã kết nối'); return; }
+    // Kiểm ngay tại đây, đúng biểu thức backend (validation.middleware.ts
+    // pairBoxSchema) — trước đây mã sai vẫn gửi đi rồi mới nhận lỗi 400.
+    if (!PAIRING_CODE.test(code)) {
+      setError(/^[SR]/.test(code)
+        ? 'Mã phải gồm 7–10 ký tự, chỉ chữ in hoa và số.'
+        : 'Mã bắt đầu bằng S (người gửi) hoặc R (người nhận).');
+      return;
+    }
     if (!boxName.trim()) { setError('Vui lòng đặt tên cho hộp quà của bạn'); return; }
 
     setIsLoading(true);
     setError('');
     try {
       const res = await apiClient.post('/boxes/pair', {
-        pairingCode: pairingCode.trim().toUpperCase(),
+        pairingCode: code,
         boxName: boxName.trim(),
       });
       if (res.data.success) {
@@ -88,7 +104,7 @@ export default function PairBox() {
               autoCapitalize="characters"
               style={{ textTransform: pairingCode ? 'uppercase' : 'none', letterSpacing: 2, fontWeight: 700 }}
             />
-            <Tips>Mã gồm đúng 10 ký tự.</Tips>
+            <Tips>{roleHint || 'Mã gồm 7–10 ký tự, bắt đầu bằng S hoặc R.'}</Tips>
           </label>
 
           <label className="sl-field">

@@ -33,4 +33,13 @@ export class ThemeController {
       next(error);
     }
   };
+
+  public initiateFont = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+    try {
+      const data = await this.themeService.initiateFontUpload(req.params.boxId);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  };
 }

@@ -7,24 +7,55 @@ export class MusicController {
     private musicService: MusicService = new MusicService()
   ) {}
 
-  public getMusicLibrary = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  public list = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
-      const data = await this.musicService.getMusicLibrary();
+      const data = await this.musicService.list(req.params.boxId);
       res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);
     }
   };
 
-  public getPreviewUrl = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  public initiateUpload = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
     try {
-      const { musicId } = req.params;
-      const url = await this.musicService.getPreviewUrl(musicId);
-      if (!url) {
-        res.status(404).json({ success: false, error: { code: 'not_found', message: 'Music track not found' } });
-        return;
-      }
-      res.status(200).json({ success: true, data: { previewURL: url } });
+      const data = await this.musicService.initiateUpload(req.params.boxId, req.body?.music_id);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  public commit = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+    try {
+      const data = await this.musicService.commit(req.params.boxId, req.user!.uid, req.body);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  public rename = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+    try {
+      await this.musicService.rename(req.params.boxId, req.params.musicId, req.body?.name);
+      res.status(200).json({ success: true, data: null });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  public remove = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+    try {
+      const data = await this.musicService.remove(req.params.boxId, req.params.musicId);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  public previewUrl = async (req: AuthenticatedRequest, res: Response<ApiResponse>, next: NextFunction) => {
+    try {
+      const url = await this.musicService.previewUrl(req.params.boxId, req.params.musicId);
+      res.status(200).json({ success: true, data: { url } });
     } catch (error) {
       next(error);
     }

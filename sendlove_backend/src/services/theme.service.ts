@@ -3,22 +3,29 @@ import { IStorageRepository } from '../repositories/interfaces/storage.repositor
 import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { FirebaseStorageRepository } from '../repositories/firebase/firebase-storage.repository';
 import { AppError } from '../middleware/error-handler.middleware';
-import { BoxTheme, ThemeWidget, ThemeWidgetType } from '../types/theme.types';
+import { BoxTheme, ThemeAsset, ThemeWidget, ThemeWidgetType } from '../types/theme.types';
+import { crc32 } from '../utils/crc32';
 
 export const SCREEN = 240;
-/** 240 × 240 × 2 byte RGB565 — đúng kích thước mảng StandbyBackground của firmware. */
+/** 240 × 240 × 2 byte RGB565 — đúng kích thước nền LayoutEngine đọc từ phân vùng theme. */
 export const BG_BYTES = SCREEN * SCREEN * 2;
+/** Phông VLW web cắt sẵn đúng tập ký tự cần dùng: vài chục glyph, vài chục KB là nhiều. */
+export const FONT_MAX_BYTES = 64 * 1024;
 const MAX_WIDGETS = 8;
 
+/** LayoutEngine::formatDate — web cắt phông theo đúng các chuỗi này. */
+export const DATE_FORMATS = ['WD, DD.MM', 'WD DD.MM', 'DD/MM/YYYY'];
+const LOCALES = ['vi', 'en'];
+
 /**
- * Luật theo từng type — chỉ nhận đúng khoá firmware đọc cho type đó, và phông
- * nằm trong if-chain thật của drawClockTime/drawClockDate. Tên phông khác thì
- * firmware âm thầm rơi về mặc định, nên chặn ở đây thay vì để người dùng tưởng
- * đã đổi được.
+ * Luật theo từng type — chỉ nhận đúng khoá firmware đọc cho type đó.
+ * Phông (2026-09-24): 'f_time'/'f_date' = VLW trong gói theme (phải kèm file trong `fonts`),
+ * 'Font7'/'Font2' = phông có sẵn trong firmware. ChakraPetch/Orbitron/Roboto biên dịch
+ * cứng đã GỠ khỏi firmware, tên cũ firmware sẽ âm thầm vẽ bằng phông có sẵn -> chặn ở đây.
  */
-const RULES: Record<ThemeWidgetType, { color: boolean; align: boolean; fonts?: string[] }> = {
-  clock_time: { color: true, align: true, fonts: ['ChakraPetch_SemiBold_48', 'Orbitron_32', 'Font7'] },
-  clock_date: { color: true, align: true, fonts: ['ChakraPetch_SemiBold_16', 'Roboto_14', 'FreeSans_12'] },
+const RULES: Record<ThemeWidgetType, { color: boolean; align: boolean; fonts?: string[]; date?: boolean }> = {
+  clock_time: { color: true, align: true, fonts: ['f_time', 'Font7'] },
+  clock_date: { color: true, align: true, fonts: ['f_date', 'Font2'], date: true },
   chip_temp: { color: true, align: true },
   wifi_icon: { color: true, align: false },
   battery_icon: { color: false, align: false }, // pushImage nhiều màu, bỏ qua cfg.color
@@ -73,11 +80,26 @@ export function sanitizeWidgets(input: unknown): ThemeWidget[] {
       out.align = align;
     }
     if (rule.fonts) {
-      const font = raw.font ?? rule.fonts[0];
+      // Mặc định là phông có sẵn (phần tử cuối): không cần file phông nào.
+      const font = raw.font ?? rule.fonts[rule.fonts.length - 1];
       if (!rule.fonts.includes(font)) {
         throw new AppError(400, 'invalid_theme', `${where}.font must be one of: ${rule.fonts.join(', ')}`);
       }
       out.font = font;
+      // Chỉ để web mở lại trình sửa đúng như lúc lưu (họ phông + cỡ đã cắt ra file VLW).
+      // Firmware không đọc hai khoá này: hình chữ nằm sẵn trong file phông.
+      if (typeof raw.family === 'string' && raw.family.length >= 1 && raw.family.length <= 40) out.family = raw.family;
+      if (isInt(raw.px) && raw.px >= 8 && raw.px <= 72) out.px = raw.px;
+    }
+    if (rule.date) {
+      const format = raw.format ?? DATE_FORMATS[0];
+      if (!DATE_FORMATS.includes(format)) {
+        throw new AppError(400, 'invalid_theme', `${where}.format must be one of: ${DATE_FORMATS.join(', ')}`);
+      }
+      const locale = raw.locale ?? 'vi';
+      if (!LOCALES.includes(locale)) throw new AppError(400, 'invalid_theme', `${where}.locale must be vi or en`);
+      out.format = format;
+      out.locale = locale;
     }
     return out;
   });
@@ -115,6 +137,29 @@ export class ThemeService {
     return { path, upload };
   }
 
+  /** Như ảnh nền, cho một file phông VLW (web cắt sẵn tập ký tự). */
+  async initiateFontUpload(boxId: string) {
+    const path = `${this.bgPrefix(boxId)}f_${Date.now()}_${Math.floor(Math.random() * 1000)}.vlw`;
+    const upload = await this.storageRepo.generateUploadPolicy(path, 'application/octet-stream', FONT_MAX_BYTES, 15);
+    return { path, upload };
+  }
+
+  /**
+   * Kiểm một file của gói (đúng thư mục theme của CHÍNH hộp này, đúng đuôi) rồi tự đo size
+   * + crc32 từ file thật. Hộp dựa vào đúng hai số này để nhận file.
+   */
+  private async measureAsset(boxId: string, path: unknown, ext: 'bin' | 'vlw', field: string): Promise<ThemeAsset> {
+    const re = ext === 'bin' ? /^[\w./-]+\.bin$/ : /^[\w./-]+\.vlw$/;
+    if (typeof path !== 'string' || !path.startsWith(this.bgPrefix(boxId)) || !re.test(path) || path.includes('..')) {
+      throw new AppError(400, 'invalid_theme', `'${field}' must be a path returned by /theme/${ext === 'bin' ? 'background' : 'font'}`);
+    }
+    if (!(await this.storageRepo.fileExists(path))) {
+      throw new AppError(400, 'invalid_theme', `'${field}' file not found`);
+    }
+    const buf = await this.storageRepo.downloadToBuffer(path);
+    return { path, size: buf.length, crc32: crc32(buf) };
+  }
+
   async saveTheme(boxId: string, uid: string, body: any): Promise<BoxTheme> {
     const name = typeof body?.theme_name === 'string' ? body.theme_name.trim() : '';
     if (name.length < 1 || name.length > 40) {
@@ -122,23 +167,43 @@ export class ThemeService {
     }
     const widgets = sanitizeWidgets(body?.widgets);
 
+    const assets: NonNullable<BoxTheme['assets']> = {};
     let background: string | null = null;
     if (body?.background != null) {
-      const path = body.background;
-      // Chỉ nhận file nằm đúng thư mục theme của CHÍNH hộp này — không cho trỏ
-      // sang media của hộp khác hay tin nhắn.
-      if (typeof path !== 'string' || !path.startsWith(this.bgPrefix(boxId)) || !/^[\w./-]+\.bin$/.test(path) || path.includes('..')) {
-        throw new AppError(400, 'invalid_theme', "'background' must be a path returned by /theme/background");
+      const bg = await this.measureAsset(boxId, body.background, 'bin', 'background');
+      if (bg.size !== BG_BYTES) {
+        throw new AppError(400, 'invalid_theme', `Background must be exactly ${BG_BYTES} bytes (240x240 RGB565), got ${bg.size}`);
       }
-      const exists = await this.storageRepo.fileExists(path);
-      const size = exists ? parseInt((await this.storageRepo.getFileMetadata(path))?.size || '0', 10) : 0;
-      if (size !== BG_BYTES) {
-        throw new AppError(400, 'invalid_theme', `Background must be exactly ${BG_BYTES} bytes (240x240 RGB565), got ${size}`);
-      }
-      background = path;
+      assets.bg = bg;
+      background = bg.path;
     }
 
-    const theme: BoxTheme = { theme_name: name, widgets, background, updated_at: Date.now(), updated_by: uid };
+    // Phông VLW: widget dùng 'f_time'/'f_date' thì PHẢI kèm file tương ứng, không thì hộp
+    // vẽ bằng phông có sẵn trong khi web xem trước bằng phông khác -> người dùng tưởng lỗi.
+    for (const key of ['f_time', 'f_date'] as const) {
+      const used = widgets.some((w) => w.font === key);
+      const path = body?.fonts?.[key];
+      if (!used) continue;
+      if (path == null) throw new AppError(400, 'invalid_theme', `A widget uses '${key}' but fonts.${key} is missing`);
+      const f = await this.measureAsset(boxId, path, 'vlw', `fonts.${key}`);
+      if (f.size < 24 || f.size > FONT_MAX_BYTES) {
+        throw new AppError(400, 'invalid_theme', `fonts.${key} must be 24-${FONT_MAX_BYTES} bytes`);
+      }
+      assets[key] = f;
+    }
+
+    const box = await this.boxRepo.getById(boxId);
+    const now = Date.now();
+    const theme: BoxTheme = {
+      theme_id: `t_${now}`,
+      rev: (box?.config?.theme?.rev || 0) + 1,
+      theme_name: name,
+      widgets,
+      background,
+      assets,
+      updated_at: now,
+      updated_by: uid,
+    };
     await this.boxRepo.update(boxId, { 'config/theme': theme, updated_at: theme.updated_at } as any);
     await this.boxRepo.updateFlags(boxId, { theme_flag: true });
     return theme;

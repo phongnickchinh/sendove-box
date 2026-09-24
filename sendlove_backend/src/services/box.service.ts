@@ -3,6 +3,7 @@ import { IUserRepository } from '../repositories/interfaces/user.repository.inte
 import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { FirebaseUserRepository } from '../repositories/firebase/firebase-user.repository';
 import { AppError } from '../middleware/error-handler.middleware';
+import * as admin from 'firebase-admin';
 
 export class BoxService {
   constructor(
@@ -149,6 +150,10 @@ export class BoxService {
     if (data.led_state !== undefined) updates['config/led_state'] = data.led_state;
     if (data.display_brightness !== undefined) updates['config/display_brightness'] = data.display_brightness;
     if (data.playback_volume !== undefined) updates['config/playback_volume'] = data.playback_volume;
+    // Hộp ghi lại số này vào status/config_rev sau khi áp dụng xong -> web so hai số để
+    // hiện "đã áp dụng" hay "đang chờ hộp". Tăng nguyên tử phía server, hai lần lưu
+    // gần nhau không bao giờ ra cùng một rev.
+    updates['config/config_rev'] = admin.database.ServerValue.increment(1);
 
     await this.boxRepo.update(boxId, updates as any);
 

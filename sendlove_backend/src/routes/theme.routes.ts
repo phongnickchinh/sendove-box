@@ -17,6 +17,7 @@ export default function themeRoutes(controller: ThemeController) {
   router.get('/', controller.getTheme);
   router.put('/', controller.saveTheme);
   router.post('/background', controller.initiateBackground);
+  router.post('/font', controller.initiateFont);
 
   return router;
 }

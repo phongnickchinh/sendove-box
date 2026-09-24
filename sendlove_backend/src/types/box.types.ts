@@ -31,8 +31,10 @@ export interface BoxConfig {
   };
 
   led_state?: LedState;
-  display_brightness?: number; // 0-100
-  playback_volume?: number;    // 0-100
+  display_brightness?: number; // 0-100 (firmware kẹp sàn 5%)
+  playback_volume?: number;    // 0-100, 0 = tắt tiếng
+  /** Tăng mỗi lần PUT config. Hộp chép vào status.config_rev khi đã áp dụng. */
+  config_rev?: number;
 
   /** Bố cục màn chờ, ghi qua PUT /boxes/:boxId/theme */
   theme?: BoxTheme;
@@ -44,7 +46,8 @@ export interface BoxFlags {
   ota_flag: boolean; /** Cờ báo có OTA firmware đang chờ */
   p_flag: boolean; /** Cờ báo có thay đổi pairing (thêm/ngắt kết nối) */
   config_flag: boolean; /** Cờ báo led_state/display_brightness/playback_volume đã thay đổi — ESP32 cần đọc lại */
-  theme_flag?: boolean; /** Cờ báo config/theme (màn chờ) đã đổi — firmware CHƯA đọc cờ này */
+  theme_flag?: boolean; /** Cờ báo config/theme (màn chờ) đã đổi — hộp tải gói theme theo rev */
+  music_flag?: boolean; /** Thư viện nhạc báo thức đổi (thêm/sửa/xoá bài) — hộp lấy lại danh sách */
 }
 
 export interface BoxStatus {
@@ -67,6 +70,19 @@ export interface BoxStatus {
    * gửi trường này — thiếu thì web coi là 'sd' (bản build hiện tại là SD).
    */
   storage_type?: 'sd' | 'nand';
+  /** config_rev mà hộp đã áp dụng (độ sáng, âm lượng). Nhỏ hơn config.config_rev = đang chờ hộp. */
+  config_rev?: number;
+  /** Thẻ nhớ: 'ok' | 'absent' (không mount được / vừa mất) | 'none' (bản NAND). */
+  sd_state?: 'ok' | 'absent' | 'none';
+  sd_free_mb?: number;
+  /** Rev theme hộp đang hiển thị (so với config.theme.rev). */
+  theme_rev?: number;
+  /** Số bài nhạc báo thức đã có trên thẻ. */
+  music_n?: number;
+  /** Đoạn cuối nhật ký hộp, chỉ đẩy khi có lỗi mới hoặc lần sync đầu sau boot. */
+  log_tail?: string;
+  /** Giây (time(nullptr)) lúc đẩy log_tail. */
+  log_at?: number;
 }
 
 export interface Box extends BaseModel {

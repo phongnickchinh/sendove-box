@@ -13,6 +13,7 @@ import { FirebaseMessageRepository } from '../repositories/firebase/firebase-mes
 import { FirebaseRateLimitRepository } from '../repositories/firebase/firebase-rate-limit.repository';
 import { FirebaseStorageRepository } from '../repositories/firebase/firebase-storage.repository';
 import { FirebaseAlarmRepository } from '../repositories/firebase/firebase-alarm.repository';
+import { FirebaseMusicRepository } from '../repositories/firebase/firebase-music.repository';
 import { FirebaseOtaRepository } from '../repositories/firebase/firebase-ota.repository';
 import { FirebaseFirmwareRepository } from '../repositories/firebase/firebase-firmware.repository';
 
@@ -83,8 +84,8 @@ export function createContainer(): AppContainer {
   const userService = new UserService(userRepo);
   const messageService = new MessageService(messageRepo, storageRepo);
   const deviceService = new DeviceService(boxRepo, messageRepo, alarmRepo, fwRepo, otaRepo);
-  const alarmService = new AlarmService(alarmRepo);
-  const musicService = new MusicService(); // No deps
+  const musicService = new MusicService(new FirebaseMusicRepository(), storageRepo);
+  const alarmService = new AlarmService(alarmRepo, musicService);
   const themeService = new ThemeService(boxRepo, storageRepo);
 
   // 3. Instantiating Controllers with dependencies injected

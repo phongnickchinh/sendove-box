@@ -73,6 +73,11 @@ export class FirebaseStorageRepository implements IStorageRepository {
     await file.download({ destination: localDestination });
   }
 
+  async downloadToBuffer(filePath: string): Promise<Buffer> {
+    const [buf] = await storage.bucket().file(filePath).download();
+    return buf;
+  }
+
   /**
    * Uploads a local file to Storage.
    */

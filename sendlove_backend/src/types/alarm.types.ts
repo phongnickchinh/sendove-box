@@ -15,4 +15,11 @@ export interface Alarm extends BaseModel {
    * false = one-shot, sau khi kích hoạt sẽ tự set is_enable = false
    */
   repeatable: boolean;
+
+  /** Bài trong boxes/{boxId}/music. Không có = tiếng bíp. Hộp chỉ tải bài báo thức dùng. */
+  music_id?: string | null;
+  /** 0-100, riêng từng báo thức (mặc định 80). Web chặn < 20. */
+  volume?: number;
+  /** Tăng dần từ 30% mức đã chọn trong 20s (mặc định bật). */
+  ramp?: boolean;
 }

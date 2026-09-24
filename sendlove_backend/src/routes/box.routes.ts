@@ -7,7 +7,8 @@ export default function boxRoutes(
   controller: BoxController,
   messageRouter: Router,
   alarmRouter: Router,
-  themeRouter: Router
+  themeRouter: Router,
+  musicRouter: Router
 ) {
   const router = Router();
 
@@ -23,6 +24,7 @@ export default function boxRoutes(
   router.use('/:boxId/messages', messageRouter);
   router.use('/:boxId/alarms', alarmRouter);
   router.use('/:boxId/theme', themeRouter);
+  router.use('/:boxId/music', musicRouter);
 
   return router;
 }

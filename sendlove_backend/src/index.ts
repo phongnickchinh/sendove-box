@@ -49,10 +49,11 @@ app.use('/users', userRoutes(container.userController));
 const msgRouter = messageRoutes(container.messageController);
 const alrmRouter = alarmRoutes(container.alarmController);
 const themeRouter = themeRoutes(container.themeController);
-app.use('/boxes', boxRoutes(container.boxController, msgRouter, alrmRouter, themeRouter));
+// Nhạc báo thức theo hộp (2026-09-24). Route /music cũ (thư viện giả 2 bài) đã gỡ.
+const musicRouter = musicRoutes(container.musicController);
+app.use('/boxes', boxRoutes(container.boxController, msgRouter, alrmRouter, themeRouter, musicRouter));
 
 app.use('/device', deviceRoutes(container.deviceController));
-app.use('/music', musicRoutes(container.musicController));
 
 // Error Handling Middleware (must be the last middleware)
 app.use(errorHandler);

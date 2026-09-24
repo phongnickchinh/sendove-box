@@ -1,10 +1,24 @@
 #include "LayoutEngine.h"
-#include "ChakraPetch_SemiBold_16.h"
-#include "ChakraPetch_SemiBold_48.h"
 #include "CustomBatteryIcons.h"
 #include "CustomWifiIcons.h"
-#include "StandbyBackground.h"
+#include "ScreenLogger.h"
 #include "SystemMonitor.h"
+#include "ThemeStore.h"
+#include <time.h>
+
+// Nền, phông ChakraPetch và bố cục mặc định KHÔNG còn biên dịch vào firmware (2026-09-24,
+// MEMORY.md §28): tất cả nằm trong gói theme (ThemeStore). Chỉ còn phông có sẵn của
+// LovyanGFX cho màn dự phòng và màn báo thức.
+
+static constexpr int32_t BG_W = SCREEN_WIDTH;
+static constexpr int32_t BG_H = SCREEN_HEIGHT;
+static constexpr uint32_t BG_BYTES = BG_W * BG_H * 2;
+static constexpr time_t LAYOUT_MIN_VALID_EPOCH = 1600000000;
+
+// Tên thứ PHẢI khớp theme/layout.js của web: web cắt phông VLW đúng theo các chuỗi này.
+static const char* const WD_VI[7] = {"Chủ nhật", "Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy"};
+static const char* const WD_VI_ASCII[7] = {"CN", "T2", "T3", "T4", "T5", "T6", "T7"};
+static const char* const WD_EN[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
 uint16_t LayoutEngine::hexToColor(const char *hex) {
   if (hex == nullptr || strlen(hex) < 7 || hex[0] != '#')
@@ -13,49 +27,118 @@ uint16_t LayoutEngine::hexToColor(const char *hex) {
   return lgfx::color565((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
 }
 
-bool LayoutEngine::loadConfig(const char *jsonString) {
+void LayoutEngine::unloadFonts() {
+  if (_hasVlwTime) _vlwTime.unloadFont();
+  if (_hasVlwDate) _vlwDate.unloadFont();
+  _hasVlwTime = _hasVlwDate = false;
+}
+
+bool LayoutEngine::parseWidgets(const char *json, size_t len) {
   _widgets.clear();
-
   JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, jsonString);
-  if (error)
-    return false;
+  if (deserializeJson(doc, json, len)) return false;
 
-  JsonArray widgets = doc["widgets"];
-  for (JsonObject widget : widgets) {
+  for (JsonObject widget : doc["widgets"].as<JsonArray>()) {
     WidgetConfig cfg;
-    const char *type = widget["type"];
+    // Thiếu "type" từng làm strcmp(nullptr) sập hộp (case bắt buộc #6) -> bỏ widget.
+    const char *type = widget["type"] | "";
+    if (strcmp(type, "clock_time") == 0) cfg.type = WIDGET_CLOCK_TIME;
+    else if (strcmp(type, "clock_date") == 0) cfg.type = WIDGET_CLOCK_DATE;
+    else if (strcmp(type, "wifi_icon") == 0) cfg.type = WIDGET_WIFI_ICON;
+    else if (strcmp(type, "battery_icon") == 0) cfg.type = WIDGET_BATTERY_ICON;
+    else if (strcmp(type, "chip_temp") == 0) cfg.type = WIDGET_CHIP_TEMP;
+    else continue;
 
-    if (strcmp(type, "clock_time") == 0)
-      cfg.type = WIDGET_CLOCK_TIME;
-    else if (strcmp(type, "clock_date") == 0)
-      cfg.type = WIDGET_CLOCK_DATE;
-    else if (strcmp(type, "wifi_icon") == 0)
-      cfg.type = WIDGET_WIFI_ICON;
-    else if (strcmp(type, "battery_icon") == 0)
-      cfg.type = WIDGET_BATTERY_ICON;
-    else if (strcmp(type, "chip_temp") == 0)
-      cfg.type = WIDGET_CHIP_TEMP;
-    else if (strcmp(type, "image") == 0)
-      cfg.type = WIDGET_IMAGE;
-    else
-      continue;
-
-    cfg.x = widget["x"] | 0;
-    cfg.y = widget["y"] | 0;
-    cfg.w = widget["w"] | 0;
-    cfg.h = widget["h"] | 0;
+    int x = widget["x"] | -1, y = widget["y"] | -1, w = widget["w"] | 0, h = widget["h"] | 0;
+    if (x < 0 || y < 0 || w < 0 || h < 0 || x + w > BG_W || y + h > BG_H) continue;  // ngoài màn
+    cfg.x = x;
+    cfg.y = y;
+    cfg.w = w;
+    cfg.h = h;
     cfg.color = hexToColor(widget["color"] | "#000000");
     cfg.align = widget["align"] | "left";
-    cfg.font = widget["font"] | "default";
-    cfg.format = widget["format"] | "";
-    cfg.src = widget["src"] | "";
-
+    cfg.font = widget["font"] | "";
+    cfg.format = widget["format"] | "WD, DD.MM";
+    cfg.locale = widget["locale"] | "vi";
     _widgets.push_back(cfg);
   }
+  return !_widgets.empty();
+}
 
-  // Dropped LayoutEngine Loaded widgets log
-  return true;
+void LayoutEngine::useFallbackWidgets() {
+  _widgets.clear();
+  WidgetConfig t;
+  t.type = WIDGET_CLOCK_TIME;
+  t.x = 0; t.y = 80; t.w = BG_W; t.h = 60;
+  t.color = TFT_WHITE; t.align = "center"; t.font = "Font7";
+  _widgets.push_back(t);
+  WidgetConfig d;
+  d.type = WIDGET_CLOCK_DATE;
+  d.x = 0; d.y = 150; d.w = BG_W; d.h = 24;
+  d.color = TFT_WHITE; d.align = "center"; d.font = "Font2";
+  d.format = "WD, DD.MM"; d.locale = "vi";
+  _widgets.push_back(d);
+}
+
+bool LayoutEngine::loadTheme() {
+  unloadFonts();
+  _bg = nullptr;
+  _fallback = true;
+
+  uint32_t len = 0;
+  const uint8_t *layout = ThemeStore::asset("layout", &len);
+  if (layout && parseWidgets((const char *)layout, len)) {
+    uint32_t bgLen = 0;
+    const uint8_t *bg = ThemeStore::asset("bg", &bgLen);
+    if (bg && bgLen == BG_BYTES) _bg = (const uint16_t *)bg;  // RGB565 LE, căn 4 byte
+
+    uint32_t fl = 0;
+    const uint8_t *ft = ThemeStore::asset("f_time", &fl);
+    if (ft && fl > 24) {
+      _pwTime.set(ft, fl);
+      _hasVlwTime = _vlwTime.loadFont(&_pwTime);
+    }
+    const uint8_t *fd = ThemeStore::asset("f_date", &fl);
+    if (fd && fl > 24) {
+      _pwDate.set(fd, fl);
+      _hasVlwDate = _vlwDate.loadFont(&_pwDate);
+    }
+    _fallback = false;
+  } else {
+    useFallbackWidgets();
+  }
+  invalidateCache();
+  DLOG("[LAY] %s, %u widget, nen=%d, vlw=%d%d", _fallback ? "du phong" : ThemeStore::themeId(),
+       (unsigned)_widgets.size(), _bg ? 1 : 0, _hasVlwTime ? 1 : 0, _hasVlwDate ? 1 : 0);
+  return !_fallback;
+}
+
+const lgfx::IFont *LayoutEngine::fontFor(const WidgetConfig &cfg) const {
+  if (cfg.font == "f_time" && _hasVlwTime) return &_vlwTime;
+  if (cfg.font == "f_date" && _hasVlwDate) return &_vlwDate;
+  if (cfg.type == WIDGET_CLOCK_TIME) return &fonts::Font7;  // 7 đoạn 48px, chỉ số và ':'
+  return &fonts::Font2;                                      // 16px ASCII
+}
+
+void LayoutEngine::formatDate(const WidgetConfig &cfg, bool unicode, char *out, size_t len) const {
+  time_t now = time(nullptr);
+  if (now < LAYOUT_MIN_VALID_EPOCH) {
+    // Chưa có giờ (mất điện, chưa NTP): hiện rõ là chưa có thay vì ngày sai.
+    snprintf(out, len, "--.--");
+    return;
+  }
+  struct tm t;
+  localtime_r(&now, &t);
+  const bool en = cfg.locale == "en";
+  const char *wd = en ? WD_EN[t.tm_wday] : (unicode ? WD_VI[t.tm_wday] : WD_VI_ASCII[t.tm_wday]);
+
+  if (cfg.format == "DD/MM/YYYY") {
+    snprintf(out, len, "%02d/%02d/%04d", t.tm_mday, t.tm_mon + 1, t.tm_year + 1900);
+  } else if (cfg.format == "WD DD.MM") {
+    snprintf(out, len, "%s %02d.%02d", wd, t.tm_mday, t.tm_mon + 1);
+  } else {  // "WD, DD.MM" (mặc định)
+    snprintf(out, len, "%s, %02d.%02d", wd, t.tm_mday, t.tm_mon + 1);
+  }
 }
 
 void LayoutEngine::invalidateCache() {
@@ -76,16 +159,21 @@ void LayoutEngine::drawBackgroundPatch(LGFX *canvas, int32_t x, int32_t y,
     h += y;
     y = 0;
   }
-  if (x + w > BG_WIDTH)
-    w = BG_WIDTH - x;
-  if (y + h > BG_HEIGHT)
-    h = BG_HEIGHT - y;
+  if (x + w > BG_W)
+    w = BG_W - x;
+  if (y + h > BG_H)
+    h = BG_H - y;
   if (w <= 0 || h <= 0)
     return;
 
+  if (!_bg) {
+    canvas->fillRect(x, y, w, h, TFT_BLACK);
+    return;
+  }
+  // Đọc thẳng từ flash qua mmap — cùng loại bộ nhớ với mảng PROGMEM trước đây.
   for (int32_t r = 0; r < h; r++) {
     int32_t curY = y + r;
-    canvas->pushImage(x, curY, w, 1, &StandbyBackground[curY * BG_WIDTH + x]);
+    canvas->pushImage(x, curY, w, 1, &_bg[curY * BG_W + x]);
   }
 }
 
@@ -100,7 +188,8 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver *display,
 
   if (fullRedraw) {
     tft->startWrite();
-    tft->pushImage(0, 0, BG_WIDTH, BG_HEIGHT, StandbyBackground);
+    if (_bg) tft->pushImage(0, 0, BG_W, BG_H, _bg);
+    else tft->fillScreen(TFT_BLACK);
     tft->endWrite();
     invalidateCache();
   }
@@ -128,10 +217,19 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver *display,
   }
 
   display->releaseSPI();
+
+  // VLWfont::drawChar cấp bitmap glyph bằng alloca TRÊN STACK task này (tới vài KB với
+  // giờ cỡ lớn). Glyph to nhất có thể chưa xuất hiện ở khung đầu -> in mỗi khi mức còn lại
+  // xuống thấp hơn lần trước (high-water mark chỉ giảm), để số đọc được là đáy thật.
+  if (_hasVlwTime || _hasVlwDate) {
+    UBaseType_t left = uxTaskGetStackHighWaterMark(nullptr);
+    if (left < _stackMin) {
+      _stackMin = left;
+      DLOG("[LAY] stack con %u B", (unsigned)left);
+    }
+  }
 }
 
-// Nam o LayoutEngine chu khong o DisplayDriver: font 48 da nhung o day, include
-// them o file khac la nhan doi mang glyph trong flash.
 void LayoutEngine::renderAlarmScreen(DisplayDriver *display, const char *timeStr,
                                      const char *hint) {
   if (!display) return;
@@ -143,13 +241,13 @@ void LayoutEngine::renderAlarmScreen(DisplayDriver *display, const char *timeStr
   tft->setTextColor(TFT_WHITE);
   tft->setTextDatum(lgfx::middle_center);
 
-  tft->setFont(&ChakraPetch_SemiBold_16);
+  tft->setFont(&fonts::Font4);
   tft->drawString("BAO THUC", SCREEN_WIDTH / 2, 60);
 
-  tft->setFont(&ChakraPetch_SemiBold_48);
+  tft->setFont(&fonts::Font7);
   tft->drawString(timeStr ? timeStr : "--:--", SCREEN_WIDTH / 2, 118);
 
-  tft->setFont(&ChakraPetch_SemiBold_16);
+  tft->setFont(&fonts::Font2);
   tft->setTextColor(0xFD34);  // hong nhat, cung tong voi portal
   tft->drawString(hint ? hint : "", SCREEN_WIDTH / 2, 180);
 
@@ -175,6 +273,8 @@ void LayoutEngine::drawTextWidget(LGFX* canvas, const WidgetConfig& cfg, const c
     }
 
     int32_t centerY = boxY + (boxH / 2);
+    // Chỉ màu chữ, KHÔNG màu nền: nền là ảnh. Web cắt VLW alpha 0/255 nên pixel nào cũng
+    // vẽ thẳng hoặc bỏ qua, không phải trộn màu với pixel đọc ngược (ST7789 không đọc được).
     canvas->setTextColor(cfg.color);
 
     if (cfg.align == "center") {
@@ -198,32 +298,20 @@ void LayoutEngine::drawClockTime(LGFX* canvas, const WidgetConfig& cfg, NetworkM
     network->getTimeString(timeStr, sizeof(timeStr));
     if (!force && strcmp(timeStr, _lastTimeStr) == 0) return;
 
-    const lgfx::IFont* selectedFont = &ChakraPetch_SemiBold_48;
-    if (cfg.font == "Orbitron_32") {
-        selectedFont = &fonts::Orbitron_Light_32;
-    } else if (cfg.font == "Font7") {
-        selectedFont = &fonts::Font7;
-    }
-
-    drawTextWidget(canvas, cfg, timeStr, 132, 35, selectedFont);
+    drawTextWidget(canvas, cfg, timeStr, 132, 35, fontFor(cfg));
 
     strncpy(_lastTimeStr, timeStr, sizeof(_lastTimeStr) - 1);
     _lastTimeStr[sizeof(_lastTimeStr) - 1] = '\0';
 }
 
 void LayoutEngine::drawClockDate(LGFX* canvas, const WidgetConfig& cfg, NetworkManager* network, bool force) {
-    char dateStr[32];
-    network->getDateString(dateStr, sizeof(dateStr));
+    (void)network;
+    const lgfx::IFont* font = fontFor(cfg);
+    char dateStr[48];
+    formatDate(cfg, isVlw(font), dateStr, sizeof(dateStr));
     if (!force && strcmp(dateStr, _lastDateStr) == 0) return;
 
-    const lgfx::IFont* selectedFont = &ChakraPetch_SemiBold_16;
-    if (cfg.font == "Roboto_14") {
-        selectedFont = &fonts::Roboto_Thin_24;
-    } else if (cfg.font == "FreeSans_12") {
-        selectedFont = &fonts::FreeSansBold12pt7b;
-    }
-
-    drawTextWidget(canvas, cfg, dateStr, 140, 16, selectedFont);
+    drawTextWidget(canvas, cfg, dateStr, 140, 16, font);
 
     strncpy(_lastDateStr, dateStr, sizeof(_lastDateStr) - 1);
     _lastDateStr[sizeof(_lastDateStr) - 1] = '\0';
@@ -287,7 +375,7 @@ void LayoutEngine::drawChipTemp(LGFX *canvas, const WidgetConfig &cfg,
   char tempBuf[16];
   snprintf(tempBuf, sizeof(tempBuf), "%d'C", tempInt);
 
-  drawTextWidget(canvas, cfg, tempBuf, 100, 20, &ChakraPetch_SemiBold_16);
+  drawTextWidget(canvas, cfg, tempBuf, 100, 20, &fonts::Font2);
 
   _lastChipTemp = tempInt;
 }

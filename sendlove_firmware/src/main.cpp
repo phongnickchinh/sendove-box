@@ -11,6 +11,11 @@
 #include "PowerManager.h"
 #include "ScreenLogger.h"
 #include "UIController.h"
+#include "Settings.h"
+#include "SdLog.h"
+#include "SdStore.h"
+#include "MusicStore.h"
+#include "ThemeStore.h"
 #include "config.h"
 #include <Arduino.h>
 #include <SPI.h>
@@ -59,6 +64,11 @@ static QueueHandle_t eventQueue = nullptr;
 // KHÔNG tính cờ này vào isPlaybackActive(): sync đang tải sẽ tự huỷ ở điểm kiểm tra
 // kế tiếp mà không bật _hasPendingMessages -> chờ xong chẳng có tin mới nào để phát.
 static std::atomic<bool> s_pendingPlay{false};
+
+// Báo thức đang kêu BẰNG NHẠC (đọc thẻ liên tục). Tính vào isPlaybackActive() để sync
+// dừng ở điểm kiểm tra kế tiếp và downloadFile() ngắt giữa chừng: ở 16kHz DMA chỉ đủ
+// ~96ms, thẻ bận ghi tin là nhạc rè (case bắt buộc #5). Bíp thì không đọc thẻ, không tính.
+static std::atomic<bool> s_alarmMusicOn{false};
 
 // ============================================================================
 // Rollback sau OTA
@@ -114,15 +124,9 @@ enum class AppState { STATE_STANDBY, STATE_VIDEO, STATE_ALARM, STATE_OTA };
 // (setPlaybackActiveCallback) chạy trong task context.
 std::atomic<AppState> currentAppState{AppState::STATE_STANDBY};
 
-const char *defaultLayoutJson = R"({
-  "theme_name": "Default Card Theme",
-  "background": "bg_defaut",
-  "widgets": [
-    { "type": "clock_date", "format": "WEEKDAY, DD.MM", "x": 9, "y": 9, "w": 140, "h": 16, "align": "left", "font": "ChakraPetch_16", "color": "#B83D3D" },
-    { "type": "clock_time", "format": "HH:MM", "x": 50, "y": 30, "w": 160, "h": 45, "align": "center", "font": "ChakraPetch_48", "color": "#000000" },
-    { "type": "battery_icon", "x": 154, "y": 10, "w": 75, "h": 16 }
-  ]
-})";
+// Bố cục + nền + phông màn chờ KHÔNG còn biên dịch cứng (thiết kế 2026-09-24, §28): theme
+// nằm trong phân vùng flash `theme` (ThemeStore), chép từ gói trên thẻ SD. Không có theme
+// thì LayoutEngine vẽ màn dự phòng đen chữ trắng bằng phông có sẵn của LovyanGFX.
 
 void Task_MediaPlayer(void *pvParameters) {
   DLOG("[PLAY] task started");
@@ -213,6 +217,7 @@ void Task_MediaPlayer(void *pvParameters) {
 
   static constexpr const char* ALARM_HINT = "Cham: bao lai 5p - Giu: tat";
   char alarmTime[6] = "";
+  AlarmItem ringItem;            // báo thức đang kêu: nhạc, âm lượng, tăng dần
   uint32_t alarmStartMs = 0;
   uint32_t lastBeepMs = 0;
   uint32_t lastAlarmPollMs = 0;
@@ -339,15 +344,30 @@ void Task_MediaPlayer(void *pvParameters) {
         !appCtx.otaHandler.isUpdating() &&
         millis() - lastAlarmPollMs >= 500) {
       lastAlarmPollMs = millis();
-      if (AlarmClock::instance().pollDue(time(nullptr), alarmTime, sizeof(alarmTime))) {
+      if (AlarmClock::instance().pollDue(time(nullptr), alarmTime, sizeof(alarmTime), &ringItem)) {
         if (currentAppState == AppState::STATE_VIDEO) appCtx.player.stop();
         currentAppState = AppState::STATE_ALARM;
+        // Nhạc có trên thẻ thì phát nhạc, còn lại (không chọn nhạc, chưa tải xong, thẻ lỗi,
+        // file hỏng) đều về MỘT nhánh: tiếng bíp như trước.
+        s_alarmMusicOn = false;
+        if (ringItem.musicId[0] && MusicStore::has(ringItem.musicId)) {
+          char musicPath[48];
+          MusicStore::pathFor(ringItem.musicId, musicPath, sizeof(musicPath));
+          uint8_t startVol = ringItem.ramp ? (uint8_t)(ringItem.volume * ALARM_RAMP_START_PCT / 100)
+                                           : ringItem.volume;
+          if (appCtx.player.startAlarmMusic(musicPath, startVol)) {
+            s_alarmMusicOn = true;
+            MusicStore::touch(ringItem.musicId);
+          }
+        }
         // Cú chạm xếp hàng từ trước không được tắt ngay báo thức vừa kêu.
         xQueueReset(eventQueue);
         // Cũng không được tự phát tin sau khi tắt báo thức.
         s_pendingPlay = false;
         // Thức dậy bằng timer thì màn hình còn tắt (turnOn chỉ gọi khi wake bằng chạm).
         appCtx.display.turnOn();
+        // Độ sáng người dùng có thể thấp tới 5%: bị đánh thức thì phải nhìn thấy màn.
+        appCtx.display.setBacklight(Settings::alarmBacklight());
         appCtx.layoutEngine.renderAlarmScreen(&appCtx.display, alarmTime, ALARM_HINT);
         alarmStartMs = millis();
         lastBeepMs = 0;
@@ -379,7 +399,9 @@ void Task_MediaPlayer(void *pvParameters) {
         }
         // Trả 24KB DMA của I2S: beep() cố ý không tự gỡ driver giữa các hồi bíp.
         appCtx.player.stop();
+        s_alarmMusicOn = false;
         currentAppState = AppState::STATE_STANDBY;
+        appCtx.display.setBacklight(Settings::currentBacklight());
         forceStandbyRedraw = true;
         lastUserActivity = millis();
         continue;
@@ -529,6 +551,18 @@ void Task_MediaPlayer(void *pvParameters) {
       }
     }
 
+    // Web đổi độ sáng (task WakeSync ghi Settings): áp ngay nếu màn đang bật. Màn báo
+    // thức giữ mức sàn riêng; màn đang tắt chờ ngủ thì để turnOn() tự lấy mức mới.
+    static uint32_t seenBrightnessEpoch = 0;
+    if (seenBrightnessEpoch != Settings::brightnessEpoch.load()) {
+      seenBrightnessEpoch = Settings::brightnessEpoch.load();
+      if (!appCtx.display.isSleeping()) {
+        appCtx.display.setBacklight(currentAppState == AppState::STATE_ALARM
+                                        ? Settings::alarmBacklight()
+                                        : Settings::currentBacklight());
+      }
+    }
+
     if (currentAppState == AppState::STATE_VIDEO) {
       if (!appCtx.otaHandler.isUpdating()) {
         appCtx.player.update();
@@ -547,6 +581,19 @@ void Task_MediaPlayer(void *pvParameters) {
       }
     } else if (currentAppState == AppState::STATE_STANDBY) {
       uint32_t now = millis();
+      // Gói theme mới đã tải xong (WakeSync): task này là chủ duy nhất của LayoutEngine nên
+      // cài ở đây. Chờ sync xong: xoá/ghi flash đứng CPU ~2s, không để rơi giữa phiên TLS.
+      if (ThemeStore::installPending() && !appCtx.network.isSyncing() && !s_pendingPlay) {
+        char dir[64], id[24];
+        uint32_t rev = 0;
+        if (ThemeStore::takeInstallRequest(dir, sizeof(dir), id, sizeof(id), &rev)) {
+          drawToast("Dang ap dung giao dien...");
+          ThemeStore::installFromSd(dir, id, rev);
+          appCtx.layoutEngine.loadTheme();  // hỏng thì tự về màn dự phòng
+          forceStandbyRedraw = true;
+          lastUserActivity = millis();
+        }
+      }
       if (now - lastClockRender >= 1000 || forceStandbyRedraw) {
         bool fullRedraw = (lastClockRender == 0) || forceStandbyRedraw;
         appCtx.layoutEngine.renderStandbyScreen(&appCtx.display, &appCtx.network, fullRedraw);
@@ -557,6 +604,12 @@ void Task_MediaPlayer(void *pvParameters) {
         // thanh tiến trình của cú giữ cuối.
         if (otaSeqStep == 2 && appCtx.ui.getTouchHoldMs() == 0) drawOtaPrompt();
       }
+      // Nhật ký xuống thẻ theo lô, chỉ ở màn chờ (không tranh bus với lúc phát tin).
+      static uint32_t lastLogFlush = 0;
+      if (now - lastLogFlush >= 30000) {
+        lastLogFlush = now;
+        SdLog::flush();
+      }
       vTaskDelay(pdMS_TO_TICKS(10));
     } else if (currentAppState == AppState::STATE_ALARM) {
       // Giữ mốc hoạt động để vòng ngủ ở Task_UIController không chen vào lúc đang kêu.
@@ -565,11 +618,27 @@ void Task_MediaPlayer(void *pvParameters) {
         DLOG("[ALM] het 1 phut -> tu tat");
         AlarmClock::instance().dismiss();
         appCtx.player.stop();  // trả 24KB DMA của I2S
+        s_alarmMusicOn = false;
         currentAppState = AppState::STATE_STANDBY;
+        appCtx.display.setBacklight(Settings::currentBacklight());
         forceStandbyRedraw = true;
+      } else if (s_alarmMusicOn) {
+        // Tăng dần tuyến tính trên thang âm lượng (thang này vốn theo dB): 30% -> 100%
+        // mức đã chọn trong ALARM_RAMP_MS.
+        uint8_t vol = ringItem.volume;
+        uint32_t t = millis() - alarmStartMs;
+        if (ringItem.ramp && t < ALARM_RAMP_MS) {
+          uint32_t start = (uint32_t)ringItem.volume * ALARM_RAMP_START_PCT / 100;
+          vol = (uint8_t)(start + (ringItem.volume - start) * t / ALARM_RAMP_MS);
+        }
+        appCtx.player.tickAlarmMusic(vol);
+        vTaskDelay(pdMS_TO_TICKS(20));  // DMA ~96ms @16kHz: nạp mỗi 20ms là thừa sức
       } else if (lastBeepMs == 0 || millis() - lastBeepMs >= ALARM_BEEP_PERIOD_MS) {
         lastBeepMs = millis();
-        appCtx.player.alarmBeep();  // block ~0.6s, chạm trong lúc đó vẫn xếp hàng
+        // Bíp dự phòng LUÔN ở mức 100 như trước: sóng sin của nó vốn nhỏ (đỉnh 4000/32767),
+        // nhân thêm âm lượng báo thức (mặc định 80 ≈ -8dB) là có thể không nghe thấy khi
+        // đang ngủ — mà nhánh này chạy đúng lúc nhạc đã hỏng.
+        appCtx.player.alarmBeep(100);  // block ~0.6s, chạm trong lúc đó vẫn xếp hàng
       } else {
         vTaskDelay(pdMS_TO_TICKS(20));
       }
@@ -695,6 +764,7 @@ void Task_UIController(void *pvParameters) {
       }
 
       DLOG("[SLP] sleep %llus", (unsigned long long)(sleepTimeUs / 1000000ULL));
+      SdLog::flush();  // hộp có thể ngủ rồi mất điện: ghi nốt nhật ký trước
 
       // Dừng MediaPlayer giải phóng SPI/RAM và chuyển về Standby trước khi ngủ
       appCtx.player.stop();
@@ -837,7 +907,9 @@ void setup() {
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
 
   appCtx.display.init(spiMutex);
-  appCtx.display.setBacklight(BACKLIGHT_DAY_PERCENT);
+  // Cài đặt người dùng (NVS) phải có TRƯỚC khi bật đèn nền lần đầu.
+  Settings::begin();
+  appCtx.display.setBacklight(Settings::currentBacklight());
   appCtx.display.showMessage("Booting...");
 
   // Khởi tạo ScreenLogger sau khi display đã sẵn sàng
@@ -878,7 +950,6 @@ void setup() {
     strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
     appCtx.network.connectWiFi(wifiSsid, wifiPass);
   }
-  appCtx.layoutEngine.loadConfig(defaultLayoutJson);
 
 #if ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD
   DLOG("[BOOT] storage: SD");
@@ -903,6 +974,14 @@ void setup() {
   delay(1000);
 #endif
 
+  // Cây thư mục /sys /theme /alarm, dọn file .tmp còn sót, đo dung lượng trống.
+  SdStore::begin(appCtx.storage);
+  MusicStore::load();  // bảng nhạc báo thức đã có trên thẻ (tra cứu lúc kêu, không đụng thẻ)
+  // Theme trong phân vùng flash. Trống (vd. vừa nạp cáp bảng phân vùng mới) mà thẻ còn gói
+  // đang dùng thì chép lại ngay — lúc này chưa có task nào vẽ nên an toàn.
+  if (!ThemeStore::begin()) ThemeStore::restoreFromSdIfNeeded();
+  appCtx.layoutEngine.loadTheme();
+
   appCtx.player.init(appCtx.storage, &appCtx.display);
   
   // Phát beep test loa khi khởi động
@@ -925,7 +1004,7 @@ void setup() {
     });
 
     appCtx.network.setPlaybackActiveCallback([]() {
-      return (currentAppState == AppState::STATE_VIDEO);
+      return (currentAppState == AppState::STATE_VIDEO) || s_alarmMusicOn.load();
     });
 
     // Kích hoạt Firebase Sync ngầm ngay khi vừa nạp code/khởi động xong

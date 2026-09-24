@@ -2,6 +2,7 @@
 #include "DisplayDriver.h"
 #include "ScreenLogger.h"
 #include "config.h"
+#include "Settings.h"
 
 void UIController::init(uint8_t touchPin, DisplayDriver* display) {
     _touchPin = touchPin;
@@ -63,6 +64,6 @@ void UIController::showBootScreen() {
     _display->turnOn();
     _display->clear();
     _display->showMessage("Sendlove Box");
-    _display->setBacklight(BACKLIGHT_DAY_PERCENT);
+    _display->setBacklight(Settings::currentBacklight());
     vTaskDelay(pdMS_TO_TICKS(2000));
 }

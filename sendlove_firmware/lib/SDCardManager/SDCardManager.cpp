@@ -36,9 +36,10 @@ bool SDCardManager::init(uint8_t csPin, SemaphoreHandle_t spiMutex) {
         if (!acquireSPI()) return false;
 
         // SD.begin() mac dinh 4MHz -> qua cham cho video 15fps. Thu vien tu ha ve
-        // 400kHz trong lúc init roi moi dung con so nay. max_files = 5 du cho 3
-        // handle dong thoi (write + read tuan tu + read ngau nhien).
-        ok = SD.begin(_csPin, SPI, SD_SPI_FREQ_HZ, "/sd", 5, false);
+        // 400kHz trong lúc init roi moi dung con so nay. max_files = 7: 4 handle
+        // thuong tru (write tin + read tuan tu + read ngau nhien + ghi file tong quat)
+        // cong handle tam cua readFile/readFileAt/listDir.
+        ok = SD.begin(_csPin, SPI, SD_SPI_FREQ_HZ, "/sd", 7, false);
         if (ok) cardMB = (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL));
 
         releaseSPI();
@@ -78,6 +79,26 @@ int32_t SDCardManager::writeFile(const char* path, const uint8_t* data, size_t l
     if (!file) {
         releaseSPI();
         DLOG("[SD] open W fail");
+        return -1;
+    }
+
+    size_t written = file.write(data, len);
+    file.close();
+    releaseSPI();
+
+    return (int32_t)written;
+}
+
+int32_t SDCardManager::appendFile(const char* path, const uint8_t* data, size_t len) {
+    if (!_mounted || !data) return -1;
+    if (!acquireSPI()) return -1;
+
+    mkParentDirLocked(path);
+
+    File file = SD.open(path, FILE_APPEND);
+    if (!file) {
+        releaseSPI();
+        DLOG("[SD] open A fail");
         return -1;
     }
 
@@ -313,6 +334,162 @@ int32_t SDCardManager::readFile(const char* path, uint8_t* buf, size_t maxLen) c
     f.close();
     releaseSPI();
     return (int32_t)n;
+}
+
+// --- File tong quat (theme, nhac bao thuc, log) ---
+
+bool SDCardManager::remount() {
+    // Ben goi dam bao khong con ai dung handle nao (chi goi luc STANDBY, khong phat).
+    if (acquireSPI()) {
+        if (_writeFile) _writeFile.close();
+        if (_readFile) _readFile.close();
+        if (_atFile) _atFile.close();
+        if (_genFile) _genFile.close();
+        if (_mounted) SD.end();
+        releaseSPI();
+    }
+    _atSize = 0;
+    _atPos = 0;
+    _atPosKnown = false;
+    _mounted = false;
+    return init(_csPin, _spiMutex);
+}
+
+bool SDCardManager::probe() {
+    if (!_mounted) return false;
+    if (!acquireSPI()) return false;
+    // Mo + doc that mot byte: SD.cardType()/totalBytes() chi tra gia tri cache luc mount,
+    // rut the roi van bao binh thuong.
+    bool ok = false;
+    File f = SD.open("/sys/layout.json", FILE_READ);
+    if (f) {
+        uint8_t b;
+        ok = (f.read(&b, 1) == 1);
+        f.close();
+    } else {
+        File root = SD.open("/");
+        ok = (bool)root;
+        if (root) root.close();
+    }
+    releaseSPI();
+    if (!ok) {
+        _mounted = false;
+        DLOG("[SD] probe fail -> coi nhu rut the");
+    }
+    return ok;
+}
+
+int32_t SDCardManager::readFileAt(const char* path, uint32_t offset, uint8_t* buf, size_t len) const {
+    if (!_mounted || !buf || len == 0) return -1;
+    if (!acquireSPI()) return -1;
+    File f = SD.open(path, FILE_READ);
+    if (!f) {
+        releaseSPI();
+        return -1;
+    }
+    int32_t n = -1;
+    if (f.seek(offset)) n = (int32_t)f.read(buf, len);
+    f.close();
+    releaseSPI();
+    return n;
+}
+
+bool SDCardManager::renameFile(const char* from, const char* to) {
+    if (!_mounted) return false;
+    if (!acquireSPI()) return false;
+    bool ok = SD.exists(from) && !SD.exists(to) && SD.rename(from, to);
+    releaseSPI();
+    return ok;
+}
+
+bool SDCardManager::makeDir(const char* path) {
+    if (!_mounted) return false;
+    if (!acquireSPI()) return false;
+    mkParentDirLocked(path);
+    bool ok = SD.exists(path) || SD.mkdir(path);
+    releaseSPI();
+    return ok;
+}
+
+bool SDCardManager::removeDir(const char* path) {
+    if (!_mounted) return false;
+    if (!acquireSPI()) return false;
+    bool ok = SD.rmdir(path);
+    releaseSPI();
+    return ok;
+}
+
+size_t SDCardManager::listDir(const char* dir, void (*cb)(const char*, bool, void*), void* ctx) {
+    if (!_mounted || !cb) return 0;
+    // Chep ten ra truoc roi moi goi cb NGOAI mutex (R4: cb co the xoa/doi ten file).
+    static constexpr size_t MAX_ENTRIES = 24;
+    static constexpr size_t NAME_LEN = 40;  // KHÔNG đặt NAME_MAX: trùng macro của limits.h
+    char names[MAX_ENTRIES][NAME_LEN];
+    bool dirs[MAX_ENTRIES];
+    size_t n = 0;
+
+    if (!acquireSPI()) return 0;
+    File d = SD.open(dir);
+    if (d && d.isDirectory()) {
+        File e = d.openNextFile();
+        while (e && n < MAX_ENTRIES) {
+            const char* full = e.name();
+            const char* base = strrchr(full, '/');
+            base = base ? base + 1 : full;
+            strncpy(names[n], base, NAME_LEN - 1);
+            names[n][NAME_LEN - 1] = '\0';
+            dirs[n] = e.isDirectory();
+            n++;
+            e.close();
+            e = d.openNextFile();
+        }
+        if (e) e.close();
+    }
+    if (d) d.close();
+    releaseSPI();
+
+    for (size_t i = 0; i < n; i++) cb(names[i], dirs[i], ctx);
+    return n;
+}
+
+uint32_t SDCardManager::freeMB() const {
+    if (!_mounted) return 0;
+    if (!acquireSPI()) return 0;
+    // usedBytes() quet bang FAT khi FSINFO khong hop le -> co the ton vai giay tren the
+    // lon. Ben goi (SdStore) chi goi luc mount va sau moi lan tai xong, roi cache lai.
+    uint64_t total = SD.totalBytes();
+    uint64_t used = SD.usedBytes();
+    releaseSPI();
+    return (uint32_t)((total > used ? total - used : 0) / (1024ULL * 1024ULL));
+}
+
+bool SDCardManager::openGenWrite(const char* path, bool append) {
+    if (!_mounted) return false;
+    if (!acquireSPI()) return false;
+    if (_genFile) _genFile.close();
+    mkParentDirLocked(path);
+    _genFile = SD.open(path, append ? FILE_APPEND : FILE_WRITE);
+    bool ok = (bool)_genFile;
+    if (ok) _genFile.setBufferSize(512);  // cung ly do voi openFileForWrite
+    releaseSPI();
+    if (!ok) DLOG("[SD] open G fail");
+    return ok;
+}
+
+size_t SDCardManager::genWrite(const uint8_t* data, size_t len) {
+    if (!_genFile || !data || len == 0) return 0;
+    if (!acquireSPI()) return 0;
+    size_t w = _genFile.write(data, len);
+    releaseSPI();
+    return w;
+}
+
+void SDCardManager::closeGenWrite() {
+    if (!_genFile) return;
+    if (acquireSPI()) {
+        _genFile.close();
+        releaseSPI();
+    }
 }
 
 // --- SPI Mutex + NOP Hack ---

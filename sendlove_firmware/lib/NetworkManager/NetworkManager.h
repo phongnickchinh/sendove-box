@@ -47,9 +47,6 @@ public:
     /// Get current formatted time string ("14:30")
     void getTimeString(char* buffer, size_t maxLen) const;
 
-    /// Get current formatted date string
-    void getDateString(char* buffer, size_t maxLen) const;
-
     /// Get Wi-Fi RSSI signal strength
     int getWifiRSSI() const;
 
@@ -145,7 +142,40 @@ private:
     bool pushFirebaseAlarms();
     /// true tới khi tải được alarm_list lần đầu sau boot (hoặc lần tải trước hỏng)
     bool _alarmsNeedFetch = true;
+    /// Cài đặt người dùng (độ sáng, âm lượng): GET config?shallow=true khi config_flag
+    /// bật, hoặc lần sync đầu sau boot (web có thể đã đổi lúc hộp tắt). Hỏng thì thử lại.
+    bool syncFirebaseSettings();
+    bool _settingsNeedFetch = true;
+    /// PATCH hạ các cờ đang bật về false, MỘT request cho mọi cờ (mỗi request = 1 TLS).
+    void resetFlags(bool alarm, bool config, bool theme, bool music);
     bool checkAndDownloadNewMessages(class IStorageProvider* storage);
+
+    /// Tải một file Firebase Storage về thẻ (theme, nhạc báo thức). Ghi vào dst.part,
+    /// .part còn từ lần trước thì xin tiếp bằng `Range: bytes=N-` (đề xuất #3), đủ `size`
+    /// byte thì kiểm crc32 rồi mới đổi tên thành dst. Tin nhắn KHÔNG đi đường này (slot
+    /// ghi qua SDStorageProvider, không có .part để tải tiếp).
+    enum class DlResult : uint8_t { OK, ABORTED, FAILED };
+    DlResult downloadFile(const char* storagePath, const char* dstPath, uint32_t size, uint32_t crc);
+
+    /// Đẩy đoạn cuối nhật ký lên status/log_tail khi có lỗi mới (đề xuất #2).
+    void pushLogTail();
+
+    /// Nhạc báo thức: tải bài các báo thức đang dùng mà thẻ chưa có (tối đa
+    /// ALARM_MUSIC_PER_SYNC bài mỗi chu kỳ, bài của báo thức sắp kêu trước), xoá bài đã
+    /// bị xoá khỏi thư viện. Chỉ GET danh sách nhạc khi cần: cờ bật, thiếu bài, lần đầu.
+    /// false = bị ngắt vì báo thức/tin bắt đầu phát (thử lại chu kỳ sau).
+    bool syncAlarmMusic();
+    bool _musicNeedFetch = true;      // lần đầu sau boot / sau khi thẻ mount lại / cờ bật
+    uint32_t _seenMountEpoch = 0;     // SdStore::mountEpoch đã xử lý
+
+    /// Theme: GET config/theme khi cờ bật / lần đầu / thẻ vừa mount lại; rev khác bản trong
+    /// flash thì tải gói về /theme/t_<id>_r<rev>/ rồi nhờ Task_MediaPlayer cài (ThemeStore).
+    /// Chỉ hạ theme_flag khi bản TRONG FLASH đã đúng rev (không phải lúc tải xong).
+    /// false = bị ngắt vì báo thức/tin bắt đầu phát.
+    bool syncTheme(bool themeFlag);
+    bool _themeNeedFetch = true;
+    uint32_t _seenThemeEpoch = 0;
+    bool _themeFlag = false;          // theme_flag đọc ở checkFirebaseFlags(), hạ trong syncTheme()
     bool downloadVoiceSegment(const String& rawVoiceUrl, class WiFiClientSecure& client,
                                class IStorageProvider* storage, const char* writeSlotId);
 

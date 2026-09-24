@@ -1,8 +1,8 @@
 #include "DisplayDriver.h"
 #include "config.h"
+#include "Settings.h"
 #include "driver/gpio.h"
 #include <esp_arduino_version.h>
-#include "ChakraPetch_SemiBold_16.h"
 
 #if defined(ESP_ARDUINO_VERSION) && ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
 // ESP32 Core 3.0+
@@ -48,12 +48,13 @@ void DisplayDriver::showWrappedText(const char *asciiText, int32_t x, int32_t y,
   if (asciiText == nullptr || asciiText[0] == '\0' || w <= 0 || h <= 0) return;
   if (!acquireSPI()) return;
 
-  _tft.setFont(&ChakraPetch_SemiBold_16);
+  // Phông có sẵn của LovyanGFX (ChakraPetch biên dịch cứng đã gỡ 2026-09-24, §28).
+  _tft.setFont(&fonts::FreeSansBold9pt7b);
   _tft.setTextColor(color);
   _tft.setTextDatum(lgfx::top_center);
 
-  // yAdvance font = 29 (xem ChakraPetch_SemiBold_16.h); dùng nguyên làm line height.
-  const int32_t lineHeight = 29;
+  // yAdvance của FreeSansBold9pt7b = 22; dùng nguyên làm line height.
+  const int32_t lineHeight = 22;
   int32_t maxLines = h / lineHeight;
   if (maxLines < 1) maxLines = 1;
   if (maxLines > 16) maxLines = 16;
@@ -140,7 +141,7 @@ void DisplayDriver::wakeupFlash() {
 
 void DisplayDriver::turnOn() {
   if (!_isSleeping) {
-    setBacklight(BACKLIGHT_DAY_PERCENT);
+    setBacklight(Settings::currentBacklight());
     return;
   }
 
@@ -157,7 +158,7 @@ void DisplayDriver::turnOn() {
 
     // Bật lại LEDC PWM hoàn toàn độc lập
     LEDC_SETUP();
-    setBacklight(BACKLIGHT_DAY_PERCENT);
+    setBacklight(Settings::currentBacklight());
     _isSleeping = false;
   } else {
     Serial.println(F("[Display] ERROR: acquireSPI() timeout in turnOn()!"));

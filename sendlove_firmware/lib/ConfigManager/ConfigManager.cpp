@@ -128,7 +128,13 @@ size_t ConfigManager::loadAlarms(AlarmItem* alarms, size_t maxCount) {
     // Blob phai dung count * sizeof(AlarmItem). Lech nghia la blob ghi boi ban
     // firmware co AlarmItem khac kich thuoc (id[16] cu) -> doc vao se lech truong.
     // Tra 0: AlarmClock coi nhu chua co bao thuc, lan sync dau se tai lai tu cloud.
-    if (_prefs.getBytesLength(KEY_ALARM_DATA) != count * sizeof(AlarmItem)) return 0;
+    if (_prefs.getBytesLength(KEY_ALARM_DATA) != count * sizeof(AlarmItem)) {
+        // Hạ cờ dirty cùng lúc: blob đã bỏ mà cờ còn bật thì lần sync đầu "hộp thắng",
+        // đẩy danh sách RỖNG lên đè mất toàn bộ báo thức trên cloud.
+        _prefs.putBool(KEY_ALARM_DIRTY, false);
+        _prefs.putUInt(KEY_ALARM_COUNT, 0);
+        return 0;
+    }
     size_t toRead = (count < maxCount) ? count : maxCount;
     size_t readBytes = _prefs.getBytes(KEY_ALARM_DATA, alarms, toRead * sizeof(AlarmItem));
     return readBytes / sizeof(AlarmItem);
@@ -140,6 +146,20 @@ bool ConfigManager::saveAlarmDirty(bool dirty) {
 
 bool ConfigManager::loadAlarmDirty() {
     return _prefs.getBool(KEY_ALARM_DIRTY, false);
+}
+
+void ConfigManager::loadSettings(UserSettings& out) {
+    out.brightness = _prefs.getUChar(KEY_SET_BL, SETTINGS_DEFAULT_BRIGHTNESS);
+    out.volume = _prefs.getUChar(KEY_SET_VOL, SETTINGS_DEFAULT_VOLUME);
+    out.rev = _prefs.getUInt(KEY_SET_REV, 0);
+}
+
+bool ConfigManager::saveSettings(const UserSettings& s) {
+    bool ok = _prefs.putUChar(KEY_SET_BL, s.brightness) > 0;
+    ok = (_prefs.putUChar(KEY_SET_VOL, s.volume) > 0) && ok;
+    // rev ghi SAU CÙNG: mất điện giữa chừng thì rev cũ còn đó -> lần sync sau đọc lại.
+    ok = (_prefs.putUInt(KEY_SET_REV, s.rev) > 0) && ok;
+    return ok;
 }
 
 bool ConfigManager::saveRefreshToken(const char* token) {

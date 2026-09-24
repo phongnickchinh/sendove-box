@@ -74,13 +74,16 @@ public:
 
   /// Word-wrap và vẽ caption ASCII (đã bỏ dấu tiếng Việt từ trước bởi caller)
   /// trong 1 vùng chữ nhật (x,y,w,h). Tự ngắt dòng theo bề rộng pixel thực tế
-  /// bằng font ChakraPetch_SemiBold_16, giới hạn số dòng vừa chiều cao vùng,
+  /// bằng font FreeSansBold9pt7b (có sẵn trong LovyanGFX), giới hạn số dòng vừa chiều cao vùng,
   /// dòng cuối thêm "..." nếu văn bản dài hơn chỗ hiển thị.
   void showWrappedText(const char *asciiText, int32_t x, int32_t y, int32_t w, int32_t h,
                         uint16_t color = 0xFFFF);
 
   /// Set backlight brightness percentage (0-100)
   void setBacklight(uint8_t percent);
+
+  /// Màn hình đang tắt (turnOff, chờ light sleep). Đổi độ sáng lúc này thì KHÔNG bật đèn.
+  bool isSleeping() const { return _isSleeping; }
 
   /// Turn off display and lock backlight GPIO LOW for sleep
   void turnOff();

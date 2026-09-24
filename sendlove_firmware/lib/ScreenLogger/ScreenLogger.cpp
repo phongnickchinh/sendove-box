@@ -1,5 +1,6 @@
 #include "ScreenLogger.h"
 #include "DisplayDriver.h"
+#include "SdLog.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -23,6 +24,7 @@ void ScreenLogger::log(const char* fmt, ...) {
     va_end(args);
 
     pushLine(line);
+    SdLog::add(line);  // chỉ chép vào RAM; ghi thẻ ở SdLog::flush() (xem SdLog.h)
     render();
 }
 

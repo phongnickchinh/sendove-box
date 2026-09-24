@@ -52,7 +52,17 @@ void SDStorageProvider::resetManifest() {
     _m.writeSlotIndex = 0;
 }
 
+// Manifest ghi kiểu nguyên tử (2026-09-24): ghi file tạm, xoá bản cũ, đổi tên. Mất điện
+// giữa chừng (pin cạn, rút sạc — case bắt buộc #1 trong tài liệu thiết kế) thì lúc boot
+// còn đúng một trong hai file đầy đủ. Trước đây writeFile() mở "w" cắt cụt index.bin
+// trước khi ghi -> mất điện đúng lúc đó là mất cả hàng chờ tin nhắn.
+static constexpr const char* SD_MANIFEST_TMP = "/media/index.tmp";
+
 bool SDStorageProvider::loadManifest() {
+    // Lần ghi trước chết sau khi xoá bản cũ, trước khi đổi tên -> bản tạm là bản đúng.
+    if (!_sd.fileExists(SD_MANIFEST_PATH) && _sd.fileExists(SD_MANIFEST_TMP)) {
+        _sd.renameFile(SD_MANIFEST_TMP, SD_MANIFEST_PATH);
+    }
     int32_t n = _sd.readFile(SD_MANIFEST_PATH, (uint8_t*)&_m, sizeof(_m));
     if (n != (int32_t)sizeof(_m)) return false;
     if (_m.magic != SD_MANIFEST_MAGIC) return false;
@@ -64,9 +74,31 @@ bool SDStorageProvider::loadManifest() {
 
 void SDStorageProvider::saveManifest() {
     if (!_mounted) return;
-    if (_sd.writeFile(SD_MANIFEST_PATH, (const uint8_t*)&_m, sizeof(_m)) != (int32_t)sizeof(_m)) {
+    if (_sd.writeFile(SD_MANIFEST_TMP, (const uint8_t*)&_m, sizeof(_m)) != (int32_t)sizeof(_m)) {
         DLOG("[SDP] ERR: luu manifest FAIL");
+        return;
     }
+    _sd.deleteFile(SD_MANIFEST_PATH);
+    if (!_sd.renameFile(SD_MANIFEST_TMP, SD_MANIFEST_PATH)) {
+        DLOG("[SDP] ERR: doi ten manifest FAIL");
+    }
+}
+
+bool SDStorageProvider::remount() {
+    _activeIndex = -1;
+    _writeOpen = false;
+    _readIndex = -1;
+    _mounted = _sd.remount();
+    if (!_mounted) {
+        resetManifest();
+        return false;
+    }
+    if (!loadManifest()) {
+        resetManifest();
+        saveManifest();
+    }
+    DLOG("[SDP] remount OK unread=%u", getUnreadCount());
+    return true;
 }
 
 // ============================================================================

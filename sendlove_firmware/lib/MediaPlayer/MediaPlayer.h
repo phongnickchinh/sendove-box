@@ -50,8 +50,15 @@ public:
     /// Test I2S speaker beep
     void testAudioBeep();
 
-    /// Một hồi bíp báo thức (block ~0.6s). Gọi khi player đang IDLE.
-    void alarmBeep();
+    /// Một hồi bíp báo thức (block ~0.6s) ở âm lượng 0..100. Gọi khi player đang IDLE.
+    void alarmBeep(uint8_t volume);
+
+    /// Phát nhạc báo thức (lặp) từ file trên thẻ. false = không mở/không đọc được ->
+    /// bên gọi dùng tiếng bíp (một nhánh dự phòng duy nhất, case bắt buộc #4).
+    bool startAlarmMusic(const char* path, uint8_t volume);
+    /// Gọi mỗi vòng khi đang kêu: đổi âm lượng (tăng dần) + nạp DMA. Không block.
+    void tickAlarmMusic(uint8_t volume);
+    bool isAlarmMusicPlaying() const { return _alarmMusic; }
 
 
     /// Get current playback state
@@ -92,6 +99,8 @@ private:
     uint32_t _frameBaseOffset = 0;
     bool     _readFrameSizeHeader = true;
     bool     _lastFrameSkipped = false;  // Không bỏ hai frame liên tiếp
+
+    bool     _alarmMusic    = false;  // đang phát nhạc báo thức (không có video)
 
     bool     _isSlbxRgb565  = false;
     uint16_t _slbxWidth     = 128;

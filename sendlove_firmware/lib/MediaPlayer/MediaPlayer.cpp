@@ -6,6 +6,8 @@
 #include "SystemMonitor.h"
 #include "config.h"
 #include "ScreenLogger.h"
+#include "Settings.h"
+#include "SdStore.h"
 
 // ============================================================================
 // MediaPlayer Implementation — VJPG/VIMG via IStorageProvider
@@ -19,7 +21,7 @@ static void dumpHexBytes(const char* tag, const uint8_t* data, size_t len) {
 
 // ============================================================================
 // ASCII-fold tiếng Việt (tạm thời, chờ phase font Unicode thật) — bỏ dấu để
-// hiển thị được bằng font ChakraPetch_* hiện chỉ có glyph ASCII 32-126.
+// hiển thị được bằng font FreeSansBold9pt7b (có sẵn, chỉ có glyph ASCII 32-126).
 // ============================================================================
 
 // Khối Vietnamese Unicode U+1EA0-1EF9 (và 4 cặp Latin Extended-A Ă/Đ/Ơ/Ư) đều
@@ -208,7 +210,7 @@ bool MediaPlayer::playItem(const char* identifier) {
 
     _display->turnOn();
     _display->clear();
-    _display->setBacklight(BACKLIGHT_DAY_PERCENT);
+    _display->setBacklight(Settings::currentBacklight());
 
     _isSlbxRgb565 = false;
 
@@ -274,6 +276,8 @@ bool MediaPlayer::playItem(const char* identifier) {
     DLOG("[PLAY] setup OK: frames=%d", _totalFrames);
 
     // Khởi tạo I2S nếu chưa có (chỉ init 1 lần trong vòng đời MediaPlayer)
+    // Âm lượng đặt TRƯỚC init(): âm lượng 0 thì init() để ampli tắt luôn.
+    _audio.setVolume(Settings::volume.load(), true);
     if (!_audio.isInitialized()) {
         _audio.init();
     }
@@ -332,6 +336,11 @@ bool MediaPlayer::playItem(const char* identifier) {
 }
 void MediaPlayer::update() {
     if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
+
+    // Web đổi âm lượng giữa lúc đang phát: chỉ đổi đích, fillChunk() trượt dần tới đó.
+    if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
+        _audio.setVolume(Settings::volume.load());
+    }
 
     if (_state == PlaybackState::PLAYING) {
         // 1. Tick audio trước decode (nạp đầy DMA 192ms)
@@ -418,6 +427,7 @@ void MediaPlayer::stop() {
         _storage->closeRead();
     }
     _state = PlaybackState::IDLE;
+    _alarmMusic = false;
     _audio.stop();
     // Giải phóng _jpegBuffer để hoàn trả 32KB cho heap lúc Standby / TLS Handshake
     if (_jpegBuffer != nullptr) {
@@ -438,11 +448,38 @@ void MediaPlayer::stop() {
 }
 
 void MediaPlayer::testAudioBeep() {
+    _audio.setVolume(Settings::volume.load(), true);
     _audio.testBeep();
 }
 
-void MediaPlayer::alarmBeep() {
+void MediaPlayer::alarmBeep(uint8_t volume) {
+    _audio.setVolume(volume, true);
     _audio.beep(400);
+}
+
+bool MediaPlayer::startAlarmMusic(const char* path, uint8_t volume) {
+    if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
+    _audio.setVolume(volume, true);
+    bool ok = _audio.isInitialized() || _audio.init();
+    // Nhạc báo thức chỉ cần I2S DMA (~24KB) + 3KB đệm, không cấp bộ giải mã JPEG.
+    if (ok) ok = _audio.loadFromFile(SdStore::card(), path, true);
+    if (ok) {
+        _audio.prefill();
+        _alarmMusic = true;
+    } else {
+        _audio.stop();
+        DLOG("[ALM] khong mo duoc nhac -> bip");
+    }
+    if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
+    return ok;
+}
+
+void MediaPlayer::tickAlarmMusic(uint8_t volume) {
+    if (!_alarmMusic) return;
+    if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
+    _audio.setVolume(volume);
+    _audio.tick();
+    if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
 }
 
 PlaybackState MediaPlayer::getState() const {

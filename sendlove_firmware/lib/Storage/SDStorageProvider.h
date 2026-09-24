@@ -85,6 +85,9 @@ public:
 
     bool formatStorage() override;
 
+    SDCardManager* sdCard() override { return &_sd; }
+    bool remount() override;
+
 private:
     SDCardManager _sd;
     SdManifest _m{};

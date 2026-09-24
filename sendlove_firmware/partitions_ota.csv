@@ -2,6 +2,13 @@
 # SPIFFS/LittleFS o bat ky dau trong firmware (da grep ca src/ lan lib/), no chi
 # ngoi khong. Cho cho hai phan vung app: 0x1C0000 -> 0x1F0000 moi ben (+192KB).
 #
+# 2026-09-24 (thiet ke the SD, MEMORY.md §28, user chot cach B): bot moi app
+# 0x1F0000 -> 0x1D0000 (1,81MB; firmware dang ~1,43MB) de lay 256KB cho phan vung
+# `theme`: ban chieu cua goi theme tren the SD (nen 240x240 + phong + layout), doc
+# bang esp_partition_mmap nhu mang PROGMEM truoc day. The SD van la kho goc.
+# app1 DOI OFFSET 0x200000 -> 0x1E0000: nap cap se ghi lai boot_app0.bin vao otadata
+# (PlatformIO lam san) -> hop khoi dong tu app0, khong chay theo otadata cu.
+#
 # nvs GIU NGUYEN offset 0x9000 va size 0x5000 -> Wi-Fi creds, bao thuc, last_dl_ts
 # song qua lan nap nay. `nvs_keys` chi can khi bat ma hoa NVS (dang tat) nen doi
 # cho xuong cuoi la vo hai.
@@ -10,6 +17,7 @@
 # Name,     Type, SubType,  Offset,   Size
 nvs,        data, nvs,      0x9000,   0x5000
 otadata,    data, ota,      0xe000,   0x2000
-app0,       app,  ota_0,    0x10000,  0x1F0000
-app1,       app,  ota_1,    0x200000, 0x1F0000
+app0,       app,  ota_0,    0x10000,  0x1D0000
+app1,       app,  ota_1,    0x1E0000, 0x1D0000
+theme,      data, 0x40,     0x3B0000, 0x40000
 nvs_keys,   data, nvs_keys, 0x3F0000, 0x1000

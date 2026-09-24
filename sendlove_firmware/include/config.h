@@ -41,6 +41,21 @@ static constexpr uint32_t PENDING_PLAY_SETTLE_MS = 10000;
 // Display Backlight
 static constexpr uint8_t BACKLIGHT_DAY_PERCENT = 100;
 
+// Cài đặt người dùng (web: PUT /boxes/:id/config -> config_flag). Lưu NVS nên vẫn có hiệu
+// lực khi thẻ SD hỏng. User chốt 2026-09-24: âm lượng mặc định 100 = bằng mức phát trước
+// đây, cập nhật firmware không làm hộp nhỏ đi. Quyết định "KHÔNG giảm đèn nền" ở MEMORY.md
+// §4 là chặn firmware TỰ giảm sáng, không áp cho cài đặt do người dùng chọn (§28).
+static constexpr uint8_t SETTINGS_DEFAULT_BRIGHTNESS = 100;
+static constexpr uint8_t SETTINGS_DEFAULT_VOLUME = 100;
+// Sàn độ sáng: kéo về 0 thì màn đen hẳn, người dùng tưởng hộp hỏng.
+static constexpr uint8_t SETTINGS_MIN_BRIGHTNESS = 5;
+// Màn báo thức luôn sáng ít nhất bấy nhiêu, dù cài đặt thấp hơn.
+static constexpr uint8_t ALARM_MIN_BRIGHTNESS = 60;
+// Chân SD_MODE của MAX98357A (BOM.md: GPIO20, HIGH = phát, LOW = shutdown). -1 = bo hiện
+// tại chưa nối (breadboard nối cứng SD_MODE) -> firmware không đụng chân nào. Đổi thành 20
+// khi lên PCB. Âm lượng 0 thì tắt ampli luôn.
+static constexpr int8_t PIN_AMP_SD = -1;
+
 // Media Playback
 static constexpr uint8_t TARGET_FPS = 15;
 static constexpr uint32_t FRAME_DURATION_MS = 1000 / TARGET_FPS;
@@ -78,6 +93,18 @@ static constexpr uint8_t MAX_ALARMS = 10;
 static constexpr uint32_t ALARM_SNOOZE_SEC = 5 * 60;
 static constexpr uint32_t ALARM_RING_MAX_MS = 60000;
 static constexpr uint32_t ALARM_BEEP_PERIOD_MS = 1000;
+
+// Nhạc báo thức (thiết kế 2026-09-24, MEMORY.md §28). User chốt: 10 bài mỗi hộp, mỗi bài
+// 5-60s, 16kHz mono (mở lại "giữ 8kHz" RIÊNG cho nhạc báo thức). 60s × 16000 × 2 byte =
+// 1.920.000 + 54 byte header -> trần 2MB, KHÔNG dùng AUDIO_MAX_PCM_BYTES (600KB của tin nhắn).
+static constexpr size_t   ALARM_MUSIC_MAX_TRACKS = 10;
+static constexpr uint32_t ALARM_MUSIC_MAX_BYTES  = 2000000;
+// Mỗi chu kỳ sync tải tối đa bấy nhiêu bài: một chu kỳ quá dài làm lệnh phát tin đang chờ
+// (§27) hết hạn 60s.
+static constexpr uint8_t  ALARM_MUSIC_PER_SYNC   = 2;
+// Tăng dần: bắt đầu ở 30% mức đã chọn (thang âm lượng vốn đã theo dB), đủ mức sau 20s.
+static constexpr uint32_t ALARM_RAMP_MS          = 20000;
+static constexpr uint8_t  ALARM_RAMP_START_PCT   = 30;
 
 // Bat xac thuc chung chi TLS cho moi ket noi Firebase (thay cho setInsecure()).
 // Root CA nam o include/firebase_root_ca.h.
@@ -151,7 +178,11 @@ static constexpr UBaseType_t TASK_PRIORITY_MEDIA_PLAYER = 3;
 static constexpr UBaseType_t TASK_PRIORITY_NETWORK = 2;
 static constexpr UBaseType_t TASK_PRIORITY_UI_CONTROLLER = 5;
 
-static constexpr uint32_t TASK_STACK_MEDIA_PLAYER = 6144;
+// 8192 từ 2026-09-24: phông VLW của theme (LovyanGFX VLWfont::drawChar) cấp bitmap từng
+// glyph bằng alloca(w*h) TRÊN STACK task này — giờ cỡ 48-56px là 2-3KB mỗi glyph. §24 dặn
+// không nâng khi chưa đo; đây là nhu cầu mới có số cụ thể, và LayoutEngine in
+// "[LAY] stack con N B" sau lần vẽ đầu có VLW để đo trên máy thật.
+static constexpr uint32_t TASK_STACK_MEDIA_PLAYER = 8192;
 static constexpr uint32_t TASK_STACK_NETWORK = 6144;
 static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
 

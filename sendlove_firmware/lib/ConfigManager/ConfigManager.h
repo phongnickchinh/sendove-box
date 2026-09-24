@@ -21,6 +21,19 @@ struct AlarmItem {
     char time[6] = "00:00"; // "HH:MM"
     bool isEnable = false;
     bool repeatable = false;
+    // Nhạc báo thức (2026-09-24). Rỗng = tiếng bíp. Đổi kích thước struct -> blob NVS cũ
+    // lệch cỡ -> loadAlarms() bỏ blob VÀ hạ cờ dirty (không thì lần sync đầu đẩy danh
+    // sách rỗng lên, xoá sạch báo thức trên cloud).
+    char musicId[24] = "";
+    uint8_t volume = 80;   // 0..100, riêng từng báo thức (user chốt mặc định 80)
+    bool ramp = true;      // tăng dần từ 30% mức đã chọn trong ALARM_RAMP_MS
+};
+
+/// Cài đặt người dùng đặt trên web (boxes/<id>/config). rev = config_rev lần áp dụng gần nhất.
+struct UserSettings {
+    uint8_t brightness = SETTINGS_DEFAULT_BRIGHTNESS;
+    uint8_t volume = SETTINGS_DEFAULT_VOLUME;
+    uint32_t rev = 0;
 };
 
 class ConfigManager {
@@ -80,6 +93,12 @@ public:
     bool saveAlarmDirty(bool dirty);
     bool loadAlarmDirty();
 
+    // --- Cài đặt người dùng (độ sáng, âm lượng) ---
+
+    /// Chưa từng lưu thì trả giá trị mặc định trong config.h, không phải lỗi.
+    void loadSettings(UserSettings& out);
+    bool saveSettings(const UserSettings& s);
+
     // --- Firebase Auth ---
 
     /// Lưu refresh token của Firebase Auth (đổi lấy idToken mới mà không cần
@@ -105,6 +124,9 @@ private:
     static constexpr const char* KEY_ALARM_DATA    = "alarm_data";
     static constexpr const char* KEY_ALARM_DIRTY   = "alarm_dirty";
     static constexpr const char* KEY_FB_REFRESH    = "fb_refresh";
+    static constexpr const char* KEY_SET_BL        = "set_bl";
+    static constexpr const char* KEY_SET_VOL       = "set_vol";
+    static constexpr const char* KEY_SET_REV       = "set_rev";
 };
 
 #endif // CONFIG_MANAGER_H

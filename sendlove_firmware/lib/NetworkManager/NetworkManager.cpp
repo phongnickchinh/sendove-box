@@ -204,28 +204,6 @@ void NetworkManager::getTimeString(char* buffer, size_t maxLen) const {
     strftime(buffer, maxLen, "%H:%M", &timeinfo);
 }
 
-void NetworkManager::getDateString(char* buffer, size_t maxLen) const {
-    if (buffer == nullptr || maxLen == 0) return;
-    if (!_isTimeSynced) {
-        snprintf(buffer, maxLen, "Loading...");
-        return;
-    }
-
-    struct tm timeinfo;
-    // Non-blocking read from internal ESP32 RTC (timeout = 0)
-    if (!getLocalTime(&timeinfo, 0)) {
-        snprintf(buffer, maxLen, "Loading...");
-        return;
-    }
-
-    const char* days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-
-    snprintf(buffer, maxLen, "%s, %02d.%02d",
-             days[timeinfo.tm_wday],
-             timeinfo.tm_mday,
-             timeinfo.tm_mon + 1);
-}
-
 int NetworkManager::getWifiRSSI() const {
     if (WiFi.status() != WL_CONNECTED) return -100;
     return WiFi.RSSI();
@@ -517,6 +495,12 @@ bool NetworkManager::isWebServerRunning() const {
 #include "IStorageProvider.h"
 #include "ConfigManager.h"
 #include "DisplayDriver.h"
+#include "Settings.h"
+#include "SDCardManager.h"
+#include "SdLog.h"
+#include "SdStore.h"
+#include "MusicStore.h"
+#include "ThemeStore.h"
 
 // Bao ve buoc gianh quyen co _isSyncing giua cac task khac do uu tien.
 static portMUX_TYPE s_syncMux = portMUX_INITIALIZER_UNLOCKED;
@@ -675,6 +659,13 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
+    // 0. Thẻ vắng (chưa mount được lúc boot, hoặc probe vừa báo mất): thử mount lại.
+    // An toàn ở đây vì không phát tin (vừa kiểm ở trên) và task này là bên duy nhất
+    // mở file tải về. Mount lại được thì các bước sau (theme, nhạc, tin) tự đồng bộ.
+    if (SdStore::state() == SdStore::State::ABSENT) {
+        SdStore::tryRemount();
+    }
+
     // 1. Tái kết nối Wi-Fi. 12s chứ không phải 5s: sau Light Sleep đây là một lần
     // associate + 4-way handshake + xin IP DHCP hoàn toàn mới (xem ensureConnected),
     // thực tế tốn 3-8s. Cắt ở 5s là bỏ dở giữa chừng đúng lúc sắp xong.
@@ -762,9 +753,25 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
 
     // 4. Update Status (Heartbeat + Diag Telemetry đẩy lên cloud)
     updateFirebaseStatus(batteryPercent, isCharging);
+    // Đoạn cuối nhật ký, CHỈ khi có lỗi mới (hoặc lần đầu sau boot) -> thường không tốn gì.
+    pushLogTail();
     vTaskDelay(pdMS_TO_TICKS(100));
 
     if (isPlaybackActive()) {
+        strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
+        _isSyncing = false;
+        return false;
+    }
+
+    // 4a. Theme (gói nhỏ ~150KB, chỉ tải khi cờ bật / rev khác bản trong flash).
+    if (!syncTheme(_themeFlag) || isPlaybackActive()) {
+        strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
+        _isSyncing = false;
+        return false;
+    }
+
+    // 4b. Nhạc báo thức — TRƯỚC tin nhắn: báo thức là việc có giờ hẹn, tin thì không.
+    if (!syncAlarmMusic() || isPlaybackActive()) {
         strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
@@ -1070,11 +1077,14 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
 
     // 448 chứ không phải 384: thêm trường "fw" (2026-09-21) đã đẩy chuỗi sát trần,
     // mà tràn thì snprintf cắt cụt ÂM THẦM -> cả gói JSON hỏng, PATCH bị từ chối.
-    char payload[448];
+    // 640: thêm config_rev/sd_state/sd_free_mb/music_n/theme_rev (2026-09-24). Đủ diag đầy ~480
+    // byte; tràn thì snprintf cắt cụt -> JSON hỏng -> heartbeat chết (kiểm ngay bên dưới).
+    char payload[640];
     uint32_t now = (uint32_t)time(nullptr);
-    snprintf(payload, sizeof(payload),
+    int plen = snprintf(payload, sizeof(payload),
              "{\"online\":true,\"battery\":%d,\"is_charging\":%s,\"last_seen\":%u,"
-             "\"fw\":\"%s\","
+             "\"fw\":\"%s\",\"config_rev\":%lu,\"sd_state\":\"%s\",\"sd_free_mb\":%lu,"
+             "\"music_n\":%u,\"theme_rev\":%lu,"
              "\"diag\":{"
              "\"wake\":\"%s\","
              "\"step\":\"%s\","
@@ -1089,7 +1099,9 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
              "\"prev_err\":\"%s\""
              "}}",
              batteryPercent, isCharging ? "true" : "false", now,
-             FW_VERSION,
+             FW_VERSION, (unsigned long)Settings::appliedRev.load(),
+             SdStore::stateName(), (unsigned long)SdStore::freeMB(),
+             (unsigned)MusicStore::count(), (unsigned long)ThemeStore::rev(),
              _currentWakeCause,
              _diagStep,
              _diagErr,
@@ -1101,6 +1113,11 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
              _prevWakeCause,
              _prevDiagStep,
              _prevDiagErr);
+    if (plen < 0 || plen >= (int)sizeof(payload)) {
+        DLOG("[NET] status payload BI CAT (%d)", plen);
+        http.end();
+        return false;
+    }
 
     int httpCode = http.PATCH((uint8_t*)payload, strlen(payload));
     noteAuthFailure(httpCode, "status");
@@ -1160,6 +1177,8 @@ bool NetworkManager::checkFirebaseFlags() {
     // có thể không bao giờ tới. OTA giờ là chế độ riêng do người dùng vào bằng
     // chuỗi chạm giữ 3s, 3s rồi 6s (STATE_OTA trong main.cpp).
     bool alarmFlag = false;
+    bool configFlag = false;
+    bool musicFlag = false;
     if (payload != "null" && payload.length() > 2) {
         JsonDocument doc;
         if (deserializeJson(doc, payload)) {
@@ -1168,30 +1187,22 @@ bool NetworkManager::checkFirebaseFlags() {
             return false;
         }
         alarmFlag = doc["a_flag"] | false;
+        configFlag = doc["config_flag"] | false;
+        musicFlag = doc["music_flag"] | false;
+        _themeFlag = doc["theme_flag"] | false;
     }
     _lastAFlag = alarmFlag;
+    // Báo thức đổi (có thể đổi bài) hoặc thư viện nhạc đổi -> lấy lại danh sách nhạc.
+    if (alarmFlag || musicFlag) _musicNeedFetch = true;
 
-    // Reset cờ TRƯỚC khi tải danh sách báo thức: web sửa tiếp trong lúc đang tải
-    // sẽ bật lại a_flag và được bắt ở chu kỳ sau. Reset sau khi tải thì lần sửa đó
-    // bị xoá mất cờ. Chỉ PATCH khi có cờ bật — trước đây PATCH mỗi chu kỳ 10s,
-    // tốn một lần bắt tay TLS vô ích.
-    if (alarmFlag) {
-        WiFiClientSecure patchClient;
-        configureTlsClient(patchClient);
-        HTTPClient patchHttp;
+    // Reset cờ TRƯỚC khi tải: web sửa tiếp trong lúc đang tải sẽ bật lại cờ và được
+    // bắt ở chu kỳ sau. Reset sau khi tải thì lần sửa đó bị xoá mất cờ. Chỉ PATCH khi
+    // có cờ bật — trước đây PATCH mỗi chu kỳ 10s, tốn một lần bắt tay TLS vô ích.
+    // config_flag hạ ở đây cũng an toàn dù tải hỏng: _settingsNeedFetch giữ lượt thử lại.
+    resetFlags(alarmFlag, configFlag, false, musicFlag);
 
-        // Dung lai _url an toan: GET flags o tren da http.end() xong truoc khi toi day.
-        snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json",
-                 FIREBASE_HOST, BOX_ID);
-        appendAuth('?');
-
-        if (patchHttp.begin(patchClient, _url)) {
-            patchHttp.setTimeout(FIREBASE_TIMEOUT_MS);
-            patchHttp.addHeader("Content-Type", "application/json");
-            int pc = patchHttp.PATCH("{\"a_flag\":false}");
-            noteAuthFailure(pc, "flags reset");
-            patchHttp.end();
-        }
+    if (configFlag || _settingsNeedFetch) {
+        _settingsNeedFetch = !syncFirebaseSettings();
     }
 
     // Đồng bộ báo thức hai chiều (luật đầy đủ ở AlarmClock.h):
@@ -1247,6 +1258,11 @@ bool NetworkManager::pushFirebaseAlarms() {
         a["time"] = alarms[i].time;
         a["is_enable"] = alarms[i].isEnable;
         a["repeatable"] = alarms[i].repeatable;
+        // Hộp đẩy CẢ danh sách (hộp thắng) nên phải gửi đủ trường nhạc, không thì PUT xoá
+        // mất lựa chọn nhạc/âm lượng người nhận đã đặt trên web (case bắt buộc #2).
+        if (alarms[i].musicId[0]) a["music_id"] = alarms[i].musicId;
+        a["volume"] = alarms[i].volume;
+        a["ramp"] = alarms[i].ramp;
         // Web không đọc created_at; ghi cho khớp schema backend (BaseModel).
         a["created_at"] = nowMs;
         a["updated_at"] = nowMs;
@@ -1272,6 +1288,81 @@ bool NetworkManager::pushFirebaseAlarms() {
 
     DLOG("[NET] alarms PUT %u -> %d", (unsigned)count, code);
     return code == HTTP_CODE_OK;
+}
+
+void NetworkManager::resetFlags(bool alarm, bool config, bool theme, bool music) {
+    if (!alarm && !config && !theme && !music) return;
+
+    char body[96] = "{";
+    size_t n = 1;
+    auto add = [&](bool on, const char* key) {
+        if (!on) return;
+        n += snprintf(body + n, sizeof(body) - n, "%s\"%s\":false", n > 1 ? "," : "", key);
+    };
+    add(alarm, "a_flag");
+    add(config, "config_flag");
+    add(theme, "theme_flag");
+    add(music, "music_flag");
+    snprintf(body + n, sizeof(body) - n, "}");
+
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/flags.json", FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
+    if (!http.begin(client, _url)) return;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    http.addHeader("Content-Type", "application/json");
+    int pc = http.PATCH(body);
+    noteAuthFailure(pc, "flags reset");
+    http.end();
+}
+
+// Cài đặt người dùng. `?shallow=true` trên nút config: khoá có giá trị nguyên thuỷ
+// (display_brightness, playback_volume, config_rev) trả về NGUYÊN giá trị, còn khoá là
+// object (alarm_list, theme, wifi_config) chỉ trả `true`. Một request, và không kéo
+// mật khẩu Wi-Fi hay cả danh sách báo thức về hộp.
+bool NetworkManager::syncFirebaseSettings() {
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/config.json?shallow=true",
+             FIREBASE_HOST, BOX_ID);
+    appendAuth('&');
+
+    if (!http.begin(client, _url)) return false;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    int code = http.GET();
+    noteAuthFailure(code, "settings");
+    if (code != HTTP_CODE_OK) {
+        DLOG("[NET] settings GET fail: %d", code);
+        if (code < 0) logTlsError(client, "settings");
+        http.end();
+        return false;
+    }
+    String payload = http.getString();
+    http.end();
+
+    int bl = -1, vol = -1;
+    uint32_t rev = 0;
+    if (payload != "null" && payload.length() > 2) {
+        JsonDocument doc;
+        if (deserializeJson(doc, payload)) return false;
+        // is<int>() chặn giá trị lạ (chuỗi, null) -> -1 = giữ giá trị cũ.
+        if (doc["display_brightness"].is<int>()) bl = doc["display_brightness"].as<int>();
+        if (doc["playback_volume"].is<int>()) vol = doc["playback_volume"].as<int>();
+        rev = doc["config_rev"] | 0u;
+    }
+    // Không có gì để đổi thì khỏi ghi NVS (mỗi lần boot đều đi qua đây).
+    if (bl < 0 && vol < 0) return true;
+    if (rev == Settings::appliedRev.load() && rev != 0 &&
+        (bl < 0 || bl == (int)Settings::brightness.load()) &&
+        (vol < 0 || vol == (int)Settings::volume.load())) {
+        return true;
+    }
+    Settings::apply(bl, vol, rev);
+    return true;
 }
 
 bool NetworkManager::syncFirebaseAlarms() {
@@ -1324,12 +1415,352 @@ bool NetworkManager::syncFirebaseAlarms() {
             strncpy(alarms[count].time, tStr, sizeof(alarms[count].time) - 1);
             alarms[count].isEnable = alarmObj["is_enable"] | false;
             alarms[count].repeatable = alarmObj["repeatable"] | false;
+            const char* mid = alarmObj["music_id"] | "";
+            if (strlen(mid) < sizeof(alarms[count].musicId)) {
+                strncpy(alarms[count].musicId, mid, sizeof(alarms[count].musicId) - 1);
+            }
+            int vol = alarmObj["volume"] | 80;
+            alarms[count].volume = (uint8_t)(vol < 0 ? 0 : (vol > 100 ? 100 : vol));
+            alarms[count].ramp = alarmObj["ramp"] | true;
             count++;
         }
     }
 
     AlarmClock::instance().replaceFromCloud(alarms, count);
     return true;
+}
+
+NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, const char* dstPath,
+                                                     uint32_t size, uint32_t crc) {
+    SDCardManager* card = SdStore::card();
+    if (!card || !storagePath || !dstPath || size == 0) return DlResult::FAILED;
+
+    // Đã có đủ từ lần trước (crc đã kiểm lúc đổi tên) -> khỏi tải. Gặp khi gói theme bị
+    // cài lại, hoặc chọn lại một bài nhạc đang nằm sẵn trên thẻ.
+    if (card->getFileSize(dstPath) == (int32_t)size) return DlResult::OK;
+
+    char part[96];
+    snprintf(part, sizeof(part), "%s.part", dstPath);
+
+    int32_t have = card->getFileSize(part);
+    if (have < 0) have = 0;
+    if ((uint32_t)have > size) {  // .part của một bản khác dài hơn -> bỏ
+        card->deleteFile(part);
+        have = 0;
+    }
+
+    if ((uint32_t)have < size) {
+        // Đường dẫn Storage -> URL tải: mọi '/' phải mã hoá thành %2F (giống voice_url).
+        String url = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/";
+        for (const char* p = storagePath; *p; p++) {
+            if (*p == '/') url += "%2F";
+            else url += *p;
+        }
+        url += "?alt=media";
+
+        WiFiClientSecure client;
+        configureTlsClient(client);
+        HTTPClient http;
+        if (!http.begin(client, url)) return DlResult::FAILED;
+        http.setTimeout(30000);
+        addStorageAuthHeader(http);
+        if (have > 0) {
+            char range[40];
+            snprintf(range, sizeof(range), "bytes=%ld-", (long)have);
+            http.addHeader("Range", range);
+        }
+        int code = http.GET();
+        noteAuthFailure(code, "file");
+        if (code < 0) logTlsError(client, "file");
+
+        bool append;
+        if (code == 206 && have > 0) {
+            append = true;
+        } else if (code == HTTP_CODE_OK) {
+            append = false;  // server bỏ qua Range -> tải lại từ đầu
+            have = 0;
+        } else {
+            DLOG("[NET] file GET %d: %s", code, dstPath);
+            http.end();
+            // 416 = .part đã đủ/lệch -> bỏ, lần sau tải lại từ đầu.
+            if (code == 416) card->deleteFile(part);
+            return DlResult::FAILED;
+        }
+
+        DLOG("[NET] tai %s tu %ld/%lu", dstPath, (long)have, (unsigned long)size);
+        if (!card->openGenWrite(part, append)) {
+            http.end();
+            SdStore::noteIoError();
+            return DlResult::FAILED;
+        }
+
+        WiFiClient* stream = http.getStreamPtr();
+        uint8_t buffer[2048];
+        uint32_t got = (uint32_t)have;
+        uint32_t lastData = millis();
+        bool writeErr = false, aborted = false;
+        while (got < size && http.connected()) {
+            // Báo thức (có nhạc) bắt đầu kêu giữa chừng: dừng, giữ .part để lần sau tải tiếp.
+            if (isPlaybackActive()) {
+                aborted = true;
+                break;
+            }
+            size_t avail = stream->available();
+            if (avail == 0) {
+                if (millis() - lastData > DOWNLOAD_STALL_TIMEOUT_MS) break;
+                vTaskDelay(pdMS_TO_TICKS(5));
+                continue;
+            }
+            size_t want = avail < sizeof(buffer) ? avail : sizeof(buffer);
+            if (want > size - got) want = size - got;
+            // read() chứ KHÔNG readBytes(): WiFiClientSecure không override readBytes() nên
+            // rơi về Stream::readBytes() đọc TỪNG BYTE (xem vòng tải tin nhắn bên dưới).
+            int n = stream->read(buffer, want);
+            if (n <= 0) continue;
+            if (card->genWrite(buffer, (size_t)n) != (size_t)n) {
+                writeErr = true;
+                break;
+            }
+            got += (uint32_t)n;
+            lastData = millis();
+        }
+        card->closeGenWrite();
+        http.end();
+
+        if (writeErr) {
+            DLOG("[NET] ghi the FAIL @%lu: %s", (unsigned long)got, dstPath);
+            SdStore::noteIoError();
+            return DlResult::FAILED;
+        }
+        if (aborted) return DlResult::ABORTED;
+        if (got < size) {
+            DLOG("[NET] tai do %lu/%lu, lan sau tai tiep", (unsigned long)got, (unsigned long)size);
+            return DlResult::FAILED;
+        }
+    }
+
+    bool readOk = false;
+    uint32_t actual = SdStore::crc32File(part, size, &readOk);
+    if (!readOk || actual != crc) {
+        DLOG("[NET] crc sai %s (%08lx != %08lx)", dstPath, (unsigned long)actual, (unsigned long)crc);
+        card->deleteFile(part);
+        return DlResult::FAILED;
+    }
+    card->deleteFile(dstPath);
+    if (!card->renameFile(part, dstPath)) return DlResult::FAILED;
+    SdStore::refreshFree();
+    return DlResult::OK;
+}
+
+bool NetworkManager::syncTheme(bool themeFlag) {
+    if (!SdStore::card() || !ThemeStore::partitionPresent()) return true;
+
+    uint32_t epoch = SdStore::mountEpoch.load();
+    if (epoch != _seenThemeEpoch) {
+        _seenThemeEpoch = epoch;
+        _themeNeedFetch = true;
+    }
+    // Đang chờ Task_MediaPlayer cài gói vừa tải: đừng tải lại, chờ lần sau.
+    if (ThemeStore::installPending()) return true;
+    if (!themeFlag && !_themeNeedFetch) return true;
+
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/config/theme.json", FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
+    if (!http.begin(client, _url)) return true;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    int code = http.GET();
+    noteAuthFailure(code, "theme");
+    if (code != HTTP_CODE_OK) {
+        DLOG("[NET] theme GET fail: %d", code);
+        http.end();
+        return true;
+    }
+    String payload = http.getString();
+    http.end();
+
+    if (payload == "null" || payload.length() <= 2) {  // chưa từng lưu theme
+        _themeNeedFetch = false;
+        if (themeFlag) resetFlags(false, false, true, false);
+        return true;
+    }
+    JsonDocument doc;
+    if (deserializeJson(doc, payload)) return true;
+    const char* id = doc["theme_id"] | "";
+    uint32_t rev = doc["rev"] | 0u;
+    // Theme lưu bằng web bản cũ (trước 2026-09-24) không có theme_id/rev/assets: hộp
+    // không biết tải gì. Người nhận lưu lại theme một lần trên web là xong.
+    if (!id[0] || rev == 0 || strlen(id) > 20) {
+        DLOG("[NET] theme cu, can luu lai tren web");
+        _themeNeedFetch = false;
+        if (themeFlag) resetFlags(false, false, true, false);
+        return true;
+    }
+
+    char dir[48];
+    snprintf(dir, sizeof(dir), "/theme/%s_r%lu", id, (unsigned long)rev);
+
+    if (ThemeStore::valid() && ThemeStore::rev() == rev && strcmp(ThemeStore::themeId(), id) == 0) {
+        // Bản trong flash đã đúng: giờ mới hạ cờ, và dọn gói cũ trên thẻ.
+        _themeNeedFetch = false;
+        if (themeFlag) resetFlags(false, false, true, false);
+        SDCardManager* card = SdStore::card();
+        if (card) {
+            card->listDir("/theme", [](const char* name, bool isDir, void* keep) {
+                if (!isDir || strncmp(name, "t_", 2) != 0) return;
+                char path[48];
+                snprintf(path, sizeof(path), "/theme/%s", name);
+                if (strcmp(path, static_cast<const char*>(keep)) != 0) SdStore::removeTree(path);
+            }, dir);
+        }
+        return true;
+    }
+
+    // Tải từng asset vào thư mục gói. Kiểm size + crc32 trong downloadFile().
+    static const struct { const char* key; const char* file; } ASSETS[] = {
+        {"bg", "bg.bin"}, {"f_time", "f_time.vlw"}, {"f_date", "f_date.vlw"}};
+    JsonObject assets = doc["assets"].as<JsonObject>();
+    for (const auto& a : ASSETS) {
+        JsonObject o = assets[a.key].as<JsonObject>();
+        if (o.isNull()) continue;
+        const char* sp = o["path"] | "";
+        uint32_t size = o["size"] | 0u;
+        uint32_t crc = o["crc32"] | 0u;
+        if (!sp[0] || size == 0 || size > 200000) continue;
+        char dst[80];
+        snprintf(dst, sizeof(dst), "%s/%s", dir, a.file);
+        DlResult r = downloadFile(sp, dst, size, crc);
+        if (r == DlResult::ABORTED) return false;
+        if (r != DlResult::OK) {
+            DLOG("[NET] theme asset %s FAIL", a.key);
+            return true;  // _themeNeedFetch giữ nguyên -> chu kỳ sau thử tiếp
+        }
+    }
+    // layout.json = nguyên bản theme từ cloud (widgets + tên asset). Ghi SAU asset: gói
+    // chỉ "đầy đủ" khi có layout.json (asset bắt buộc của ThemeStore).
+    char path[80];
+    snprintf(path, sizeof(path), "%s/layout.json", dir);
+    if (!SdStore::writeAtomic(path, (const uint8_t*)payload.c_str(), payload.length())) return true;
+
+    ThemeStore::requestInstall(dir, id, rev);
+    DLOG("[NET] theme %s rev %lu san sang, cho cai", id, (unsigned long)rev);
+    return true;
+}
+
+bool NetworkManager::syncAlarmMusic() {
+    if (!SdStore::card()) return true;  // không có thẻ: báo thức kêu bíp, không có gì để làm
+
+    // Thẻ vừa mount lại: index trên thẻ mới có thể khác hẳn -> nạp lại, lấy lại danh sách.
+    uint32_t epoch = SdStore::mountEpoch.load();
+    if (epoch != _seenMountEpoch) {
+        _seenMountEpoch = epoch;
+        MusicStore::load();
+        _musicNeedFetch = true;
+    }
+
+    char need[ALARM_MUSIC_MAX_TRACKS][24];
+    size_t nNeed = AlarmClock::instance().musicInUse(time(nullptr), need, ALARM_MUSIC_MAX_TRACKS);
+    bool missing = false;
+    for (size_t i = 0; i < nNeed; i++) {
+        if (!MusicStore::has(need[i])) missing = true;
+    }
+    // Chu kỳ bình thường (không cờ, đủ bài) KHÔNG tốn request nào.
+    if (!_musicNeedFetch && !missing) return true;
+
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/music.json", FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
+    if (!http.begin(client, _url)) return true;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    int code = http.GET();
+    noteAuthFailure(code, "music");
+    if (code != HTTP_CODE_OK) {
+        DLOG("[NET] music GET fail: %d", code);
+        http.end();
+        return true;
+    }
+    String payload = http.getString();
+    http.end();
+
+    JsonDocument doc;
+    if (payload != "null" && payload.length() > 2 && deserializeJson(doc, payload)) return true;
+    JsonObject lib = doc.as<JsonObject>();
+
+    // Bài đã bị xoá khỏi thư viện -> xoá khỏi thẻ. Chỉ làm khi GET danh sách thành công.
+    char keep[ALARM_MUSIC_MAX_TRACKS][24];
+    size_t nKeep = 0;
+    for (JsonPair kv : lib) {
+        if (nKeep >= ALARM_MUSIC_MAX_TRACKS) break;
+        if (strlen(kv.key().c_str()) >= sizeof(keep[0])) continue;
+        strncpy(keep[nKeep], kv.key().c_str(), sizeof(keep[0]) - 1);
+        keep[nKeep][sizeof(keep[0]) - 1] = '\0';
+        nKeep++;
+    }
+    MusicStore::pruneExcept(keep, nKeep);
+    _musicNeedFetch = false;
+
+    uint8_t done = 0;
+    for (size_t i = 0; i < nNeed; i++) {
+        JsonObject m = lib[need[i]];
+        if (m.isNull()) continue;  // báo thức trỏ tới bài đã xoá: kêu bíp
+        uint32_t rev = m["rev"] | 0u;
+        uint32_t size = m["size"] | 0u;
+        uint32_t crc = m["crc32"] | 0u;
+        const char* sp = m["storage_path"] | "";
+        if (MusicStore::has(need[i], rev)) continue;
+        if (size == 0 || size > ALARM_MUSIC_MAX_BYTES || !sp[0]) continue;
+        if (done >= ALARM_MUSIC_PER_SYNC) {
+            _musicNeedFetch = true;  // còn bài chưa tải -> chu kỳ sau lấy tiếp
+            break;
+        }
+        char path[48];
+        MusicStore::pathFor(need[i], path, sizeof(path));
+        DlResult r = downloadFile(sp, path, size, crc);
+        if (r == DlResult::ABORTED) {
+            _musicNeedFetch = true;
+            return false;
+        }
+        if (r == DlResult::OK) {
+            MusicStore::put(need[i], rev, size, crc);
+            DLOG("[NET] nhac %s OK", need[i]);
+        } else {
+            _musicNeedFetch = true;
+        }
+        done++;
+    }
+    return true;
+}
+
+void NetworkManager::pushLogTail() {
+    static constexpr size_t MAX = 2200;
+    char* tail = (char*)malloc(MAX);
+    if (!tail) return;
+    if (!SdLog::takeTail(tail, MAX)) {
+        free(tail);
+        return;
+    }
+    JsonDocument doc;
+    doc["log_tail"] = (const char*)tail;
+    doc["log_at"] = (uint32_t)time(nullptr);
+    String body;
+    serializeJson(doc, body);  // ArduinoJson tự escape ", \ và xuống dòng
+    free(tail);
+
+    WiFiClientSecure client;
+    configureTlsClient(client);
+    HTTPClient http;
+    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/status.json", FIREBASE_HOST, BOX_ID);
+    appendAuth('?');
+    if (!http.begin(client, _url)) return;
+    http.setTimeout(FIREBASE_TIMEOUT_MS);
+    http.addHeader("Content-Type", "application/json");
+    int code = http.PATCH(body);
+    noteAuthFailure(code, "log");
+    http.end();
 }
 
 // Tải voice_url/bg_music_url và append vào slot vừa ghi (offset ngay sau phần
@@ -1755,6 +2186,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         uint32_t lastProgressMs = millis();
                         int lastLoggedRead = 0;
                         while (http.connected() && (len > 0 || len == -1)) {
+                            // Báo thức (có nhạc) bắt đầu kêu: nhường thẻ cho luồng nhạc
+                            // (case bắt buộc #5). Coi như tải hỏng -> discardWrite(), tin
+                            // không được đánh dấu đã tải nên chu kỳ sau tải lại.
+                            if (isPlaybackActive()) {
+                                DLOG("[NET] dl dung: bao thuc dang keu");
+                                writeError = true;
+                                break;
+                            }
                             size_t sizeAvail = stream->available();
                             if (sizeAvail) {
                                 size_t toRead = (sizeAvail < sizeof(buffer)) ? sizeAvail : sizeof(buffer);

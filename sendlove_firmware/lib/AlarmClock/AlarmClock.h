@@ -47,9 +47,14 @@ public:
     /// đẩy lại có sửa đổi mới thì giữ nguyên dirty để lần sau đẩy tiếp.
     void markPushed(uint32_t rev);
 
-    /// Gọi định kỳ (~500ms). true = bắt đầu kêu ngay, outTime nhận "HH:MM".
-    /// Báo thức một lần bị tắt (và đánh dấu dirty) NGAY lúc bắt đầu kêu.
-    bool pollDue(time_t now, char* outTime, size_t len);
+    /// Gọi định kỳ (~500ms). true = bắt đầu kêu ngay, outTime nhận "HH:MM", outItem (nếu
+    /// có) nhận bản sao báo thức đang kêu (nhạc, âm lượng, tăng dần). Báo lại 5 phút trả
+    /// đúng báo thức đã snooze. Báo thức một lần bị tắt (dirty) NGAY lúc bắt đầu kêu.
+    bool pollDue(time_t now, char* outTime, size_t len, AlarmItem* outItem = nullptr);
+
+    /// Các music_id mà báo thức đang dùng, không trùng, xếp theo báo thức sắp kêu nhất
+    /// trước (ưu tiên tải). Báo thức đang tắt xếp sau cùng. Trả số id đã ghi.
+    size_t musicInUse(time_t now, char (*outIds)[24], size_t maxCount);
 
     /// Người dùng chạm ngắn khi đang kêu: kêu lại sau ALARM_SNOOZE_SEC.
     void snooze(time_t now);
@@ -77,6 +82,7 @@ private:
     time_t   _lastFiredMinute = 0;  // chống kêu lại trong cùng một phút
     time_t   _snoozeUntil = 0;
     char     _snoozeTime[6] = "";
+    AlarmItem _snoozeItem;          // báo thức đang snooze: kêu lại đúng nhạc + âm lượng
 
     void lock();
     void unlock();

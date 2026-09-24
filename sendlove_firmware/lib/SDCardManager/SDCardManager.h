@@ -19,7 +19,11 @@
 // Toàn bộ ngữ nghĩa slot / manifest / hàng chờ nằm ở SDStorageProvider —
 // đúng cách chia NandStorage / NandStorageProvider.
 //
-// BA FILE HANDLE cùng lúc (SD.begin dành sẵn max_files = 5):
+// BỐN FILE HANDLE thường trú + handle tạm của readFile/readFileAt (SD.begin dành sẵn
+// max_files = 7 từ 2026-09-24; trước đó 5 cho 3 handle):
+//   _genFile   : ghi file tổng quát (nhạc, theme) của WakeSync, không đụng đường tải tin.
+//                CHỈ Task_WakeSync dùng: openGenWrite() đóng handle đang mở, nên task khác
+//                dùng chung sẽ cướp file đang tải (log dùng appendFile(), 2026-09-24).
 //   _writeFile : đường ghi (download)
 //   _readFile  : đọc tuần tự cho MediaPlayer (con trỏ do provider quản)
 //   _atFile    : đọc ngẫu nhiên cho AudioPlayer — PHẢI là handle RIÊNG, vì
@@ -45,6 +49,10 @@ public:
     /// Ghi dữ liệu vào file (tạo mới hoặc ghi đè)
     /// @return Số bytes đã ghi, hoặc -1 nếu lỗi
     int32_t writeFile(const char* path, const uint8_t* data, size_t len);
+
+    /// Ghi tiếp vào cuối file (tạo nếu chưa có), mở-ghi-đóng trong một lần giữ mutex
+    /// @return Số bytes đã ghi, hoặc -1 nếu lỗi
+    int32_t appendFile(const char* path, const uint8_t* data, size_t len);
 
     /// Mở file để ghi stream (cắt sạch nội dung cũ)
     bool openFileForWrite(const char* path);
@@ -112,6 +120,40 @@ public:
     /// @return Số bytes đọc được, hoặc -1 nếu không mở được
     int32_t readFile(const char* path, uint8_t* buf, size_t maxLen) const;
 
+    // --- File tổng quát (theme, nhạc báo thức, log) — thêm 2026-09-24 ---
+
+    /// Tháo rồi mount lại thẻ (thẻ vừa cắm lại). Gọi khi KHÔNG có handle nào đang mở.
+    bool remount();
+
+    /// Thẻ còn trả lời không (SD.cardType() != CARD_NONE). Sai -> đánh dấu chưa mount.
+    bool probe();
+
+    /// Đọc `len` byte tại `offset` của một file (mở-đọc-đóng). -1 nếu không mở được.
+    int32_t readFileAt(const char* path, uint32_t offset, uint8_t* buf, size_t len) const;
+
+    /// Đổi tên. FAT không ghi đè: `to` đã có thì trả false (bên gọi xoá trước).
+    bool renameFile(const char* from, const char* to);
+
+    /// Tạo thư mục (và thư mục cha một cấp). true nếu đã có sẵn hoặc tạo được.
+    bool makeDir(const char* path);
+
+    /// Xoá thư mục RỖNG (SD.rmdir). Xoá cả cây: SdStore::removeTree().
+    bool removeDir(const char* path);
+
+    /// Duyệt tên các mục trong thư mục (không đệ quy). cb nhận tên KHÔNG kèm đường dẫn
+    /// và cờ isDir. Tên được chép ra rồi mới gọi cb sau khi nhả mutex, nên cb được phép
+    /// gọi lại các hàm của lớp này (xoá, đổi tên).
+    size_t listDir(const char* dir, void (*cb)(const char* name, bool isDir, void* ctx), void* ctx);
+
+    /// Dung lượng còn trống (MB). 0 nếu chưa mount.
+    uint32_t freeMB() const;
+
+    /// Handle ghi THỨ HAI cho file tổng quát (tải nhạc/theme) — tách khỏi _writeFile
+    /// của đường tải tin nhắn. append = mở "a" (ghi tiếp cuối file, cho tải tiếp bằng Range).
+    bool openGenWrite(const char* path, bool append);
+    size_t genWrite(const uint8_t* data, size_t len);
+    void closeGenWrite();
+
 private:
     uint8_t _csPin = 0;
     mutable SemaphoreHandle_t _spiMutex = nullptr;
@@ -120,6 +162,7 @@ private:
     File _writeFile;
     File _readFile;
     File _atFile;
+    File _genFile;  // ghi file tổng quát (xem openGenWrite)
 
     uint32_t _atSize = 0;
     uint32_t _atPos = 0;

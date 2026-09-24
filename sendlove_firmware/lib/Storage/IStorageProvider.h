@@ -115,6 +115,15 @@ public:
 
     /// Xóa toàn bộ dữ liệu storage (Factory reset / Clear NAND)
     virtual bool formatStorage() { return false; }
+
+    // --- File tổng quát trên thẻ (theme, nhạc báo thức, log) — 2026-09-24 ---
+
+    /// Thẻ SD bên dưới, để SdStore đọc/ghi file tuỳ ý. nullptr = bộ nhớ không phải thẻ
+    /// (bản NAND): mọi tính năng dựa trên thẻ tự tắt.
+    virtual class SDCardManager* sdCard() { return nullptr; }
+
+    /// Mount lại thẻ + nạp lại manifest (thẻ vừa cắm lại). Chỉ gọi khi không phát tin.
+    virtual bool remount() { return false; }
 };
 
 #endif // I_STORAGE_PROVIDER_H

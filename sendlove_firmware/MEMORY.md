@@ -2342,3 +2342,116 @@ mới chen vào. Build `pio run` OK. Chưa nạp lên máy.
 `delay(ms)`. Đừng dùng `sleep()`/`usleep()`. Viết `sleep(2000)` vẫn biên dịch sạch, không có cảnh
 báo nào.
 
+## 28. Thiết kế: theme / nhạc báo thức / cài đặt trên thẻ SD — user chốt (2026-09-24)
+
+Chỉ là THIẾT KẾ, chưa code. Tài liệu đầy đủ (sơ đồ, CSDL, thứ tự 4 giai đoạn):
+https://claude.ai/code/artifact/172c970d-74be-42f0-8659-a6e990bb52f2
+
+**User chốt:**
+1. Theme vẽ theo **cách B**: gói theme trên thẻ SD được chép sang một phân vùng flash `theme`
+   (~256KB, bớt app0/app1 mỗi bên 128KB) rồi đọc bằng `esp_partition_mmap`. Lý do: bus SPI dùng
+   chung với ST7789 không CS, đọc nền từ thẻ lúc vẽ là không được. **Phải nạp cáp một lần** để
+   đổi bảng phân vùng. Thẻ hỏng thì VẪN hiện theme trong flash; màn đen chữ trắng chỉ khi phân vùng
+   trống/hỏng.
+2. Nhạc báo thức **16kHz** — mở lại quyết định "giữ 8kHz" (§4) RIÊNG cho nhạc báo thức. Tin nhắn
+   không đổi. Cần trần kích thước riêng (~2MB), `AUDIO_MAX_PCM_BYTES` 600KB không áp cho nhạc.
+3. Thư viện nhạc thuộc **hộp** (`boxes/{boxId}/music`), không thuộc người dùng.
+4. **Chỉ người nhận** quản lý nhạc và báo thức (giống theme).
+5. Thẻ SD gắn từ hộp khác: **không xử lý**.
+6. Hạn mức: **10 bài**/hộp, mỗi bài 5–60s, file gốc ≤ 15MB.
+7. Âm lượng **riêng từng báo thức**, mặc định 80, tăng dần bật sẵn.
+8. Âm lượng phát tin mặc định **100** (bằng mức hiện tại).
+9. PCB: chân GAIN của MAX98357A để **pad chọn** 9/12/15dB (phần mềm chỉ giảm được âm lượng).
+10. **Nguyên tắc edge case**: chỉ xử lý bằng phần mềm case BẮT BUỘC (mất dữ liệu, sập/treo, báo
+    thức không kêu). Case giải quyết được bằng cách thông thường (thay thẻ, format lại, cập nhật
+    firmware) thì KHÔNG xử lý. Áp cho cả các đợt sau.
+
+**Đính chính §4 "KHÔNG giảm độ sáng đèn nền":** quyết định đó chặn firmware TỰ giảm sáng để che
+lỗi nguồn. Không áp cho cài đặt độ sáng do người dùng chọn trên web (mặc định vẫn 100%).
+
+**Đã kiểm khi thiết kế:** LovyanGFX 1.2.26 có `loadFont(const uint8_t*, ft_vlw)`
+(`LGFXBase.hpp:809`) → nạp phông VLW (web cắt sẵn tập ký tự tiếng Việt cần dùng) từ con trỏ mmap
+được. KHÔNG dùng `loadFont(fs, path)`: nó đọc thẻ ngay lúc vẽ, trên cùng bus với màn hình.
+`storage.rules` cho hộp đọc `media/{boxId}/**` → theme/nhạc để dưới đó là đủ; gói mặc định ở
+`public/` thì chưa có rule.
+
+## 29. Triển khai §28: cài đặt, nền tảng thẻ SD, nhạc báo thức, theme (2026-09-24)
+
+Làm theo thứ tự advisor đề xuất: cài đặt → nền tảng SD → nhạc → theme (theme cuối vì là phần
+duy nhất phải nạp cáp). Kèm đề xuất #1 (status mở rộng), #2 (log trên thẻ), #3 (tải tiếp bằng
+Range), #10 (xem trước đúng như hộp). `pio run` OK: RAM 16.9%, Flash 1,31MB / 1,90MB (giảm
+~120KB so với trước vì nền + ChakraPetch không còn biên dịch vào). **Chưa nạp lên máy.**
+
+**Firmware — module mới:**
+- `lib/Settings`: độ sáng + âm lượng (NVS `set_bl/set_vol/set_rev`), gamma 2, sàn 5%, màn báo
+  thức ≥60%, bảng 101 hệ số Q15 theo dB. `AudioPlayer::fillChunk` bỏ hẳn phép nhân khi hệ số =
+  32768 → âm lượng 100 (mặc định) đi ĐÚNG đường cũ bit-identical; khác 100 thì trượt ≤8192/lượt.
+  `config_flag` đọc trong `checkFirebaseFlags`, lấy giá trị bằng `GET config.json?shallow=true`
+  (1 request, không kéo mật khẩu Wi-Fi/alarm_list). `PIN_AMP_SD = -1` (breadboard chưa nối).
+- `lib/SdStore`: `/sys/layout.json`, dọn `.tmp` lúc boot, `writeAtomic`, crc32 zlib (không bảng),
+  remount ở đầu `syncWakeup` khi ABSENT. `SDCardManager`: handle thứ 4 `_genFile`, `max_files` 7,
+  `remount/probe/readFileAt/renameFile/makeDir/removeDir/listDir/freeMB`. Manifest `index.bin`
+  giờ ghi nguyên tử (tmp → xoá → đổi tên).
+- `lib/SdLog`: vòng 32×64 B trong RAM (mọi DLOG), `flush()` xuống `/sys/log/log0.txt` mỗi 30s ở
+  STANDBY + trước khi ngủ, `status/log_tail` chỉ khi có dòng ERR/FAIL mới hoặc lần đầu sau boot.
+- `NetworkManager::downloadFile`: `.part` + `Range: bytes=N-`, kiểm size + crc32 rồi mới đổi tên,
+  dst đã đủ size thì bỏ qua. CHỈ cho theme/nhạc — **tin nhắn KHÔNG tải tiếp** (ghi qua slot của
+  SDStorageProvider, không có .part). Phải dùng `stream->read()` không phải `readBytes()` (đọc từng
+  byte, xem vòng tải tin).
+- `lib/MusicStore` + `syncAlarmMusic`: `/alarm/index.json`, ≤10 bài, tối đa 2 bài/chu kỳ, bài của
+  báo thức sắp kêu trước, xoá bài không còn trên cloud (+ `.part` mồ côi). `AlarmItem` thêm
+  `musicId[24]/volume/ramp` → blob NVS cũ lệch cỡ → `loadAlarms` bỏ blob VÀ hạ cờ dirty (không thì
+  lần sync đầu "hộp thắng" đẩy danh sách rỗng xoá sạch báo thức cloud).
+- Báo thức: nhạc có trên thẻ → `startAlarmMusic` (AudioPlayer đọc file qua `_atFile`, lặp, ramp
+  30%→100% trong 20s); mọi lỗi khác → bíp ở mức **100** (sóng sin vốn nhỏ, nhân âm lượng 80 là có
+  thể không nghe). `isPlaybackActive()` tính cả báo thức có nhạc; vòng tải tin cũng dừng khi đó.
+  `crc32File` KHÔNG dùng `_atFile` (nhạc báo thức giữ handle đó).
+- Theme (cách B): `partitions_ota.csv` app0/app1 0x1F0000 → 0x1D0000, app1 dời về 0x1E0000,
+  phân vùng `theme` (data 0x40) 0x3B0000 256KB. `lib/ThemeStore`: header sector 0 ghi CUỐI, mmap,
+  kiểm crc payload lúc boot, cài từ `/theme/t_<id>_r<rev>/` trong Task_MediaPlayer khi không sync;
+  flash trống lúc boot thì cài lại từ `/theme/active.json`. `LayoutEngine::loadTheme()`: nền mmap
+  (y như mảng PROGMEM cũ), phông VLW qua `lgfx::PointerWrapper` + `lgfx::VLWfont` sống cùng theme,
+  ngày theo `format/locale` (tên thứ phải khớp `theme/layout.js` của web), dự phòng đen/trắng
+  Font7 + Font2. `theme_flag` chỉ hạ khi bản TRONG FLASH đúng rev. Đã xoá `StandbyBackground.h`,
+  `ChakraPetch_SemiBold_16/48.h` (nền đã xuất sang `sendlove_web/public/theme/default-bg.bin`).
+- `TASK_STACK_MEDIA_PLAYER` 6144 → 8192: VLWfont::drawChar `alloca(w*h)` trên stack. Log
+  `[LAY] stack con N B` mỗi khi mức còn lại xuống thấp hơn lần trước (glyph to nhất có thể chưa
+  xuất hiện ở khung đầu). Web chặn glyph > 3000 B (`themePack.js MAX_GLYPH_BYTES`); phông mặc
+  định đo được glyph lớn nhất 630 B. Buffer status 448 → 640.
+
+**Gotcha đã gặp:**
+- LDF PlatformIO không lần theo `<Preferences.h>` bên trong `ConfigManager.h` → lib mới dùng
+  ConfigManager phải include thẳng `<Preferences.h>`.
+- `NAME_MAX` là macro của limits.h — đặt tên hằng khác.
+- **Thử máy thật 24/09: `[NET] ghi the FAIL` ngay sau `[NET] tai /alarm/m_...`.** Bản đầu cho
+  `SdLog::flush` (Task_MediaPlayer, 30s/lần) dùng CHUNG `_genFile` với `downloadFile`
+  (Task_WakeSync): `openGenWrite` của log đóng file nhạc đang tải, `genWrite` kế tiếp trả 0.
+  Sửa: log dùng `SDCardManager::appendFile` (mở-ghi-đóng trong một lần giữ mutex); `_genFile`
+  giờ chỉ WakeSync dùng. Log FAIL in thêm `@<byte>` để phân biệt nếu còn lỗi thật của thẻ.
+  Hệ quả phụ của bản lỗi: `log0.txt` có thể dính một đoạn byte nhạc — vô hại.
+- LovyanGFX trên panel KHÔNG đọc được: pixel alpha trung gian của phông VLW trộn với MỘT màu nền
+  cố định (`getBaseColor()`), không với ảnh nền → web cắt VLW alpha nhị phân 0/255.
+
+**Backend/web/rules:** `config_rev` (ServerValue.increment); music CRUD thật ở
+`/boxes/:id/music` (upload policy → commit, backend tự tải file đo size + crc + kiểm header AUDC;
+xoá bài gỡ `music_id` khỏi báo thức cùng một lần ghi); alarm thêm `music_id/volume/ramp`; theme có
+`theme_id/rev/assets` + route `/theme/font`, phông `f_time/f_date/Font7/Font2`; `database.rules.json`
+cho hộp đọc `boxes/$id/music` và ghi 3 trường nhạc trong alarm_list. Web: ReceiverConfig (trạng thái
+áp dụng, thẻ nhớ, log), ReceiverMusic mới, ReceiverAlarms (nhạc/âm lượng/tăng dần), theme cắt VLW +
+`ExactPreview`. Đã kiểm trong trình duyệt: VLW (33 glyph xếp tăng, alpha chỉ 0/255, đủ chữ Việt,
+"Thứ năm, 24.09" đúng), RGB565 nền mặc định đúng màu, gói nhạc AUDC 16kHz đúng từng trường.
+
+**Theme mặc định** không còn là "gói public" (§28 bỏ ngỏ rule `public/`): web gửi nền mặc định
+như một ảnh nền bình thường vào `media/{boxId}/theme/`, không cần rule mới.
+
+### Chưa kiểm chứng trên máy thật — nạp CÁP bắt buộc (bảng phân vùng đổi)
+1. Boot: `[THM] phan vung trong -> man du phong` rồi màn đen giờ 7 đoạn trắng; `[SDS] san sang`.
+2. Web: lưu theme "Mặc định" → sync → `[NET] theme ... san sang` → "Dang ap dung giao dien..."
+   → màn đúng như ExactPreview; `[LAY] stack con N B` phải còn > ~1KB.
+3. Rút thẻ, reboot: theme vẫn hiện (từ flash). Cắm lại → sync kế tiếp `[SDS] the da cam lai`.
+4. Đặt âm lượng 0/50/100 giữa lúc phát tin (không "bụp"); độ sáng 5% rồi để báo thức kêu (≥60%).
+5. Thêm nhạc, gán báo thức → `[NET] nhac ... OK` → kêu bằng nhạc, tăng dần; xoá file trên thẻ →
+   bíp; snooze kêu lại đúng bài; sửa giờ trong portal giữ nguyên nhạc.
+6. Ngắt điện khi đang cài theme → boot cài lại từ thẻ (`flash trong, cai lai tu the`).
+7. Deploy: `database.rules.json` (TRƯỚC khi dùng nhạc), functions, hosting. Theme lưu bằng web cũ
+   (không có rev) hộp bỏ qua — người nhận lưu lại một lần.

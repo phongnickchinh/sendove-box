@@ -163,7 +163,7 @@ void AlarmClock::markPushed(uint32_t rev) {
     unlock();
 }
 
-bool AlarmClock::pollDue(time_t now, char* outTime, size_t len) {
+bool AlarmClock::pollDue(time_t now, char* outTime, size_t len, AlarmItem* outItem) {
     if (now < ALARM_MIN_VALID_EPOCH) return false;
 
     lock();
@@ -171,6 +171,7 @@ bool AlarmClock::pollDue(time_t now, char* outTime, size_t len) {
         _snoozeUntil = 0;
         strncpy(outTime, _snoozeTime, len - 1);
         outTime[len - 1] = '\0';
+        if (outItem) *outItem = _snoozeItem;
         unlock();
         DLOG("[ALM] snooze het -> keu lai %s", outTime);
         return true;
@@ -190,6 +191,9 @@ bool AlarmClock::pollDue(time_t now, char* outTime, size_t len) {
         _lastFiredMinute = minuteKey;
         _snoozeUntil = 0;  // báo thức mới đè snooze cũ
         strncpy(_snoozeTime, hhmm, sizeof(_snoozeTime));  // nhãn nếu người dùng snooze
+        _snoozeItem = _items[i];                          // snooze kêu lại đúng nhạc này
+        if (outItem) *outItem = _items[i];
+        // Hai báo thức cùng phút: lấy cái đầu danh sách. Không phải case bắt buộc (§28).
         bool repeatable = _items[i].repeatable;
         if (!repeatable) {
             // Tắt ngay lúc bắt đầu kêu (không đợi dismiss): mất điện giữa chừng
@@ -222,6 +226,59 @@ void AlarmClock::dismiss() {
     _snoozeTime[0] = '\0';
     unlock();
     DLOG("[ALM] tat");
+}
+
+size_t AlarmClock::musicInUse(time_t now, char (*outIds)[24], size_t maxCount) {
+    struct Cand {
+        const char* id;
+        uint32_t key;  // giây tới lần kêu; báo thức tắt / chưa có giờ = rất lớn
+    };
+    Cand c[MAX_ALARMS];
+    size_t n = 0;
+
+    lock();
+    struct tm tmNow;
+    bool clockOk = now >= ALARM_MIN_VALID_EPOCH;
+    int32_t curSec = 0;
+    if (clockOk) {
+        localtime_r(&now, &tmNow);
+        curSec = tmNow.tm_hour * 3600 + tmNow.tm_min * 60 + tmNow.tm_sec;
+    }
+    for (size_t i = 0; i < _count; i++) {
+        if (_items[i].musicId[0] == '\0') continue;
+        uint32_t key = 0xFFFFFFF0u;
+        if (_items[i].isEnable && clockOk && isValidTime(_items[i].time)) {
+            const char* t = _items[i].time;
+            int32_t diff = ((t[0] - '0') * 10 + (t[1] - '0')) * 3600 +
+                           ((t[3] - '0') * 10 + (t[4] - '0')) * 60 - curSec;
+            if (diff < 0) diff += 86400;
+            key = (uint32_t)diff;
+        }
+        c[n++] = {_items[i].musicId, key};
+    }
+    // Sắp xếp chèn (≤ 10 phần tử).
+    for (size_t i = 1; i < n; i++) {
+        Cand v = c[i];
+        size_t j = i;
+        while (j > 0 && c[j - 1].key > v.key) {
+            c[j] = c[j - 1];
+            j--;
+        }
+        c[j] = v;
+    }
+    size_t out = 0;
+    for (size_t i = 0; i < n && out < maxCount; i++) {
+        bool dup = false;
+        for (size_t k = 0; k < out; k++) {
+            if (strcmp(outIds[k], c[i].id) == 0) dup = true;
+        }
+        if (dup) continue;
+        strncpy(outIds[out], c[i].id, 23);
+        outIds[out][23] = '\0';
+        out++;
+    }
+    unlock();
+    return out;
 }
 
 uint32_t AlarmClock::secondsToNext(time_t now) {

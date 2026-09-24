@@ -13,6 +13,9 @@
           ".read": "auth != null && auth.uid === $box_id",
           ".write": "auth != null && auth.uid === $box_id"
         },
+        "music": {
+          ".read": "auth != null && auth.uid === $box_id"
+        },
         "config": {
           ".read": "auth != null && auth.uid === $box_id",
           "alarm_list": {
@@ -23,6 +26,9 @@
               "time": { ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)" },
               "is_enable": { ".validate": "newData.isBoolean()" },
               "repeatable": { ".validate": "newData.isBoolean()" },
+              "music_id": { ".validate": "newData.isString() && newData.val().length < 24" },
+              "volume": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100" },
+              "ramp": { ".validate": "newData.isBoolean()" },
               "created_at": { ".validate": "newData.isNumber()" },
               "updated_at": { ".validate": "newData.isNumber()" },
               "$other": { ".validate": false }

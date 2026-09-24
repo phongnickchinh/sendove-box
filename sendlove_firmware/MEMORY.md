@@ -2320,3 +2320,25 @@ Build `pio run` OK: RAM 15.8%, Flash 69.0%. Chưa nạp lên máy.
 4. Báo thức kêu lúc đang chờ → tắt báo thức xong không tự phát tin.
 5. Chạm giữ lúc đang chờ → `[PLAY] pending huy`.
 6. Đọc hết tin mà cloud còn tin (slot từng đầy) → "Downloading...", tải xong tự phát.
+
+### Lỗi ở `b1388d8`: `sleep(2000)` chặn task ~33 phút (2026-09-24)
+
+**Triệu chứng (user test máy thật).** Log có `[PLAY] pending fire waited=7175ms` nhưng không phát.
+Chạm ngắn thêm bao nhiêu lần cũng không phát. Để hộp ngủ, chạm thức dậy thì màn hình đen.
+
+**Nguyên nhân.** Trước khi commit, trong working tree đã có thêm dòng `sleep(2000);` ngay trước
+`startNextUnread(true)`, ý là "nghỉ 2s cho chip sau sync". Commit `b1388d8` gom luôn dòng đó mà
+không ai đọc lại. **`sleep()` là hàm POSIX của newlib, tính bằng GIÂY**, nên dòng đó chặn
+`Task_MediaPlayer` khoảng 33 phút. Mọi triệu chứng đều từ đây: cú chạm vào `eventQueue` mà không
+có ai xử lý. `Task_UIController` vẫn chạy nên hộp vẫn ngủ/thức, nhưng render màn chờ là việc của
+`Task_MediaPlayer`, nên thức dậy chỉ thấy màn đen.
+
+**Đã sửa.** Giữ ý định nghỉ sau sync, nhưng đếm trong vòng lặp, không chặn task: sync phải rảnh
+liên tục `PENDING_PLAY_SETTLE_MS` (lúc sửa 2000, sau nâng lên 10000) thì mới phát, sync chạy lại thì đếm lại từ đầu. Không
+dùng `vTaskDelay(2000)`: trong 2s đó `s_pendingPlay` đã tắt nên hộp có thể đi ngủ hoặc một sync
+mới chen vào. Build `pio run` OK. Chưa nạp lên máy.
+
+**Gotcha.** Trong firmware này, muốn chờ theo ms thì dùng `vTaskDelay(pdMS_TO_TICKS(ms))` hoặc
+`delay(ms)`. Đừng dùng `sleep()`/`usleep()`. Viết `sleep(2000)` vẫn biên dịch sạch, không có cảnh
+báo nào.
+

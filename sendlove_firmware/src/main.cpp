@@ -248,6 +248,8 @@ void Task_MediaPlayer(void *pvParameters) {
   // ---- Lệnh phát đang chờ sync xong (xem s_pendingPlay) ----
   uint32_t pendingPlaySinceMs = 0;
   uint32_t pendingPlayDeadline = 0;
+  bool     pendingSawIdle = false;     // đã thấy sync rảnh kể từ lần bận gần nhất chưa
+  uint32_t pendingIdleSinceMs = 0;     // mốc bắt đầu rảnh, xem PENDING_PLAY_SETTLE_MS
 
   // Dải đáy y 200-239, cùng chỗ với toast. Render màn chờ đè mất nó nên vòng STANDBY
   // vẽ lại sau mỗi lần render, như drawOtaPrompt.
@@ -263,8 +265,9 @@ void Task_MediaPlayer(void *pvParameters) {
   };
 
   // Hạn tính từ cú chạm ĐẦU TIÊN; chạm thêm lúc đang chờ không gia hạn.
-  auto armPendingPlay = [&pendingPlaySinceMs, &pendingPlayDeadline]() {
+  auto armPendingPlay = [&pendingPlaySinceMs, &pendingPlayDeadline, &pendingSawIdle]() {
       if (s_pendingPlay) return;
+      pendingSawIdle = false;
       pendingPlaySinceMs = millis();
       pendingPlayDeadline = pendingPlaySinceMs + PENDING_PLAY_MAX_WAIT_MS;
       s_pendingPlay = true;
@@ -499,18 +502,30 @@ void Task_MediaPlayer(void *pvParameters) {
     // ~12 lối thoát khác nhau của syncWakeup(). isSyncing() gồm cả Wi-Fi, NTP, Firebase
     // và tải media. Chế độ AP cấu hình Wi-Fi KHÔNG tính là bận (user chốt 2026-09-24):
     // AP có thể bật vô thời hạn và không mở TLS.
+    //
+    // Nghỉ PENDING_PLAY_SETTLE_MS sau sync bằng cách ĐẾM trong vòng lặp, không chặn task.
+    // Bản trước dùng `sleep(2000)`: đó là sleep() POSIX, tính bằng GIÂY -> chặn task này
+    // ~33 phút: không phát, chạm xếp hàng không ai xử lý, thức dậy màn đen (không ai
+    // render). Kể cả vTaskDelay(2000) cũng không nên: trong 2s đó s_pendingPlay đã tắt
+    // nên hộp có thể đi ngủ hoặc một sync mới chen vào.
     if (s_pendingPlay && currentAppState == AppState::STATE_STANDBY) {
-      if (!appCtx.network.isSyncing()) {
+      if (appCtx.network.isSyncing()) {
+        pendingSawIdle = false;
+        if ((int32_t)(millis() - pendingPlayDeadline) > 0) {
+          s_pendingPlay = false;
+          forceStandbyRedraw = true;
+          DLOG("[PLAY] pending het han %lus", (unsigned long)(PENDING_PLAY_MAX_WAIT_MS / 1000));
+        }
+      } else if (!pendingSawIdle) {
+        pendingSawIdle = true;
+        pendingIdleSinceMs = millis();
+      } else if (millis() - pendingIdleSinceMs >= PENDING_PLAY_SETTLE_MS) {
         s_pendingPlay = false;
+        pendingSawIdle = false;
         DLOG("[PLAY] pending fire waited=%lums heap=%u maxblk=%u",
              (unsigned long)(millis() - pendingPlaySinceMs), (unsigned)ESP.getFreeHeap(),
              (unsigned)ESP.getMaxAllocHeap());
-        sleep(2000); // cho chip nghỉ 2s trước khi phát tin, tránh giật do vừa sync xong
         startNextUnread(true);
-      } else if ((int32_t)(millis() - pendingPlayDeadline) > 0) {
-        s_pendingPlay = false;
-        forceStandbyRedraw = true;
-        DLOG("[PLAY] pending het han %lus", (unsigned long)(PENDING_PLAY_MAX_WAIT_MS / 1000));
       }
     }
 

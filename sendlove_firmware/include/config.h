@@ -34,6 +34,9 @@ static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
 // Chạm ngắn lúc đang sync: lệnh phát tin được giữ chờ tối đa bấy nhiêu ms, sync xong
 // là tự phát (không bắt chạm lại). Quá hạn thì huỷ. User chốt 60s 2026-09-24.
 static constexpr uint32_t PENDING_PLAY_MAX_WAIT_MS = 60000;
+// Sync xong phải RẢNH liên tục bấy nhiêu ms thì lệnh chờ mới phát, cho chip nghỉ sau sync
+// (ý user 2026-09-24). Đếm không chặn trong vòng lặp: sync chạy lại thì đếm từ đầu.
+static constexpr uint32_t PENDING_PLAY_SETTLE_MS = 10000;
 
 // Display Backlight
 static constexpr uint8_t BACKLIGHT_DAY_PERCENT = 100;

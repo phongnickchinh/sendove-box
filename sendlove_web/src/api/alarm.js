@@ -16,8 +16,14 @@ export const getAlarms = async (boxId) => {
   return response.data; // { success: true, data: Alarm[] }
 };
 
-export const createAlarm = async (boxId, { time, is_enable, repeatable }) => {
-  const response = await apiClient.post(`/boxes/${boxId}/alarms`, { time, is_enable, repeatable });
+/**
+ * music_id: "" = tiếng bíp, còn lại phải là bài trong thư viện nhạc của hộp (api/music.js).
+ * volume 0–100 (mặc định 80, web chặn < 20), ramp = tăng dần trong 20 giây.
+ */
+export const createAlarm = async (boxId, { time, is_enable, repeatable, music_id, volume, ramp }) => {
+  const response = await apiClient.post(`/boxes/${boxId}/alarms`, {
+    time, is_enable, repeatable, music_id, volume, ramp,
+  });
   return response.data; // 201 { success: true, data: Alarm }
 };
 

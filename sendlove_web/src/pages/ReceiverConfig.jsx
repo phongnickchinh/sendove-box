@@ -43,7 +43,8 @@ export default function ReceiverConfig() {
   const [showPass, setShowPass] = useState(false);
   const [savingWifi, setSavingWifi] = useState(false);
 
-  const [cfg, setCfg] = useState({ led_state: 'OFF', display_brightness: 80, playback_volume: 70 });
+  // Mặc định khớp firmware (config.h SETTINGS_DEFAULT_*): 100 = mức hộp vẫn phát trước đây.
+  const [cfg, setCfg] = useState({ led_state: 'OFF', display_brightness: 100, playback_volume: 100 });
   const [savingCfg, setSavingCfg] = useState(false);
 
   const [confirmUnpair, setConfirmUnpair] = useState(false);
@@ -58,8 +59,8 @@ export default function ReceiverConfig() {
         setSsid(res.data.config?.wifi_config?.ssid || '');
         setCfg({
           led_state: res.data.config?.led_state || 'OFF',
-          display_brightness: res.data.config?.display_brightness ?? 80,
-          playback_volume: res.data.config?.playback_volume ?? 70,
+          display_brightness: res.data.config?.display_brightness ?? 100,
+          playback_volume: res.data.config?.playback_volume ?? 100,
         });
       } catch {
         if (alive) setError('Không đọc được cài đặt của hộp.');
@@ -90,7 +91,10 @@ export default function ReceiverConfig() {
     setSavingCfg(true); setError(null);
     try {
       await updateBoxConfig(boxId, cfg);
-      flash('Đã lưu lên tài khoản.');
+      flash('Đã lưu. Hộp áp dụng ở lần đồng bộ kế tiếp.');
+      // Lấy lại config_rev mới để dòng trạng thái chuyển sang "đang chờ hộp".
+      const res = await getBoxDetails(boxId);
+      if (res.success) setBox(res.data);
     } catch (err) {
       setError(err.response?.data?.error?.message || 'Không lưu được cài đặt.');
     } finally {
@@ -187,14 +191,19 @@ export default function ReceiverConfig() {
               </div>
             )}
 
-            <Slider label="Độ sáng màn hình" value={cfg.display_brightness}
+            {/* Firmware kẹp độ sáng tối thiểu 5% (SETTINGS_MIN_BRIGHTNESS): kéo về 0 thì
+                màn đen hẳn, người dùng tưởng hộp hỏng. Âm lượng 0 = tắt tiếng tin nhắn,
+                báo thức có âm lượng riêng. */}
+            <Slider label="Độ sáng màn hình" value={cfg.display_brightness} min={5}
               onChange={(v) => setCfg({ ...cfg, display_brightness: v })} />
-            <Slider label="Âm lượng phát" value={cfg.playback_volume}
+            <Slider label="Âm lượng phát tin nhắn" value={cfg.playback_volume}
               onChange={(v) => setCfg({ ...cfg, playback_volume: v })} />
+
+            <ApplyState config={box?.config} status={box?.status} />
 
             <div className="sl-note sl-note--warn">
               <Icon name="alert" size={16} />
-              <span>Firmware hiện tại chưa áp dụng đèn, độ sáng và âm lượng lưu từ đây.</span>
+              <span>Đèn báo chưa được firmware áp dụng. Độ sáng và âm lượng thì có.</span>
             </div>
 
             <Button kind="gho" onClick={saveConfig} disabled={savingCfg}>
@@ -213,6 +222,8 @@ export default function ReceiverConfig() {
               </div>
               <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
             </button>
+
+            <SdCard status={box?.status} />
 
             {/* --- firmware: chỉ đọc, hộp tự cài --- */}
             <div className="sl-listcard">
@@ -250,8 +261,64 @@ export default function ReceiverConfig() {
   );
 }
 
-/** Thanh trượt 0-100, đúng khoảng validation.middleware.ts:123-124 */
-function Slider({ label, value, onChange }) {
+/**
+ * Thẻ nhớ + nhật ký lỗi gần nhất (status.sd_state / sd_free_mb / log_tail do firmware gửi).
+ * Thẻ lỗi thì hộp vẫn chạy: giao diện nằm trong flash, báo thức kêu tiếng bíp, chỉ không
+ * tải được tin và nhạc. Cách xử lý là thay/format thẻ, phần mềm không làm gì thêm.
+ */
+function SdCard({ status }) {
+  const [openLog, setOpenLog] = useState(false);
+  if (!status?.sd_state || status.sd_state === 'none') return null;
+  const ok = status.sd_state === 'ok';
+  return (
+    <div className="sl-listcard" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+      <span className="sl-label-s" style={{ color: ok ? undefined : 'var(--error-text)' }}>
+        {ok
+          ? `Thẻ nhớ hoạt động · còn trống ${status.sd_free_mb ?? '?'} MB`
+          : 'Hộp không đọc được thẻ nhớ'}
+      </span>
+      {!ok && (
+        <span className="sl-caption">
+          Hộp vẫn hiện giờ và kêu báo thức, nhưng không nhận được tin nhắn và nhạc mới. Hãy cắm lại
+          hoặc thay thẻ microSD (FAT32, từ 1 GB); hộp tự nhận lại ở lần đồng bộ kế tiếp.
+        </span>
+      )}
+      {status.log_tail && (
+        <>
+          <button type="button" className="sl-link" onClick={() => setOpenLog(!openLog)}
+            style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}>
+            {openLog ? 'Ẩn nhật ký lỗi' : 'Xem nhật ký lỗi gần nhất'}
+          </button>
+          {openLog && (
+            <pre className="sl-caption" style={{ whiteSpace: 'pre-wrap', margin: 0, maxHeight: 240, overflow: 'auto' }}>
+              {status.log_tail}
+            </pre>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Hộp đã áp dụng lần lưu gần nhất chưa: backend tăng config.config_rev mỗi lần lưu,
+ * hộp chép số đó vào status.config_rev sau khi ghi NVS. Hộp ngủ thì tới 5 phút mới thức.
+ */
+function ApplyState({ config, status }) {
+  const want = config?.config_rev;
+  if (!want) return null;
+  const done = (status?.config_rev ?? 0) >= want;
+  return (
+    <span className="sl-caption" style={{ color: done ? 'var(--success-text)' : 'var(--neutral-400)' }}>
+      {done
+        ? 'Hộp đã áp dụng độ sáng và âm lượng này.'
+        : 'Đang chờ hộp áp dụng (hộp đang ngủ thì có thể mất tới 5 phút).'}
+    </span>
+  );
+}
+
+/** Thanh trượt, đúng khoảng validation.middleware.ts:123-124 */
+function Slider({ label, value, onChange, min = 0 }) {
   return (
     <label className="sl-field">
       <span style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -259,7 +326,7 @@ function Slider({ label, value, onChange }) {
         <span className="sl-label-s">{value}%</span>
       </span>
       <input
-        type="range" className="sl-range" min={0} max={100} step={5} value={value}
+        type="range" className="sl-range" min={min} max={100} step={5} value={value}
         onChange={(e) => onChange(Number(e.target.value))}
       />
     </label>

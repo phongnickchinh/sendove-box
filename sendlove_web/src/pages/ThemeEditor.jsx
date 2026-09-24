@@ -4,10 +4,11 @@ import Icon from '../components/ui/Icon';
 import { Screen, AppBar, Body, Actions, Header, Button, Modal } from '../components/ui/Screen';
 import BoxScreen from '../components/theme/BoxScreen';
 import { getTheme } from '../api/theme';
-import { imageToRgb565 } from '../utils/rgb565';
+import { imageToRgb565, loadDefaultBackground } from '../utils/rgb565';
+import { ensureWebFont } from '../utils/vlw';
 import {
-  ALIGNS, DEFAULT_WIDGETS, FONTS_BY_TYPE, MAX_WIDGETS, SCREEN, WIDGET_TYPES,
-  newWidget, toEditorWidgets, widgetProblem,
+  ALIGNS, BUILTIN_FONTS, DATE_FORMATS, DEFAULT_BG_URL, DEFAULT_WIDGETS, FONT_FAMILIES, MAX_WIDGETS,
+  PX_RANGE, SCREEN, VLW_KEY, WIDGET_TYPES, isVlw, newWidget, sharedFontIssue, toEditorWidgets, widgetProblem,
 } from '../theme/layout';
 
 /**
@@ -15,13 +16,14 @@ import {
  *
  * Mỗi ô trong bảng thuộc tính chỉ có mặt nếu LayoutEngine.cpp THẬT SỰ đọc
  * trường đó cho loại widget này (WIDGET_TYPES trong theme/layout.js):
- *   font    -> drawClockTime/drawClockDate, hai if-chain KHÁC NHAU
+ *   font    -> họ phông web (cắt thành VLW khi gửi) hoặc phông có sẵn trong firmware
+ *   format  -> clock_date: LayoutEngine::formatDate (+ locale vi/en)
  *   color   -> hexToColor, bắt buộc đúng 7 ký tự #RRGGBB
  *   align   -> drawTextWidget: center / right / còn lại = trái
  *   x,y,w,h -> drawBackgroundPatch xoá đúng ô w×h trước khi vẽ
  *
- * CỐ Ý KHÔNG CÓ: "format" (firmware đọc rồi bỏ), widget ảnh (case
- * WIDGET_IMAGE: break;), màu cho pin (drawBatteryIcon bỏ qua cfg.color).
+ * CỐ Ý KHÔNG CÓ: widget ảnh (firmware không vẽ), màu cho pin (drawBatteryIcon bỏ qua
+ * cfg.color).
  *
  * Bản nháp nhận từ ThemePicker qua location.state; mở thẳng URL thì tự đọc
  * bản đã lưu, không có thì dùng bố cục mặc định của firmware.
@@ -38,6 +40,11 @@ export default function ThemeEditor() {
   const [adding, setAdding] = useState(false);
   const [bgBusy, setBgBusy] = useState(false);
   const [bgError, setBgError] = useState(null);
+
+  // Nạp các họ phông để xem trước đúng hình chữ (web cắt đúng các phông này thành VLW).
+  useEffect(() => {
+    FONT_FAMILIES.forEach((f) => ensureWebFont(f.family, f.weight).catch(() => {}));
+  }, []);
 
   // Mở thẳng /theme/edit (không qua picker): nạp bản đã lưu nếu có.
   useEffect(() => {
@@ -88,6 +95,19 @@ export default function ThemeEditor() {
     }
   };
 
+  const useDefaultBg = async () => {
+    setBgBusy(true);
+    setBgError(null);
+    try {
+      setBg(await loadDefaultBackground(DEFAULT_BG_URL));
+    } catch {
+      setBgError('Không tải được nền mặc định.');
+    } finally {
+      setBgBusy(false);
+    }
+  };
+
+  const fontIssue = sharedFontIssue(widgets);
   const bgUrl = bg?.url || bg?.previewUrl || null;
   const goSend = () => navigate(`/box/${boxId}/receiver/theme/send`, { state: { name, widgets, bg } });
 
@@ -108,9 +128,18 @@ export default function ThemeEditor() {
           <div className="sl-listcard__mid">
             <span className="sl-label-s">Ảnh nền</span>
             <span className="sl-caption">
-              {bgBusy ? 'Đang xử lý ảnh…' : bg ? 'Ảnh riêng · 240 × 240 RGB565, 115,2 KB' : 'Nền dựng sẵn trong firmware'}
+              {bgBusy ? 'Đang xử lý ảnh…'
+                : bg?.isDefault ? 'Nền mặc định của hộp · 115,2 KB'
+                : bg ? 'Ảnh riêng · 240 × 240 RGB565, 115,2 KB'
+                : 'Nền đen (hộp không còn nền dựng sẵn)'}
             </span>
           </div>
+          {!bg && !bgBusy && (
+            <button type="button" className="sl-btn sl-btn--gho" onClick={useDefaultBg}
+              style={{ minHeight: 36, padding: '0 var(--sp-3)' }}>
+              Nền mặc định
+            </button>
+          )}
           {bg && (
             <button type="button" className="sl-iconbtn" onClick={() => setBg(null)} aria-label="Bỏ ảnh nền">
               <Icon name="trash" size={18} />
@@ -163,6 +192,13 @@ export default function ThemeEditor() {
           <Icon name="plus" size={20} />
           {widgets.length >= MAX_WIDGETS ? `Tối đa ${MAX_WIDGETS} widget` : 'Thêm widget'}
         </button>
+
+        {fontIssue && (
+          <div className="sl-note sl-note--warn">
+            <Icon name="alert" size={16} />
+            <span>{fontIssue}</span>
+          </div>
+        )}
 
         {problems.length > 0 && (
           <div className="sl-note sl-note--err">
@@ -221,22 +257,62 @@ export default function ThemeEditor() {
             </div>
           )}
 
-          {FONTS_BY_TYPE[sel.type] && (
+          {VLW_KEY[sel.type] && (
             <div className="sl-field">
               <span className="sl-label">Phông chữ</span>
               <div className="sl-seg" style={{ flexWrap: 'wrap' }}>
-                {FONTS_BY_TYPE[sel.type].map((f) => (
-                  <button key={f.value} type="button" className="sl-seg__cell"
-                    aria-pressed={sel.font === f.value}
-                    onClick={() => patch({ font: f.value })}
-                    style={{ flexBasis: '30%', fontSize: 12 }}>
+                {FONT_FAMILIES.map((f) => (
+                  <button key={f.family} type="button" className="sl-seg__cell"
+                    aria-pressed={isVlw(sel) && sel.family === f.family}
+                    onClick={() => patch({ font: VLW_KEY[sel.type], family: f.family })}
+                    style={{ flexBasis: '30%', fontSize: 12, fontFamily: `"${f.family}"` }}>
                     {f.label}
                   </button>
                 ))}
+                <button type="button" className="sl-seg__cell"
+                  aria-pressed={!isVlw(sel)}
+                  onClick={() => patch({ font: BUILTIN_FONTS[sel.type].value })}
+                  style={{ flexBasis: '60%', fontSize: 12 }}>
+                  {BUILTIN_FONTS[sel.type].label}
+                </button>
               </div>
-              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                Chỉ những phông nằm sẵn trong firmware. Chữ trên hộp là chữ Latin không dấu.
-              </span>
+              {isVlw(sel) ? (
+                <>
+                  <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span className="sl-caption">Cỡ chữ</span>
+                    <span className="sl-label-s">{sel.px}px</span>
+                  </span>
+                  <input type="range" className="sl-range" min={PX_RANGE[sel.type][0]} max={PX_RANGE[sel.type][1]}
+                    step={1} value={sel.px} onChange={(e) => patch({ px: Number(e.target.value) })} />
+                  <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
+                    Web cắt đúng các ký tự cần dùng thành phông cho hộp, có dấu tiếng Việt.
+                  </span>
+                </>
+              ) : (
+                <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
+                  Phông nằm sẵn trong hộp, không cần tải thêm. Chỉ có chữ Latin không dấu.
+                </span>
+              )}
+            </div>
+          )}
+
+          {sel.type === 'clock_date' && (
+            <div style={{ display: 'flex', gap: 10 }}>
+              <label className="sl-field" style={{ flex: 2 }}>
+                <span className="sl-label">Dạng ngày</span>
+                <select className="sl-input" value={sel.format} onChange={(e) => patch({ format: e.target.value })}>
+                  {DATE_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </label>
+              <div className="sl-field" style={{ flex: 1 }}>
+                <span className="sl-label">Thứ</span>
+                <div className="sl-seg">
+                  {[['vi', 'Việt'], ['en', 'Anh']].map(([v, l]) => (
+                    <button key={v} type="button" className="sl-seg__cell" aria-pressed={sel.locale === v}
+                      onClick={() => patch({ locale: v })}>{l}</button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 

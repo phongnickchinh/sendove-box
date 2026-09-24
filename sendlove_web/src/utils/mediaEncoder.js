@@ -269,6 +269,56 @@ export async function encodeAudioSegment(buffer, range, sampleRate) {
   return { wavBlob: audioBufferToWavBlob(rendered), duration: Math.round(duration), sampleRate: rate };
 }
 
+/**
+ * Nhạc báo thức (thiết kế 2026-09-24): 16 kHz mono (user chốt, mở lại "giữ 8kHz" RIÊNG cho
+ * nhạc), 5–60 giây (hộp kêu tối đa 1 phút), file gốc ≤ 15 MB — decodeAudioData giải mã
+ * cả bài vào RAM, file 10 phút trên điện thoại làm sập tab.
+ */
+export const ALARM_MUSIC = {
+  RATE: 16000,
+  MIN_S: 5,
+  MAX_S: 60,
+  MAX_FILE_BYTES: 15 * 1024 * 1024,
+  FADE_S: 0.05,
+};
+
+/**
+ * Cắt đoạn nhạc báo thức → file hộp phát thẳng từ thẻ: "AUDC" + u16 tần số + u32 cỡ WAV
+ * (little-endian, đúng AudioPlayer::parseAudc) rồi WAV PCM16. Tin thoại thì firmware tự
+ * thêm AUDC lúc tải; nhạc tải thẳng xuống thẻ nên web phải đóng gói sẵn.
+ * Dùng chung renderSegment (nén + trần đỉnh 0.7) như tin thoại: đỉnh cao làm ampli kéo
+ * dòng đột ngột → sụt áp. Fade 50ms hai đầu để hộp phát lặp không nghe "tạch".
+ */
+export async function encodeAlarmMusic(buffer, range) {
+  const { start, duration } = segmentOf(buffer.duration, range);
+  const rendered = await renderSegment(buffer, start, duration, ALARM_MUSIC.RATE);
+
+  const data = rendered.getChannelData(0);
+  const fade = Math.min(Math.floor(ALARM_MUSIC.FADE_S * ALARM_MUSIC.RATE), Math.floor(data.length / 2));
+  for (let i = 0; i < fade; i++) {
+    const g = i / fade;
+    data[i] *= g;
+    data[data.length - 1 - i] *= g;
+  }
+
+  const wav = new Uint8Array(await audioBufferToWavBlob(rendered).arrayBuffer());
+  const out = new Uint8Array(10 + wav.length);
+  out.set([0x41, 0x55, 0x44, 0x43], 0); // "AUDC"
+  const view = new DataView(out.buffer);
+  view.setUint16(4, ALARM_MUSIC.RATE, true);
+  view.setUint32(6, wav.length, true);
+  out.set(wav, 10);
+  return {
+    blob: new Blob([out], { type: 'application/octet-stream' }),
+    durationMs: Math.round(duration * 1000),
+  };
+}
+
+/** File .aud đã lưu → Blob WAV trình duyệt phát được (bỏ 10 byte AUDC ở đầu). */
+export async function audFileToWavBlob(arrayBuffer) {
+  return new Blob([arrayBuffer.slice(10)], { type: 'audio/wav' });
+}
+
 export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
   // Giải mã offline thay vì play() realtime: không phụ thuộc autoplay policy,
   // không mất mẫu khi tab bị throttle, và chạy nhanh hơn thời lượng thật.

@@ -13,6 +13,7 @@ import ReceiverConfig from './pages/ReceiverConfig';
 const ThemePicker = lazy(() => import('./pages/ThemePicker'));
 const ThemeEditor = lazy(() => import('./pages/ThemeEditor'));
 const ThemeSend = lazy(() => import('./pages/ThemeSend'));
+const ReceiverMusic = lazy(() => import('./pages/ReceiverMusic'));
 import AuthRoute from './components/AuthRoute';
 import BoxRoute from './components/BoxRoute';
 
@@ -40,6 +41,7 @@ function App() {
           <Route path="/box/:boxId/receiver" element={<BoxRoute role="receiver" />}>
             <Route index element={<ReceiverUI />} />
             <Route path="alarm" element={<ReceiverAlarms />} />
+            <Route path="alarm/music" element={<ReceiverMusic />} />
             <Route path="config" element={<ReceiverConfig />} />
             {/* Theme màn chờ: lưu qua /boxes/:boxId/theme. Firmware chưa tải về — xem theme/layout.js. */}
             <Route path="theme" element={<ThemePicker />} />

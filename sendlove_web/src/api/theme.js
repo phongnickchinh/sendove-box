@@ -13,12 +13,21 @@ export const getTheme = async (boxId) => {
 };
 
 /**
- * body: { theme_name, widgets: [{type,x,y,w,h,color?,align?,font?}], background: string|null }
- * data: BoxTheme đã lưu (backend lọc/chuẩn hoá widgets).
+ * body: { theme_name, widgets: [{type,x,y,w,h,color?,align?,font?,family?,px?,format?,locale?}],
+ *         background: string|null, fonts?: { f_time?: path, f_date?: path } }
+ * data: BoxTheme đã lưu, kèm theme_id + rev (hộp so rev với bản trong flash của nó).
  */
 export const saveTheme = async (boxId, body) => {
   const response = await apiClient.put(`/boxes/${boxId}/theme`, body);
   return response.data;
+};
+
+/** Tải một file phông VLW (utils/vlw.js) lên Storage, trả path để đưa vào saveTheme({ fonts }). */
+export const uploadFont = async (boxId, bytes, onProgress) => {
+  const response = await apiClient.post(`/boxes/${boxId}/theme/font`);
+  const { path, upload } = response.data.data;
+  await uploadToSignedPolicy(upload, new Blob([bytes], { type: 'application/octet-stream' }), onProgress);
+  return path;
 };
 
 /**

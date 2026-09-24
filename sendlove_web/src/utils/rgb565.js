@@ -45,4 +45,33 @@ export function rgbaToRgb565(rgba) {
   return out;
 }
 
+/** RGB565 LE (đúng bytes gửi xuống hộp) → ImageData 240×240 để vẽ xem trước. */
+export function rgb565ToImageData(bytes) {
+  const img = new ImageData(SCREEN, SCREEN);
+  const px = img.data;
+  for (let i = 0, j = 0; j < bytes.length; i += 4, j += 2) {
+    const v = bytes[j] | (bytes[j + 1] << 8);
+    px[i] = ((v >> 11) & 0x1f) * 255 / 31;
+    px[i + 1] = ((v >> 5) & 0x3f) * 255 / 63;
+    px[i + 2] = (v & 0x1f) * 255 / 31;
+    px[i + 3] = 255;
+  }
+  return img;
+}
+
+/**
+ * Nền mặc định của hộp (xuất từ StandbyBackground[] cũ của firmware, 2026-09-24): firmware
+ * không còn nền biên dịch sẵn, nên "Mặc định" cũng là một ảnh nền web gửi xuống như mọi theme.
+ */
+export async function loadDefaultBackground(url) {
+  const res = await fetch(url);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.length !== BG_BYTES) throw new Error(`default bg ${bytes.length} B`);
+  const canvas = document.createElement('canvas');
+  canvas.width = SCREEN;
+  canvas.height = SCREEN;
+  canvas.getContext('2d').putImageData(rgb565ToImageData(bytes), 0, 0);
+  return { bytes, previewUrl: canvas.toDataURL('image/png'), isDefault: true };
+}
+
 export { BG_BYTES };

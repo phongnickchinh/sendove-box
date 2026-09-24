@@ -2,10 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getTheme } from '../api/theme';
+import { getBoxDetails } from '../api/box';
 import Icon from '../components/ui/Icon';
 import { Screen, AppBar, Body, Actions, Header, Button, Tips } from '../components/ui/Screen';
 import BoxScreen, { Thumb } from '../components/theme/BoxScreen';
-import { DEFAULT_WIDGETS, PRESETS, toEditorWidgets } from '../theme/layout';
+import { DEFAULT_BG_URL, DEFAULT_WIDGETS, FONT_FAMILIES, PRESETS, toEditorWidgets } from '../theme/layout';
+import { loadDefaultBackground } from '../utils/rgb565';
+import { ensureWebFont } from '../utils/vlw';
 
 /**
  * Màn 19 "theme picker".
@@ -24,6 +27,15 @@ export default function ThemePicker() {
   const [saved, setSaved] = useState(undefined); // undefined = đang tải, null = chưa lưu
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [defaultBg, setDefaultBg] = useState(null);
+  const [boxThemeRev, setBoxThemeRev] = useState(undefined);
+
+  // Nền mặc định + phông để xem trước mẫu; status.theme_rev = bản hộp đang hiển thị.
+  useEffect(() => {
+    loadDefaultBackground(DEFAULT_BG_URL).then(setDefaultBg).catch(() => {});
+    FONT_FAMILIES.forEach((f) => ensureWebFont(f.family, f.weight).catch(() => {}));
+    getBoxDetails(boxId).then((r) => setBoxThemeRev(r.data?.status?.theme_rev ?? null)).catch(() => {});
+  }, [boxId]);
 
   useEffect(() => {
     let alive = true;
@@ -48,7 +60,7 @@ export default function ThemePicker() {
       widgets: toEditorWidgets(saved.widgets),
       bg: saved.background ? { path: saved.background, url: saved.background_url } : null,
     }] : []),
-    ...PRESETS.map((p) => ({ ...p, widgets: toEditorWidgets(p.widgets), bg: null })),
+    ...PRESETS.map((p) => ({ ...p, widgets: toEditorWidgets(p.widgets), bg: p.defaultBg ? defaultBg : null })),
   ];
   const current = options.find((o) => o.id === selected);
   const draft = current && { name: current.name, widgets: current.widgets, bg: current.bg };
@@ -59,14 +71,22 @@ export default function ThemePicker() {
       <Body>
         <Header title="Giao diện màn hình hộp" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
-        {/* Firmware hiện tại vẽ bố cục biên dịch cứng, chưa đọc theme_flag. */}
-        <div className="sl-note sl-note--warn">
-          <Icon name="alert" size={16} />
-          <span>
-            Giao diện lưu ở đây nằm trên tài khoản. Hộp chỉ áp dụng khi chạy bản firmware đọc được
-            giao diện từ tài khoản — bản hiện tại vẫn hiện giao diện dựng sẵn.
-          </span>
-        </div>
+        {/* Hộp tải gói theme về thẻ nhớ rồi chép sang bộ nhớ trong; status.theme_rev = bản đang hiện. */}
+        {saved && saved.rev ? (
+          <div className="sl-note">
+            <Icon name="sync" size={16} />
+            <span>
+              {boxThemeRev === saved.rev
+                ? 'Hộp đang hiển thị giao diện đã lưu.'
+                : 'Hộp sẽ đổi sang giao diện đã lưu ở lần đồng bộ kế tiếp (hộp đang ngủ thì tới 5 phút).'}
+            </span>
+          </div>
+        ) : saved ? (
+          <div className="sl-note sl-note--warn">
+            <Icon name="alert" size={16} />
+            <span>Giao diện này lưu bằng bản web cũ. Hãy mở và lưu lại một lần để hộp tải được.</span>
+          </div>
+        ) : null}
 
         {error && <div className="sl-reason">{error}</div>}
 

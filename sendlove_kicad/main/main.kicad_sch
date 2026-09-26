@@ -7663,6 +7663,39 @@
 		)
 		(uuid "ce40ce84-2cc3-48a9-b699-679a401fa7fc")
 	)
+	(text "7. Am thanh MAX98357A (VDD = VSYS)"
+		(at 15.24 167.64 0)
+		(effects
+			(font
+				(size 2 2)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "203a7522-ce5f-46e1-811e-c1d12dd9581e")
+	)
+	(text "8. Cam ung TTP223 (active HIGH, direct)"
+		(at 140.97 167.64 0)
+		(effects
+			(font
+				(size 2 2)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "f4150a43-21e9-4d51-bc40-e17872db4cda")
+	)
+	(text "9. LED thong bao"
+		(at 226.06 167.64 0)
+		(effects
+			(font
+				(size 2 2)
+				(bold yes)
+			)
+			(justify left bottom)
+		)
+		(uuid "6d706a73-1972-4ec5-ae93-ddb0a4090c8a")
+	)
 	(label "USB_DN"
 		(at 86.36 50.8 0)
 		(effects
@@ -8123,21 +8156,26 @@
 		)
 		(uuid "01a591aa-c940-4858-85a1-a79177b24f33")
 	)
-  (text "7. Am thanh MAX98357A (VDD = VSYS)"
-    (at 15.24 167.64 0)
-    (effects (font (size 2 2) (bold yes)) (justify left bottom))
-    (uuid "203a7522-ce5f-46e1-811e-c1d12dd9581e")
-  )
-  (text "8. Cam ung TTP223 (active HIGH, direct)"
-    (at 140.97 167.64 0)
-    (effects (font (size 2 2) (bold yes)) (justify left bottom))
-    (uuid "f4150a43-21e9-4d51-bc40-e17872db4cda")
-  )
-  (text "9. LED thong bao"
-    (at 226.06 167.64 0)
-    (effects (font (size 2 2) (bold yes)) (justify left bottom))
-    (uuid "6d706a73-1972-4ec5-ae93-ddb0a4090c8a")
-  )
+	(label "USB_DN"
+		(at 58.42 48.26 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "a1652e90-bc9d-42c0-84d1-406bd088beeb")
+	)
+	(label "USB_DP"
+		(at 58.42 53.34 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "ef9cfcab-2634-4f9d-aafd-61c06388094d")
+	)
 	(symbol
 		(lib_id "Connector:USB_C_Receptacle_USB2.0_16P")
 		(at 30.48 50.8 0)
@@ -13937,7 +13975,7 @@
 			)
 		)
 		(property "Value" "10pF (0-50pF)"
-			(at 165.735 209.55 0)
+			(at 156.21 209.55 0)
 			(effects
 				(font
 					(size 1.27 1.27)

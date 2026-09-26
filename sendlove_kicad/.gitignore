@@ -1,0 +1,20 @@
+# KiCad: file khoá, backup, autosave, cache
+*.lck
+~*.lck
+*-backups/
+_autosave-*
+*.bak
+*-bak
+*.kicad_sch-bak
+*.kicad_pcb-bak
+fp-info-cache
+\#auto_saved_files\#
+# Lịch sử cục bộ KiCad 10 (tự sinh, bên trong là một repo git riêng)
+.history/
+
+# Cài đặt cục bộ theo từng máy (lớp đang hiện, cửa sổ đang mở...)
+*.kicad_prl
+
+# Kết quả xuất sản xuất — sinh lại được từ file thiết kế
+gerbers/
+production/

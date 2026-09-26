@@ -1,6 +1,6 @@
 # SendLove Box — danh sách linh kiện (rút từ firmware v2.1.0)
 
-Nguồn: `sendlove_firmware/include/config.h`, `platformio.ini`, `lib/*`. Schematic `main/main.kicad_sch` hiện trống.
+Nguồn: `sendlove_firmware/include/config.h`, `platformio.ini`, `lib/*`. Schematic `main/main.kicad_sch` đã vẽ đủ các khối (2026-09-26, ERC 0 lỗi); reference trong bảng dưới chưa ghi, xem trực tiếp schematic.
 
 Giả định:
 - Dùng **module** ESP32-C3, không vẽ SoC rời + thạch anh + anten.
@@ -48,8 +48,8 @@ Nạp code qua USB GPIO18/19 hầu như không cần nút BOOT; nút chỉ để
 |---|---|---|---|
 | 1 | LCD IPS 240×240 ST7789, **không có chân CS** | 1.3" hoặc 1.54" | `invert=true`, `rgb_order=true`, offset 0 (DisplayDriver.h:44-52) |
 | 1 | Header 1×7 2.54mm hoặc đầu FPC theo panel | | Module: GND VCC SCL SDA RES DC BLK |
-| 1 | N-MOSFET đèn nền | AO3400 / 2N7002 | Chỉ cần nếu dùng panel trần (dòng LED vượt khả năng GPIO) |
-| 1 | R 100Ω gate + R 100k gate→GND | | Kéo xuống để đèn tắt lúc boot |
+| 1 | N-MOSFET đèn nền | AO3400 / 2N7002 | Chỉ cần nếu dùng panel trần (dòng LED vượt khả năng GPIO). **Schematic hiện dùng module, không vẽ** |
+| 1 | R 100Ω gate + R 100k gate→GND | | Kéo xuống để đèn tắt lúc boot. Không vẽ, cùng lý do trên |
 
 ### Bộ nhớ media
 | SL | Linh kiện | Gợi ý mã | Ghi chú |
@@ -87,7 +87,7 @@ Firmware xuất stereo `RIGHT_LEFT` với hai kênh giống nhau, nên chế đ�
 | 1 | IC cảm ứng điện dung | TTP223-BA6 (SOT-23-6) | TOG=0 (direct), AHLB=0 (active HIGH). Firmware đo thời gian giữ nên **không** được dùng chế độ toggle |
 | 1 | Tụ Cs 0–50pF | | Chỉnh độ nhạy |
 | 1 | Tụ 100nF | | Nguồn IC |
-| 1 | Pad đồng cảm ứng trên PCB | | |
+| 1 | Pad đồng cảm ứng trên PCB | | Schematic tạm dùng footprint TestPoint 4mm; vẽ pad thật (~10–15mm) ở bước PCB |
 
 ### Nguồn
 | SL | Linh kiện | Gợi ý mã | Ghi chú |
@@ -95,13 +95,17 @@ Firmware xuất stereo `RIGHT_LEFT` với hai kênh giống nhau, nên chế đ�
 | 1 | Cổng USB-C 16 pin (USB 2.0) | | D+/D- → GPIO19/18 |
 | 2 | R 5.1k | | CC1, CC2 xuống GND |
 | 1 | ESD cho USB | USBLC6-2SC6 | |
-| 1 | IC sạc LiPo 1 cell | TP4056 / MCP73831 | Chân CHRG chỉ nối LED sạc (không còn GPIO để đọc) |
+| 1 | IC sạc LiPo 1 cell | **TP4056-42-ESOP8** (chốt 2026-09-26) | Chân CHRG chỉ nối LED sạc (không còn GPIO để đọc). CE nối VBUS, STDBY bỏ trống |
+| 1 | R PROG 2k | | Dòng sạc ~580mA (không để 1A: IC tuyến tính toả ~1.5W) |
+| 1 | NTC 10k B3950 + R 6.2k 1% | | Chân TEMP: 6.2k từ VBUS xuống TEMP, NTC từ TEMP xuống GND, dán NTC lên thân pin. Ngưỡng 45%/80% VCC → cửa sổ sạc ~5–45°C. **Đối chiếu lại với datasheet TP4056-42** |
+| 2 | Tụ 10µF | | VBUS (đầu vào sạc) và VBAT |
 | 1 | LED sạc + R 1k | | Chỉ sáng khi cắm USB, không ăn pin |
 | 1 | Pin LiPo 3.7V ~1000mAh có mạch bảo vệ | | MEMORY.md tính theo 1000mAh |
 | 1 | (Nếu pin không có PCM) DW01A + FS8205A | | |
-| 1 | P-MOSFET + Schottky làm power-path | AO3401 + SS14 | Cắm USB thì chạy nguồn USB |
-| 1 | LDO 3.3V, ≥500mA, Iq thấp | RT9080-33 (Iq 2µA) / ME6211C33 | Wi-Fi TX đỉnh ~350mA |
-| 1 | Công tắc trượt nguồn | | |
+| 1 | P-MOSFET + Schottky làm power-path | AO3401 + SS14 | Cắm USB thì chạy nguồn USB. VBUS → SS14 → VPATH; AO3401: D = VBAT, S = VPATH, G = VBUS |
+| 1 | R 100k cổng P-MOSFET → GND | | Rút USB thì cổng về 0V để MOSFET mở cho pin cấp điện |
+| 1 | LDO 3.3V, ≥500mA, Iq thấp | **RT9080-33GJ5** (chốt 2026-09-26) | Wi-Fi TX đỉnh ~350mA. EN nối VSYS |
+| 1 | Công tắc trượt nguồn | SPDT, PCM12 | VPATH → VSYS: tắt máy vẫn sạc được |
 | 2 | Tụ 10µF | | In/out LDO |
 
 Không vẽ LED báo nguồn nối cứng (MEMORY.md mục C: làm pin 1000mAh từ 52 ngày còn 9 ngày).

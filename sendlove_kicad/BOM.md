@@ -97,14 +97,14 @@ Firmware xuất stereo `RIGHT_LEFT` với hai kênh giống nhau, nên chế đ�
 | 1 | ESD cho USB | USBLC6-2SC6 | |
 | 1 | IC sạc LiPo 1 cell | **TP4056-42-ESOP8** (chốt 2026-09-26) | Chân CHRG chỉ nối LED sạc (không còn GPIO để đọc). CE nối VBUS, STDBY bỏ trống |
 | 1 | R PROG 2k | | Dòng sạc ~580mA (không để 1A: IC tuyến tính toả ~1.5W) |
-| 1 | NTC 10k B3950 + R 6.2k 1% | | Chân TEMP: 6.2k từ VBUS xuống TEMP, NTC từ TEMP xuống GND, dán NTC lên thân pin. Ngưỡng 45%/80% VCC → cửa sổ sạc ~5–45°C. **Đối chiếu lại với datasheet TP4056-42** |
+| 1 | NTC 10k B3950 + R 6.2k 1% | | Chân TEMP: 6.2k từ VBUS xuống TEMP, NTC từ TEMP xuống GND, dán NTC lên thân pin. Ngưỡng 45%/80% VCC (đã đối chiếu datasheet TP4056-42 rev 2.4) → với B3950, cửa sổ sạc ~6–41°C |
 | 2 | Tụ 10µF | | VBUS (đầu vào sạc) và VBAT |
 | 1 | LED sạc + R 1k | | Chỉ sáng khi cắm USB, không ăn pin |
 | 1 | Pin LiPo 3.7V ~1000mAh có mạch bảo vệ | | MEMORY.md tính theo 1000mAh |
 | 1 | (Nếu pin không có PCM) DW01A + FS8205A | | |
 | 1 | P-MOSFET + Schottky làm power-path | AO3401 + SS14 | Cắm USB thì chạy nguồn USB. VBUS → SS14 → VPATH; AO3401: D = VBAT, S = VPATH, G = VBUS |
 | 1 | R 100k cổng P-MOSFET → GND | | Rút USB thì cổng về 0V để MOSFET mở cho pin cấp điện |
-| 1 | LDO 3.3V, ≥500mA, Iq thấp | **RT9080-33GJ5** (chốt 2026-09-26) | Wi-Fi TX đỉnh ~350mA. EN nối VSYS |
+| 1 | LDO 3.3V, ≥500mA, Iq thấp | **RT9080-33GJ5** (chốt 2026-09-26) | Wi-Fi TX đỉnh ~350mA. EN nối VSYS. Gói TSOT-23-5: 1 VIN, 2 GND, 3 EN, 4 NC, 5 VOUT (datasheet DS9080-09) |
 | 1 | Công tắc trượt nguồn | SPDT, PCM12 | VPATH → VSYS: tắt máy vẫn sạc được |
 | 2 | Tụ 10µF | | In/out LDO |
 

@@ -1,0 +1,66 @@
+02:15.250  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_doc.png'
+02:16.000  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_ngang.png'
+02:16.359  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_no_tung.png'
+02:16.718  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_mat_sau.png'
+02:17.015  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_day.png'
+HEART z 43.7..63.6
+BBOX inner [-24.38, 24.38, 1.9, 60.1, -12.1, 50.47]
+BUILD 124 s
+REPORT
+body: canh_hong=0 manh=1 the_tich=23.6cm3
+base: canh_hong=0 manh=1 the_tich=5.6cm3
+ear_R: canh_hong=0 manh=1 the_tich=0.8cm3
+ear_L: canh_hong=0 manh=1 the_tich=0.8cm3
+man_hinh_kinh: cham_than=False cham_day=False khe_min=0.15
+man_hinh_mach: cham_than=False cham_day=False khe_min=0.05
+pin: cham_than=False cham_day=False khe_min=0.20
+pcb: cham_than=False cham_day=False khe_min=0.60
+loa: cham_than=False cham_day=False khe_min=0.23
+cam_ung: cham_than=False cham_day=False khe_min=0.05
+usb_dau_cam: cham_than=False
+LED_ear_R: cham_tai=False
+LED_ear_L: cham_tai=False
+KICH_THUOC ngoai: 51.0 rong x 74.5 dai x 63.6 cao (ke ca tai, duoi)
+DO_THAT: than rong day 51.0 / dinh thanh (z=38) 46.0 mm, dinh vom 52.3 mm, dai than 62.0 mm
+LOA x=13.9..21.0  CAM_UNG dinh z=50.0
+PCB bao: x -22.9..22.9  y 9.5..59.5
+Info: File exported successfully
+Info: File exported successfully
+Info: File exported successfully
+Info: File exported successfully
+Info: Saved as "breadcat_vo.blend"
+SAVED 129 s
+DONE 134 s
+Blender 5.2.1 LTS (hash 9e2066aef7ef built 2026-08-25 02:38:20)
+Timer 'STL Export' took 163.23 ms
+Timer 'STL Export' took 6.61 ms
+Timer 'STL Export' took 12.84 ms
+Timer 'STL Export' took 13.62 ms
+
+Blender quit
+P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:206: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+  m = bpy.data.materials.new("toast"); m.use_nodes = True
+P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:235: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+  m = bpy.data.materials.new(name); m.use_nodes = True
+P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:271: DeprecationWarning: 'World.use_nodes' is expected to be removed in Blender 6.0
+  w = bpy.data.worlds.new("w"); sc.world = w; w.use_nodes = True
+00:17.843  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_v34.png'
+00:27.859  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_front.png'
+00:38.922  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_side.png'
+00:51.828  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_back.png'
+HEART z 43.7..63.6
+DIMS 51.0 74.5 63.6
+RONG z=0.3: 48.03
+RONG z=3: 50.75
+RONG z=5: 51.01
+RONG z=8: 50.89
+RONG z=10: 50.67
+RONG z=20: 49.15
+RONG z=30: 47.60
+RONG z=38: 46.01
+RONG z=42: 44.29
+RONG z=44: 42.87
+Info: Saved as "breadcat_shape.blend"
+Blender 5.2.1 LTS (hash 9e2066aef7ef built 2026-08-25 02:38:20)
+
+Blender quit

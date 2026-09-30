@@ -2387,6 +2387,8 @@ Range), #10 (xem trước đúng như hộp). `pio run` OK: RAM 16.9%, Flash 1,3
   thức ≥60%, bảng 101 hệ số Q15 theo dB. `AudioPlayer::fillChunk` bỏ hẳn phép nhân khi hệ số =
   32768 → âm lượng 100 (mặc định) đi ĐÚNG đường cũ bit-identical; khác 100 thì trượt ≤8192/lượt.
   `config_flag` đọc trong `checkFirebaseFlags`, lấy giá trị bằng `GET config.json?shallow=true`
+  **[SAI, sửa 2026-09-25: shallow trả `true` cho mọi khoá con kể cả số → hộp không bao giờ
+  nhận cài đặt. Giờ dùng `orderBy="$key"&startAt="config_rev"&endAt="playback_volume"`.]**
   (1 request, không kéo mật khẩu Wi-Fi/alarm_list). `PIN_AMP_SD = -1` (breadboard chưa nối).
 - `lib/SdStore`: `/sys/layout.json`, dọn `.tmp` lúc boot, `writeAtomic`, crc32 zlib (không bảng),
   remount ở đầu `syncWakeup` khi ABSENT. `SDCardManager`: handle thứ 4 `_genFile`, `max_files` 7,
@@ -2455,3 +2457,45 @@ như một ảnh nền bình thường vào `media/{boxId}/theme/`, không cần
 6. Ngắt điện khi đang cài theme → boot cài lại từ thẻ (`flash trong, cai lai tu the`).
 7. Deploy: `database.rules.json` (TRƯỚC khi dùng nhạc), functions, hosting. Theme lưu bằng web cũ
    (không có rev) hộp bỏ qua — người nhận lưu lại một lần.
+
+**Đính chính §29 (2026-09-24 tối):** bước 6 viết sai. Rút điện giữa lúc cài theme thì boot cài lại
+theme CŨ (`active.json` chỉ ghi SAU khi cài xong); theme mới tự cài ở lần sync kế vì `theme_flag`
+chưa hạ.
+
+## 30. Chuẩn hoá độ to: % âm lượng = % so với mức chuẩn của loa (user chốt 2026-09-25)
+
+**Vì sao.** Trước đó web chỉ HẠ đỉnh > 0,7, file vốn nhỏ giữ nguyên → hai file cùng 80% lệch nhau
+cả chục dB, không kiểm đều được âm lượng. Giờ `renderSegment` (sendlove_web `mediaEncoder.js`,
+dùng chung cho tin thoại, tiếng video, nhạc báo thức) đưa mọi đoạn về `LOUDNESS_TARGET_DB = -20`:
+RMS khối 400ms, cổng -60 dB tuyệt đối + -10 dB tương đối, đo sau lọc thông cao 200 Hz (loa nhỏ
+không phát bass). Nâng tối đa +18 dB (file quá nhỏ chủ yếu là ồn). Sau bộ nén thêm limiter -5 dB,
+trần đỉnh 0,7 giữ nguyên. Firmware không đổi gì ngoài bíp: sin 4000 → 4634 (RMS -20 dBFS).
+
+**Gotcha.** `DynamicsCompressorNode` của Chrome tự cộng makeup gain (~+4 dB đo được), không tắt
+được → đo lại độ to SAU nén rồi nhân một hệ số cuối. Kiểm trong trình duyệt: tín hiệu -36 dB,
+-6 dB, tiếng ồn đều ra -20,0 dB, đỉnh ≤ 0,7; bài nhiều bass (80 Hz) ra -22 dB vì bị trần đỉnh
+chặn — chấp nhận.
+
+**Đánh đổi đã biết.** Bỏ nguyên tắc cũ "chỉ hạ, không bao giờ nâng" của đường âm thanh: file nhỏ
+được nâng → dòng TRUNG BÌNH của ampli tăng (đỉnh vẫn ghim). Nếu breadboard rè / nháy màn khi
+phát: hạ `LOUDNESS_TARGET_DB`, đừng đụng trần đỉnh. File gửi trước 2026-09-25 giữ mức cũ.
+Còn thiếu: hiệu chuẩn 100% trên máy thật (chọn pad GAIN + đo SPL) — việc của user.
+
+**Cùng ngày, user nghe thử: "chưa đủ to", mọi file nhỏ hơn tiếng bíp → "to thật to", user tự hạ
+dần.** Số ở trên đã lỗi thời:
+- Web: `LOUDNESS_TARGET_DB` -20 → **-10**, `AUDIO_PEAK_CEILING` 0,7 → **0,98**, nâng tối đa
+  +30 dB, bộ nén -24 dB / 6:1. Bỏ HẲN phần dưới 250 Hz ở file gửi xuống (`SPEAKER_LOW_HZ`, loa
+  không phát được, chỉ tốn biên độ). Limiter viết tay `limitPeaks` (nhìn trước 5ms) thay
+  DynamicsCompressor làm limiter; lặp đo → bù → ghim tối đa 3 lượt. Đo trong trình duyệt: âm
+  sắc -10,0 dB; bass -10,3; giọng nói giả (nhiễu điều biên) -12,7 dB, đỉnh 0,98.
+- Firmware: bíp 4634 → **32000** (RMS -3,2 dBFS). Bíp vẫn là âm đơn 1,6 kHz — tai nhạy và
+  có lẽ trùng cộng hưởng loa — nên cùng RMS vẫn nghe to hơn nhạc.
+- Chưa đụng: âm lượng mặc định báo thức 80 (-8 dB), tăng dần từ 30%.
+- Thứ tự hạ khi quá to / rè: `targetDb` của profile → `AUDIO_PEAK_CEILING` → bảng sin bíp.
+
+**Lần 3 (user: nhạc vẫn thua bíp khi cả hai 100%).** Tách profile trong `mediaEncoder.js`:
+`PROFILE_VOICE` {-10 dB, cắt < 250 Hz} cho tin thoại / video; `PROFILE_ALARM` {-6 dB, cắt < 400 Hz,
++6 dB quanh 2 kHz} cho nhạc báo thức. Đo trên "nhạc giả" (bass + hợp âm + giai điệu + trống): RMS
+-11,2 → -7,3 dB, năng lượng dải 2 kHz -20,6 → -15,1 dB. Bíp: RMS -3,2 dB, dồn hết vào một tần số.
+**Giới hạn vật lý:** nhạc chỉ bằng được sin toàn thang khi bị nén thành gần như sóng vuông (méo
+nặng). Khoảng cách còn lại ~4 dB RMS, ~11 dB ở dải 2 kHz.

@@ -99,8 +99,11 @@ void AudioPlayer::beep(uint32_t durationMs) {
     // set lại thì tiếng bíp nhanh gấp đôi và cao gấp đôi. Lúc boot thì vô hại.
     i2s_set_sample_rates(I2S_NUM_0, rate);
     int16_t beepFrame[2];
-    // Phát sóng sin mượt mà thay vì sóng vuông để tránh tiếng rè (rẹt rẹt)
-    const int16_t sine[20] = {0, 1236, 2351, 3236, 3804, 4000, 3804, 3236, 2351, 1236, 0, -1236, -2351, -3236, -3804, -4000, -3804, -3236, -2351, -1236};
+    // Phát sóng sin mượt mà thay vì sóng vuông để tránh tiếng rè (rẹt rẹt).
+    // Biên độ 32000 = gần hết thang (đỉnh -0,2 dBFS, RMS -3,2 dBFS): user muốn bíp "to thật
+    // to" rồi tự nghe, hạ dần nếu cần (2026-09-25). Lịch sử: 4000 (-21,3 dB RMS), 4634 (-20 dB,
+    // bằng mức chuẩn cũ của web). Muốn nhỏ lại: nhân cả bảng với cùng một hệ số.
+    const int16_t sine[20] = {0, 9889, 18809, 25889, 30434, 32000, 30434, 25889, 18809, 9889, 0, -9889, -18809, -25889, -30434, -32000, -30434, -25889, -18809, -9889};
     int samples = (rate * durationMs) / 1000;
     _gain = _gainTarget;  // bíp ngắn, không cần trượt
     const bool unity = (_gain == Settings::GAIN_UNITY);

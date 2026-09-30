@@ -142,7 +142,7 @@ private:
     bool pushFirebaseAlarms();
     /// true tới khi tải được alarm_list lần đầu sau boot (hoặc lần tải trước hỏng)
     bool _alarmsNeedFetch = true;
-    /// Cài đặt người dùng (độ sáng, âm lượng): GET config?shallow=true khi config_flag
+    /// Cài đặt người dùng (độ sáng, âm lượng): GET config (khoảng khoá config_rev..playback_volume) khi config_flag
     /// bật, hoặc lần sync đầu sau boot (web có thể đã đổi lúc hộp tắt). Hỏng thì thử lại.
     bool syncFirebaseSettings();
     bool _settingsNeedFetch = true;

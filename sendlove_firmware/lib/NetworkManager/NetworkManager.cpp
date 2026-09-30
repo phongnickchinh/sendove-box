@@ -1318,16 +1318,22 @@ void NetworkManager::resetFlags(bool alarm, bool config, bool theme, bool music)
     http.end();
 }
 
-// Cài đặt người dùng. `?shallow=true` trên nút config: khoá có giá trị nguyên thuỷ
-// (display_brightness, playback_volume, config_rev) trả về NGUYÊN giá trị, còn khoá là
-// object (alarm_list, theme, wifi_config) chỉ trả `true`. Một request, và không kéo
-// mật khẩu Wi-Fi hay cả danh sách báo thức về hộp.
+// Cài đặt người dùng. Truy vấn khoảng khoá orderBy="$key" từ "config_rev" tới
+// "playback_volume": theo thứ tự chữ cái đúng 4 khoá config_rev, display_brightness,
+// led_state, playback_volume. Một request, và không kéo mật khẩu Wi-Fi (wifi_config), cả
+// danh sách báo thức (alarm_list) hay theme về hộp. orderBy="$key" không cần .indexOn.
+//
+// KHÔNG dùng `?shallow=true`: bản đầu (2026-09-24) tưởng shallow trả nguyên giá trị khoá
+// con kiểu số, thật ra nó trả `true` cho MỌI khoá con -> is<int>() sai -> hộp lặng lẽ bỏ
+// qua, không bao giờ nhận độ sáng / âm lượng (user test 25/09: cloud rev 5, hộp rev 0).
 bool NetworkManager::syncFirebaseSettings() {
     WiFiClientSecure client;
     configureTlsClient(client);
     HTTPClient http;
 
-    snprintf(_url, sizeof(_url), "https://%s/boxes/%s/config.json?shallow=true",
+    snprintf(_url, sizeof(_url),
+             "https://%s/boxes/%s/config.json?orderBy=%%22%%24key%%22"
+             "&startAt=%%22config_rev%%22&endAt=%%22playback_volume%%22",
              FIREBASE_HOST, BOX_ID);
     appendAuth('&');
 

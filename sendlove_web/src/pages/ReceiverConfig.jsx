@@ -5,7 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
 import UnpairConfirm from '../components/UnpairConfirm';
 import { fwVersion } from '../utils/boxStatus';
-import { Screen, AppBar, Body, Header, Button, CircleIcon } from '../components/ui/Screen';
+import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal } from '../components/ui/Screen';
+import { useToast } from '../components/ui/Toast';
 
 /**
  * Màn 11 "box config page" + màn 14 "unpair confirm".
@@ -21,6 +22,9 @@ import { Screen, AppBar, Body, Header, Button, CircleIcon } from '../components/
 
 /* LEDState enum ở firmware. BREATHING có trong enum nhưng hiệu ứng được ghi rõ
    là "Phase 2 — chưa triển khai", nên phải gắn nhãn chứ không để trần. */
+const DEFAULT_CFG = { led_state: 'OFF', display_brightness: 100, playback_volume: 100 };
+const CFG_KEYS = Object.keys(DEFAULT_CFG);
+
 const LED_OPTIONS = [
   { value: 'OFF', label: 'Tắt' },
   { value: 'SOLID', label: 'Sáng đều' },
@@ -36,18 +40,23 @@ export default function ReceiverConfig() {
   const [box, setBox] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [saved, setSaved] = useState(null);
+  const [toast, showToast] = useToast();
 
+  // Wi-Fi: web không bao giờ đọc lại được mật khẩu. Ô trống = giữ mật khẩu đã lưu
+  // (không gửi password); mạng mở phải chọn rõ bằng openNet.
+  const [savedSsid, setSavedSsid] = useState('');
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
+  const [openNet, setOpenNet] = useState(false);
   const [showPass, setShowPass] = useState(false);
-  const [savingWifi, setSavingWifi] = useState(false);
 
   // Mặc định khớp firmware (config.h SETTINGS_DEFAULT_*): 100 = mức hộp vẫn phát trước đây.
-  const [cfg, setCfg] = useState({ led_state: 'OFF', display_brightness: 100, playback_volume: 100 });
-  const [savingCfg, setSavingCfg] = useState(false);
+  const [cfg, setCfg] = useState(DEFAULT_CFG);
+  const [savedCfg, setSavedCfg] = useState(DEFAULT_CFG);
+  const [saving, setSaving] = useState(false);
 
   const [confirmUnpair, setConfirmUnpair] = useState(false);
+  const [leaveTo, setLeaveTo] = useState(null); // đường dẫn định rời tới khi còn thay đổi chưa lưu
 
   useEffect(() => {
     let alive = true;
@@ -56,12 +65,16 @@ export default function ReceiverConfig() {
         const res = await getBoxDetails(boxId);
         if (!alive || !res.success) return;
         setBox(res.data);
-        setSsid(res.data.config?.wifi_config?.ssid || '');
-        setCfg({
+        const s = res.data.config?.wifi_config?.ssid || '';
+        setSsid(s);
+        setSavedSsid(s);
+        const c = {
           led_state: res.data.config?.led_state || 'OFF',
           display_brightness: res.data.config?.display_brightness ?? 100,
           playback_volume: res.data.config?.playback_volume ?? 100,
-        });
+        };
+        setCfg(c);
+        setSavedCfg(c);
       } catch {
         if (alive) setError('Không đọc được cài đặt của hộp.');
       } finally {
@@ -71,50 +84,65 @@ export default function ReceiverConfig() {
     return () => { alive = false; };
   }, [boxId]);
 
-  const flash = (msg) => { setSaved(msg); setTimeout(() => setSaved(null), 4000); };
+  const wifiDirty = ssid.trim() !== savedSsid || password !== '' || openNet;
+  const cfgDirty = CFG_KEYS.some((k) => cfg[k] !== savedCfg[k]);
+  const dirty = wifiDirty || cfgDirty;
 
-  const saveWifi = async () => {
-    if (!ssid.trim()) { setError('Tên Wi-Fi không được để trống.'); return; }
-    setSavingWifi(true); setError(null);
-    try {
-      await updateWifi(boxId, { ssid: ssid.trim(), password });
-      setPassword('');
-      flash('Đã lưu Wi-Fi lên tài khoản.');
-    } catch (err) {
-      setError(err.response?.data?.error?.message || 'Không lưu được Wi-Fi.');
-    } finally {
-      setSavingWifi(false);
+  // Đóng tab / tải lại khi còn thay đổi chưa lưu. Nút back của trình duyệt/điện thoại
+  // KHÔNG chặn được: HashRouter không có useBlocker (chỉ data router mới có).
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const onUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [dirty]);
+
+  const goTo = (path) => (dirty ? setLeaveTo(path) : navigate(path));
+
+  const saveAll = async () => {
+    if (wifiDirty) {
+      if (!ssid.trim()) { showToast('Tên Wi-Fi không được để trống.', 'err'); return false; }
+      // Đổi sang mạng khác mà ô mật khẩu trống: không phân biệt được "mạng mở" với "quên nhập".
+      if (ssid.trim() !== savedSsid && !password && !openNet) {
+        showToast('Nhập mật khẩu của mạng mới, hoặc bật "Mạng không có mật khẩu".', 'err');
+        return false;
+      }
     }
-  };
-
-  const saveConfig = async () => {
-    setSavingCfg(true); setError(null);
+    setSaving(true);
     try {
-      await updateBoxConfig(boxId, cfg);
-      flash('Đã lưu. Hộp áp dụng ở lần đồng bộ kế tiếp.');
-      // Lấy lại config_rev mới để dòng trạng thái chuyển sang "đang chờ hộp".
-      const res = await getBoxDetails(boxId);
-      if (res.success) setBox(res.data);
+      if (wifiDirty) {
+        const body = { ssid: ssid.trim() };
+        if (openNet) body.password = '';
+        else if (password) body.password = password;
+        await updateWifi(boxId, body);
+        setSavedSsid(ssid.trim());
+        setPassword('');
+        setOpenNet(false);
+      }
+      if (cfgDirty) {
+        await updateBoxConfig(boxId, cfg);
+        setSavedCfg(cfg);
+        // Lấy lại config_rev mới để dòng trạng thái chuyển sang "đang chờ hộp".
+        const res = await getBoxDetails(boxId);
+        if (res.success) setBox(res.data);
+      }
+      showToast('Đã lưu. Hộp áp dụng ở lần đồng bộ kế tiếp.');
+      return true;
     } catch (err) {
-      setError(err.response?.data?.error?.message || 'Không lưu được cài đặt.');
+      showToast(err.response?.data?.error?.message || 'Không lưu được. Kiểm tra kết nối rồi thử lại.', 'err');
+      return false;
     } finally {
-      setSavingCfg(false);
+      setSaving(false);
     }
   };
 
   return (
     <Screen>
-      <AppBar onBack={() => navigate(`/box/${boxId}/receiver`)} />
+      <AppBar onBack={() => goTo(`/box/${boxId}/receiver`)} />
       <Body>
         <Header title="Cài đặt hộp" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
         {error && <div className="sl-reason">{error}</div>}
-        {saved && (
-          <div className="sl-note" style={{ background: 'var(--success-bg)', color: 'var(--success-text)' }}>
-            <Icon name="check" size={16} />
-            <span>{saved}</span>
-          </div>
-        )}
 
         {loading ? (
           <span className="sl-body">Đang tải…</span>
@@ -141,7 +169,8 @@ export default function ReceiverConfig() {
                   className="sl-input" type={showPass ? 'text' : 'password'}
                   value={password} maxLength={63} autoComplete="new-password"
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Để trống nếu mạng không có mật khẩu"
+                  disabled={openNet}
+                  placeholder={savedSsid && ssid.trim() === savedSsid ? 'Để trống để giữ mật khẩu đã lưu' : 'Mật khẩu của mạng'}
                   style={{ paddingRight: 44 }}
                 />
                 <button type="button" className="sl-iconbtn" onClick={() => setShowPass(!showPass)}
@@ -150,10 +179,17 @@ export default function ReceiverConfig() {
                   <Icon name="eye" size={20} />
                 </button>
               </span>
-              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                Tối đa 63 ký tự · để trống với mạng mở
-              </span>
+              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>Tối đa 63 ký tự</span>
             </label>
+
+            <div className="sl-listcard" style={{ padding: '10px var(--sp-3)' }}>
+              <span className="sl-label-s" style={{ flex: 1 }}>Mạng không có mật khẩu</span>
+              <button type="button" className="sl-toggle" role="switch" aria-checked={openNet}
+                aria-label="Mạng không có mật khẩu"
+                onClick={() => { setOpenNet(!openNet); setPassword(''); }}>
+                <span className="sl-toggle__knob" />
+              </button>
+            </div>
 
             {/* Firmware hiện tại chỉ đọc a_flag + alarm_list từ DB (NetworkManager
                 syncWakeup) — wifi_config và config_flag không ai đọc. Không hứa
@@ -165,10 +201,6 @@ export default function ReceiverConfig() {
                 ngay, dùng trang cài đặt khi hộp phát Wi-Fi riêng.
               </span>
             </div>
-
-            <Button kind="gho" onClick={saveWifi} disabled={savingWifi}>
-              {savingWifi ? 'Đang lưu…' : 'Lưu Wi-Fi'}
-            </Button>
 
             {/* --- đèn, màn, loa --- */}
             <span className="sl-label">Đèn báo</span>
@@ -206,14 +238,10 @@ export default function ReceiverConfig() {
               <span>Đèn báo chưa được firmware áp dụng. Độ sáng và âm lượng thì có.</span>
             </div>
 
-            <Button kind="gho" onClick={saveConfig} disabled={savingCfg}>
-              {savingCfg ? 'Đang lưu…' : 'Lưu đèn, màn hình và âm lượng'}
-            </Button>
-
             {/* --- giao diện màn hình hộp: lưu lên tài khoản, xem theme/layout.js --- */}
             <button
               type="button" className="sl-listcard" style={{ cursor: 'pointer' }}
-              onClick={() => navigate(`/box/${boxId}/receiver/theme`)}
+              onClick={() => goTo(`/box/${boxId}/receiver/theme`)}
             >
               <Icon name="palette" size={20} style={{ color: 'var(--chip-fg)' }} />
               <div className="sl-listcard__mid">
@@ -252,10 +280,35 @@ export default function ReceiverConfig() {
             </button>
           </>
         )}
+        {dirty && <div className="sl-savebar-spacer" aria-hidden="true" />}
       </Body>
 
+      {dirty && (
+        <div className="sl-savebar">
+          <span className="sl-savebar__text">Có thay đổi chưa lưu</span>
+          <Button kind="pri" block={false} onClick={saveAll} disabled={saving}>
+            {saving ? 'Đang lưu…' : 'Lưu'}
+          </Button>
+        </div>
+      )}
+
+      {toast}
+
+      {leaveTo && (
+        <Modal onClose={() => setLeaveTo(null)}>
+          <span className="sl-heading">Bỏ các thay đổi chưa lưu?</span>
+          <span className="sl-body">Wi-Fi, độ sáng hay âm lượng vừa chỉnh sẽ trở lại như cũ.</span>
+          <Button kind="pri" disabled={saving}
+            onClick={() => { const to = leaveTo; setLeaveTo(null); saveAll().then((ok) => ok && navigate(to)); }}>
+            Lưu rồi đi tiếp
+          </Button>
+          <Button kind="gho" onClick={() => navigate(leaveTo)}>Bỏ thay đổi</Button>
+        </Modal>
+      )}
+
       {confirmUnpair && (
-        <UnpairConfirm boxId={boxId} role="receiver" onClose={() => setConfirmUnpair(false)} onError={setError} />
+        <UnpairConfirm boxId={boxId} role="receiver" onClose={() => setConfirmUnpair(false)}
+          onError={(msg) => showToast(msg, 'err')} />
       )}
     </Screen>
   );

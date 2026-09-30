@@ -746,3 +746,39 @@
 
 /* nút chọn nguồn âm thanh: thu trực tiếp / chọn file */
 .sl-srcpick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); width: 100%; }
+
+/* ---------- toast (components/ui/Toast.jsx) ----------
+   fixed ở mép trên VIEWPORT, không phải đầu trang: nút lưu thường nằm cuối trang dài. */
+.sl-toast {
+  position: fixed; z-index: 30;
+  top: calc(var(--safe-top) + 12px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: min(390px, calc(100vw - 32px));
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-modal);
+  font-size: 14px; font-weight: 500; line-height: 1.4;
+  animation: sl-toast-in .2s ease-out;
+}
+.sl-toast svg { flex: 0 0 auto; margin-top: 2px; }
+/* success-bg/error-bg ở dark là rgba trong suốt: lót nền thẻ bên dưới để toast không trong veo. */
+.sl-toast--ok  { background: linear-gradient(var(--success-bg), var(--success-bg)), var(--neutral-0); color: var(--success-text); }
+.sl-toast--err { background: linear-gradient(var(--error-bg), var(--error-bg)), var(--neutral-0);     color: var(--error-text); }
+@keyframes sl-toast-in { from { opacity: 0; transform: translate(-50%, -8px); } }
+@media (prefers-reduced-motion: reduce) { .sl-toast { animation: none; } }
+
+/* ---------- thanh lưu nổi đáy (Cài đặt hộp) ----------
+   fixed thay vì sticky: ở desktop .sl-shell có overflow:hidden, sticky sẽ không dính. */
+.sl-savebar {
+  position: fixed; z-index: 9;
+  bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: var(--frame-w);
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) 20px calc(var(--safe-bottom) + var(--sp-3));
+  background: var(--bg-page);
+  border-top: 0.5px solid var(--line-card);
+}
+.sl-savebar__text { flex: 1 1 auto; font-size: 13px; line-height: 1.4; color: var(--neutral-500); }
+.sl-savebar .sl-btn { flex: 0 0 auto; min-width: 120px; }
+/* chừa chỗ cho thanh lưu để mục cuối trang không bị che */
+.sl-savebar-spacer { flex: 0 0 auto; height: 72px; }

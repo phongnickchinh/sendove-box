@@ -4,8 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { getTheme } from '../api/theme';
 import { getBoxDetails } from '../api/box';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, Actions, Header, Button, Tips } from '../components/ui/Screen';
-import BoxScreen, { Thumb } from '../components/theme/BoxScreen';
+import { Screen, AppBar, Body, Actions, Header, Button } from '../components/ui/Screen';
+import BoxScreen, { MiniScreen } from '../components/theme/BoxScreen';
 import { DEFAULT_BG_URL, DEFAULT_WIDGETS, FONT_FAMILIES, PRESETS, toEditorWidgets } from '../theme/layout';
 import { loadDefaultBackground } from '../utils/rgb565';
 import { ensureWebFont } from '../utils/vlw';
@@ -122,7 +122,7 @@ export default function ThemePicker() {
                     borderWidth: on ? 1 : 0.5,
                   }}
                 >
-                  <Thumb widgets={t.widgets} />
+                  <MiniScreen widgets={t.widgets} background={t.bg?.url || t.bg?.previewUrl} />
                   <div className="sl-listcard__mid">
                     <span className="sl-label-s" style={{ fontSize: 15 }}>{t.name}</span>
                     <span className="sl-caption">{t.what}</span>
@@ -135,8 +135,6 @@ export default function ThemePicker() {
             })}
           </div>
         )}
-
-        <Tips>Đổi được bố cục, phông chữ, màu và ảnh nền. Widget ảnh firmware chưa vẽ được nên không có ở đây.</Tips>
 
         <Actions>
           <Button kind="pri" disabled={!draft}

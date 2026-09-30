@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from '../ui/Icon';
 import { Screen, AppBar, Body, Actions, Button, Chip, CircleIcon, Modal } from '../ui/Screen';
+import Illustration from '../ui/Illustration';
 
 /**
  * Ba màn của bước 3 trong thiết kế:
@@ -60,14 +61,7 @@ const EncodingProgress = ({
     return (
       <Screen>
         <Body center>
-          <CircleIcon
-            size={88}
-            bg={ok ? 'var(--success-bg)' : 'var(--error-bg)'}
-            color={ok ? 'var(--success-fill)' : 'var(--error-fill)'}
-            icon={ok ? 'check' : 'alert'}
-            iconSize={40}
-            sw={2.5}
-          />
+          <Illustration name={ok ? 'sent' : 'failed'} width={200} />
 
           <h1 className="sl-title">{ok ? 'Đã gửi tới hộp' : 'Chưa gửi được'}</h1>
 
@@ -153,9 +147,7 @@ const EncodingProgress = ({
           <StepRow state="wait" label="Hộp nhận trong lần thức dậy kế tiếp" />
         </div>
 
-        <p className="sl-caption">
-          Hộp thức dậy 5 phút một lần để kiểm tra tin mới. Bạn có thể rời màn hình này — việc gửi vẫn tiếp tục.
-        </p>
+        <p className="sl-caption">Có thể rời màn này, việc gửi vẫn chạy.</p>
 
         {/* Đúng như dòng chú thích ngay trên: nút này chỉ rời màn hình,
             không huỷ được lượt tải đang chạy. */}

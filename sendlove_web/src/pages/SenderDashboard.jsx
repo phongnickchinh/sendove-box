@@ -7,9 +7,18 @@ import Icon from '../components/ui/Icon';
 import MessageDetail from '../components/MessageDetail';
 import MessageRow from '../components/MessageRow';
 import UnpairConfirm from '../components/UnpairConfirm';
-import { Screen, AppBar, Body, Actions, Header, Button, Tips, CircleIcon } from '../components/ui/Screen';
+import Illustration from '../components/ui/Illustration';
+import { Screen, AppBar, Body, Actions, Header, Button, Tips } from '../components/ui/Screen';
 import { clock, dayLabel, kindOf, timeAgo } from '../utils/messageFormat';
-import { lastSeenMs } from '../utils/boxStatus';
+import { lastSeenMs, syncTone } from '../utils/boxStatus';
+
+/** Cùng bảng màu chấm trạng thái với thẻ hộp ở Dashboard. */
+const TONE_DOT = {
+  ok: 'var(--success-fill)',
+  late: 'var(--warning-fill)',
+  lost: 'var(--error-fill)',
+  unknown: 'var(--neutral-400)',
+};
 
 /**
  * Màn 06 "content-history-below-part" — lịch sử tin đã gửi của một hộp.
@@ -94,12 +103,10 @@ export default function SenderDashboard() {
       <Body>
         <Header title="Lịch sử tin nhắn" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
-        <div className="sl-note" style={{ border: '0.5px solid var(--line-card)', alignItems: 'center' }}>
-          <Icon name="sync" size={16} style={{ color: 'var(--text-accent)' }} />
-          <span style={{ fontWeight: 500, color: 'var(--neutral-500)' }}>
-            {lastSeen ? `Hộp thức dậy lần cuối ${timeAgo(lastSeen)}` : 'Chưa rõ lần hộp thức gần nhất'}
-          </span>
-        </div>
+        <span className="sl-statuschip">
+          <span className="sl-boxcard__dot" style={{ background: TONE_DOT[syncTone(lastSeen)] }} />
+          {lastSeen ? `Hộp thức ${timeAgo(lastSeen)}` : 'Chưa rõ lần hộp thức'}
+        </span>
 
         {error && <div className="sl-reason">{error}</div>}
 
@@ -119,7 +126,7 @@ export default function SenderDashboard() {
           <span className="sl-body">Đang tải…</span>
         ) : sorted.length === 0 && !error ? (
           <div className="sl-card sl-card--center">
-            <CircleIcon size={56} bg="var(--rose-50)" color="var(--rose-400)" icon="chat" iconSize={24} />
+            <Illustration name="inbox" />
             <span className="sl-heading">Chưa gửi tin nào</span>
             <span className="sl-body">Gửi lời nhắn đầu tiên — hộp sẽ nhận ở lần thức dậy kế tiếp.</span>
           </div>
@@ -155,7 +162,7 @@ export default function SenderDashboard() {
           </Button>
         )}
 
-        <Tips>Hộp không báo ngược lại, nên không có dấu "đã xem".</Tips>
+        <Tips>Hộp không báo đã xem.</Tips>
 
         <Actions>
           <Button kind="pri" onClick={() => navigate(`/box/${boxId}/sender`)}>Gửi tin mới</Button>

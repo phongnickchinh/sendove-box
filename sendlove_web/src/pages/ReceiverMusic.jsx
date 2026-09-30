@@ -4,7 +4,8 @@ import { listMusic, uploadMusic, renameMusic, deleteMusic, getMusicPreviewUrl } 
 import { decodeAudioBlob, encodeAlarmMusic, audFileToWavBlob, ALARM_MUSIC } from '../utils/mediaEncoder';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal, Tips } from '../components/ui/Screen';
+import { Screen, AppBar, Body, Header, Button, Modal } from '../components/ui/Screen';
+import Illustration from '../components/ui/Illustration';
 
 /**
  * Thư viện nhạc báo thức của hộp (thiết kế 2026-09-24, firmware MEMORY.md §28).
@@ -103,7 +104,7 @@ export default function ReceiverMusic() {
           <span className="sl-body">Đang tải…</span>
         ) : tracks.length === 0 ? (
           <div className="sl-card sl-card--center">
-            <CircleIcon size={56} bg="var(--rose-50)" color="var(--rose-400)" icon="bell" iconSize={24} />
+            <Illustration name="music" />
             <span className="sl-heading">Chưa có bài nhạc nào</span>
             <span className="sl-body">Thêm một đoạn nhạc từ máy của bạn để hộp kêu bằng bài đó thay cho tiếng bíp.</span>
           </div>
@@ -142,10 +143,6 @@ export default function ReceiverMusic() {
           {full ? 'Thư viện nhạc đã đầy' : 'Thêm bài nhạc'}
         </button>
 
-        <Tips>
-          Mỗi bài dài 5–60 giây. Hộp chỉ tải bài về khi có báo thức dùng nó, và giữ lại trên thẻ nhớ.
-          Bài chưa tải xong lúc tới giờ thì hộp kêu tiếng bíp.
-        </Tips>
       </Body>
 
       {adding && (

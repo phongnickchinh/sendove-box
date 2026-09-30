@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import Icon from '../ui/Icon';
-import { Actions, Button, Tips } from '../ui/Screen';
+import { Actions, Button } from '../ui/Screen';
 import RangeTrimmer from './RangeTrimmer';
 import { initialRange } from '../../utils/trim';
 import useObjectUrl from '../../utils/useObjectUrl';
@@ -74,7 +74,7 @@ const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
           <>
             <span className="sl-chip"><Icon name="video" size={24} /></span>
             <span className="sl-label-s">Chọn hoặc quay một đoạn video</span>
-            <span className="sl-caption">Dài hơn {maxSeconds} giây thì chọn một đoạn để gửi</span>
+            <span className="sl-statuschip" style={{ alignSelf: 'center' }}>≤ {maxSeconds} giây</span>
             <label className="sl-btn sl-btn--pri" style={{ marginTop: 'var(--sp-1)' }}>
               Chọn video
               <input type="file" accept="video/*" onChange={handleFileChange} style={{ display: 'none' }} />
@@ -103,10 +103,6 @@ const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
           </>
         )}
       </div>
-
-      <Tips>
-        Khung vuông 240x240, 15 hình/giây, kèm âm thanh 8 kHz mono — chỉ đoạn đã chọn được gửi.
-      </Tips>
 
       <Actions>
         {previewUrl ? (

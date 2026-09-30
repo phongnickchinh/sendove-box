@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
 import MessageDetail from '../components/MessageDetail';
 import MessageRow from '../components/MessageRow';
+import Illustration from '../components/ui/Illustration';
 import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Screen';
 import { timeAgo } from '../utils/messageFormat';
 import { fwVersion, lastSeenMs, syncTone } from '../utils/boxStatus';
@@ -87,31 +88,24 @@ export default function ReceiverUI() {
                   ? `Đồng bộ ${timeAgo(seenAt)}`
                   : loading ? 'Đang đọc trạng thái…' : 'Chưa rõ lần đồng bộ gần nhất'}
               </span>
-              <span className="sl-caption">Hộp thức dậy mỗi 5 phút để tìm tin mới.</span>
             </div>
           </div>
 
           {status && (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--neutral-500)' }}>
-                  <Icon name="battery" size={16} />
-                  <span className="sl-caption" style={{ fontWeight: 500, color: 'var(--caramel-800)' }}>
-                    {status.battery}%
-                  </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--neutral-500)' }}>
+                <Icon name="battery" size={16} />
+                <span className="sl-caption" style={{ fontWeight: 500, color: 'var(--caramel-800)' }}>
+                  {status.battery}%
                 </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--neutral-500)' }}>
-                  <Icon name="gear" size={16} />
-                  <span className="sl-caption" style={{ fontWeight: 500, color: 'var(--caramel-800)' }}>
-                    Firmware {fwVersion(status) || '—'}
-                  </span>
-                </span>
-              </div>
-              {/* Con số trên là của lần hộp thức gần nhất, không phải đo trực tiếp. */}
-              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                Ghi nhận ở lần đồng bộ đó — không phải số đo ngay lúc này.
               </span>
-            </>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--neutral-500)' }}>
+                <Icon name="gear" size={16} />
+                <span className="sl-caption" style={{ fontWeight: 500, color: 'var(--caramel-800)' }}>
+                  Firmware {fwVersion(status) || '—'}
+                </span>
+              </span>
+            </div>
           )}
         </div>
 
@@ -130,7 +124,7 @@ export default function ReceiverUI() {
           <span className="sl-body">Đang tải…</span>
         ) : messages.length === 0 ? (
           <div className="sl-card sl-card--center">
-            <CircleIcon size={56} bg="var(--rose-50)" color="var(--rose-400)" icon="chat" iconSize={24} />
+            <Illustration name="inbox" />
             <span className="sl-heading">Chưa có tin nào</span>
             <span className="sl-body">Khi người ấy gửi, tin sẽ hiện ở đây rồi mới tới hộp.</span>
           </div>

@@ -4,7 +4,8 @@ import { getAlarms, createAlarm, updateAlarm, deleteAlarm } from '../api/alarm';
 import { listMusic } from '../api/music';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
-import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal, Tips } from '../components/ui/Screen';
+import { Screen, AppBar, Body, Header, Button, Modal, Tips } from '../components/ui/Screen';
+import Illustration from '../components/ui/Illustration';
 import { useToast } from '../components/ui/Toast';
 
 /**
@@ -89,6 +90,8 @@ export default function ReceiverAlarms() {
         await createAlarm(boxId, { ...fields, is_enable: true });
       }
       setEditing(null);
+      // a_flag: hộp chỉ đọc lại danh sách ở lần thức dậy kế tiếp.
+      showToast('Đã lưu. Hộp nhận trong vòng 5 phút.');
       await load();
     } catch (err) {
       showToast(err.response?.data?.error?.message || 'Không lưu được báo thức.', 'err');
@@ -130,7 +133,7 @@ export default function ReceiverAlarms() {
           <span className="sl-body">Đang tải…</span>
         ) : alarms.length === 0 ? (
           <div className="sl-card sl-card--center">
-            <CircleIcon size={56} bg="var(--rose-50)" color="var(--rose-400)" icon="bell" iconSize={24} />
+            <Illustration name="alarm" />
             <span className="sl-heading">Chưa đặt báo thức nào</span>
             <span className="sl-body">Đặt một giờ, hộp sẽ sáng và kêu vào đúng lúc đó.</span>
           </div>
@@ -199,6 +202,13 @@ export default function ReceiverAlarms() {
         </button>
 
         {full && <Tips>Hộp chứa được 10 báo thức. Xoá bớt một cái để có chỗ cho cái mới.</Tips>}
+
+        {/* Cách tắt khi hộp kêu — khớp firmware (config.h ALARM_SNOOZE_SEC / ALARM_RING_MAX_MS).
+            Hiện một lần ở đây thay vì lặp trong popup mỗi lần sửa. */}
+        <div className="sl-howto">
+          <Icon name="tap" size={22} />
+          <span><b>Chạm</b> để báo lại sau 5 phút · <b>giữ 3 giây</b> để tắt · tự tắt sau 1 phút</span>
+        </div>
       </Body>
 
       {toast}
@@ -221,10 +231,7 @@ export default function ReceiverAlarms() {
       {editing && !editing.confirmDelete && (
         <Modal onClose={saving ? undefined : () => setEditing(null)}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--sp-2)' }}>
-            <div className="sl-listcard__mid">
-              <span className="sl-heading">{editing.id ? 'Sửa báo thức' : 'Thêm báo thức'}</span>
-              <span className="sl-caption">Hộp sẽ kêu vào giờ này.</span>
-            </div>
+            <span className="sl-heading" style={{ flex: 1 }}>{editing.id ? 'Sửa báo thức' : 'Thêm báo thức'}</span>
             <button type="button" className="sl-iconbtn" onClick={() => setEditing(null)} disabled={saving} aria-label="Đóng">
               <Icon name="x" size={20} />
             </button>
@@ -256,10 +263,6 @@ export default function ReceiverAlarms() {
               </button>
             </div>
           </div>
-
-          <span className="sl-caption">
-            "Một lần" kêu đúng một lần rồi tự tắt — nó vẫn nằm trong danh sách để bạn bật lại.
-          </span>
 
           <label className="sl-field">
             <span className="sl-label">Âm báo</span>
@@ -294,17 +297,6 @@ export default function ReceiverAlarms() {
               aria-label="Tăng dần âm lượng" onClick={() => setEditing({ ...editing, ramp: !editing.ramp })}>
               <span className="sl-toggle__knob" />
             </button>
-          </div>
-
-          {/* Khớp hành vi firmware (config.h ALARM_SNOOZE_SEC / ALARM_RING_MAX_MS) */}
-          <span className="sl-caption">
-            Khi hộp kêu: chạm để báo lại sau 5 phút, giữ 3 giây để tắt. Không ai chạm thì tự tắt sau 1 phút.
-          </span>
-
-          {/* a_flag: hộp chỉ đọc lại danh sách ở lần thức dậy kế tiếp */}
-          <div className="sl-note">
-            <Icon name="sync" size={16} />
-            <span>Cài đặt vừa lưu sẽ tới hộp ở lần thức dậy kế tiếp — trong vòng 5 phút.</span>
           </div>
 
           <Button kind="pri" onClick={save} disabled={saving || !editing.time}>

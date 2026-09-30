@@ -5,12 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { Screen } from '../components/ui/Screen';
 
 /**
- * Frame "login signup" trong Figma. Ảnh nền thật (anthony-melone…unsplash)
- * chưa có — thử dùng src/assets/hero.png có sẵn trong repo nhưng nó là một
- * hoạ tiết trang trí NỀN TRONG SUỐT (dải ruy băng), không phải ảnh chụp toàn
- * khung, nên object-fit:cover làm nó méo và hở nền kem phía sau. Dùng tạm
- * gradient ấm thay vì ảnh vỡ; khi có ảnh thật, thay khối .sl-login-hero
- * bằng <img> trỏ file mới.
+ * Frame "login signup" trong Figma. Ảnh nền thật (anthony-melone…unsplash) nằm ở
+ * src/assets/login-hero.jpg, gắn trong .sl-login-hero (sendlove.css) kèm lớp phủ tối.
  * Bố cục dùng flex căn giữa dọc thay vì toạ độ tuyệt đối của thiết kế
  * (logo y=271, card y=344…) để không vỡ trên các chiều cao màn hình khác
  * iPhone 14 Pro Max — một đơn giản hoá có chủ đích.

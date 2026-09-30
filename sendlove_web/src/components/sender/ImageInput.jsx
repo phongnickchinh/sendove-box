@@ -40,7 +40,8 @@ async function getCroppedImg(imageSrc, pixelCrop) {
   });
 }
 
-const ImageInput = ({ onImageSelect, onCancel }) => {
+/** tip={null}: bỏ dải gợi ý (loại Ảnh); tin tĩnh vẫn giữ dải cũ. */
+const ImageInput = ({ onImageSelect, onCancel, tip = 'Ảnh được nén JPEG rồi lưu thẳng vào bộ nhớ của hộp.' }) => {
   const [file, setFile] = useState(null);
   const previewUrl = useObjectUrl(file);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -103,7 +104,7 @@ const ImageInput = ({ onImageSelect, onCancel }) => {
         )}
       </div>
 
-      <Tips>Ảnh được nén JPEG rồi lưu thẳng vào bộ nhớ của hộp.</Tips>
+      {tip && <Tips>{tip}</Tips>}
 
       <Actions>
         {previewUrl ? (

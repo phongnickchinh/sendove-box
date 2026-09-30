@@ -20,16 +20,16 @@ import { useToast } from '../components/ui/Toast';
  * có route cho người dùng bấm. Hộp tự cài. Dựng nút ở đây là dựng nút chết.
  */
 
-/* LEDState enum ở firmware. BREATHING có trong enum nhưng hiệu ứng được ghi rõ
-   là "Phase 2 — chưa triển khai", nên phải gắn nhãn chứ không để trần. */
 const DEFAULT_CFG = { led_state: 'OFF', display_brightness: 100, playback_volume: 100 };
 const CFG_KEYS = Object.keys(DEFAULT_CFG);
 
+/* LEDState enum ở firmware. Cả mục chưa được áp dụng (BREATHING còn chưa dựng hiệu
+   ứng) — nhãn "Sắp có" nằm ở tiêu đề mục, không gắn từng ô. */
 const LED_OPTIONS = [
   { value: 'OFF', label: 'Tắt' },
   { value: 'SOLID', label: 'Sáng đều' },
   { value: 'BLINK_FAST', label: 'Nháy nhanh' },
-  { value: 'BREATHING', label: 'Thở', soon: true },
+  { value: 'BREATHING', label: 'Thở' },
 ];
 
 export default function ReceiverConfig() {
@@ -150,16 +150,18 @@ export default function ReceiverConfig() {
           <>
             {/* --- Wi-Fi --- */}
             <label className="sl-field">
-              <span className="sl-label">Tên Wi-Fi (SSID)</span>
+              {/* Firmware hiện tại chưa đọc wifi_config từ DB (đổi ngay thì dùng trang cài
+                  đặt khi hộp phát Wi-Fi riêng) — huy hiệu thay cho dải cảnh báo cũ. */}
+              <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                Tên Wi-Fi (SSID) <span className="sl-badge">Sắp có</span>
+              </span>
               <input
                 className="sl-input" value={ssid} maxLength={32} autoComplete="off"
                 onChange={(e) => setSsid(e.target.value)} placeholder="Ví dụ: Nha_Duyen"
               />
               {/* ESP32-C3 (esp32-c3-devkitm-1) chỉ có radio 2.4 GHz — mạng 5 GHz
                   hộp không nhìn thấy. Đây là lý do hỏng hay gặp nhất khi đổi Wi-Fi. */}
-              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                Bắt buộc · tối đa 32 ký tự · chỉ băng tần 2.4 GHz
-              </span>
+              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>Chỉ Wi-Fi 2.4 GHz</span>
             </label>
 
             <label className="sl-field">
@@ -179,7 +181,6 @@ export default function ReceiverConfig() {
                   <Icon name="eye" size={20} />
                 </button>
               </span>
-              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>Tối đa 63 ký tự</span>
             </label>
 
             <div className="sl-listcard" style={{ padding: '10px var(--sp-3)' }}>
@@ -191,19 +192,11 @@ export default function ReceiverConfig() {
               </button>
             </div>
 
-            {/* Firmware hiện tại chỉ đọc a_flag + alarm_list từ DB (NetworkManager
-                syncWakeup) — wifi_config và config_flag không ai đọc. Không hứa
-                "hộp sẽ nhận" khi thật ra nó không nhận. */}
-            <div className="sl-note sl-note--warn">
-              <Icon name="wifi" size={16} />
-              <span>
-                Phiên bản firmware hiện tại của hộp chưa đọc Wi-Fi lưu ở đây. Muốn đổi
-                ngay, dùng trang cài đặt khi hộp phát Wi-Fi riêng.
-              </span>
-            </div>
-
             {/* --- đèn, màn, loa --- */}
-            <span className="sl-label">Đèn báo</span>
+            {/* Firmware chưa áp dụng led_state (kể cả hiệu ứng "thở") — một huy hiệu cho cả mục. */}
+            <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+              Đèn báo <span className="sl-badge">Sắp có</span>
+            </span>
             <div className="sl-seg" style={{ flexWrap: 'wrap' }}>
               {LED_OPTIONS.map((o) => (
                 <button
@@ -212,16 +205,10 @@ export default function ReceiverConfig() {
                   onClick={() => setCfg({ ...cfg, led_state: o.value })}
                   style={{ flexBasis: '40%' }}
                 >
-                  {o.label}{o.soon ? ' · sắp có' : ''}
+                  {o.label}
                 </button>
               ))}
             </div>
-            {cfg.led_state === 'BREATHING' && (
-              <div className="sl-note sl-note--warn">
-                <Icon name="alert" size={16} />
-                <span>Hiệu ứng "thở" chưa được firmware dựng xong. Chọn bây giờ thì đèn vẫn sáng đều.</span>
-              </div>
-            )}
 
             {/* Firmware kẹp độ sáng tối thiểu 5% (SETTINGS_MIN_BRIGHTNESS): kéo về 0 thì
                 màn đen hẳn, người dùng tưởng hộp hỏng. Âm lượng 0 = tắt tiếng tin nhắn,
@@ -232,11 +219,6 @@ export default function ReceiverConfig() {
               onChange={(v) => setCfg({ ...cfg, playback_volume: v })} />
 
             <ApplyState config={box?.config} status={box?.status} />
-
-            <div className="sl-note sl-note--warn">
-              <Icon name="alert" size={16} />
-              <span>Đèn báo chưa được firmware áp dụng. Độ sáng và âm lượng thì có.</span>
-            </div>
 
             {/* --- giao diện màn hình hộp: lưu lên tài khoản, xem theme/layout.js --- */}
             <button
@@ -257,10 +239,9 @@ export default function ReceiverConfig() {
             <div className="sl-listcard">
               <CircleIcon size={40} bg="var(--caramel-50)" color="var(--caramel-700)" icon="gear" iconSize={20} />
               <div className="sl-listcard__mid">
-                <span className="sl-label-s">Firmware {fwVersion(box?.status) || '—'}</span>
                 {/* Không nói "đang là bản mới nhất / hộp tự cài": firmware không đọc
                     ota_flag, OTA giờ do người dùng kích hoạt trên hộp. */}
-                <span className="sl-caption">Phiên bản hộp báo ở lần đồng bộ gần nhất.</span>
+                <span className="sl-label-s">Firmware {fwVersion(box?.status) || '—'}</span>
               </div>
             </div>
 

@@ -5,6 +5,7 @@ import VideoInput from '../components/sender/VideoInput';
 const ImageInput = lazy(() => import('../components/sender/ImageInput'));
 const loadingInput = <span className="sl-body">Đang tải…</span>;
 import VoiceInput from '../components/sender/VoiceInput';
+import TextPreview from '../components/sender/TextPreview';
 import EncodingProgress from '../components/sender/EncodingProgress';
 import Icon from '../components/ui/Icon';
 import { Screen, AppBar, Body, Actions, Button, Header, Tips } from '../components/ui/Screen';
@@ -142,8 +143,6 @@ export default function SenderUI() {
             ))}
           </div>
 
-          <Tips>Nội dung chỉ hiện trên hộp của bạn, không đăng ở đâu khác.</Tips>
-
           <Actions>
             <Button kind="gho" onClick={() => navigate(`/box/${boxId}/sender/dashboard`)}>
               Lịch sử tin nhắn
@@ -179,7 +178,7 @@ export default function SenderUI() {
         {type === 'video' && <VideoInput onVideoSelect={processAndUpload} onCancel={handleCancel} maxSeconds={maxSeconds} />}
         {type === 'image' && (
           <Suspense fallback={loadingInput}>
-            <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} />
+            <ImageInput onImageSelect={processAndUpload} onCancel={handleCancel} tip={null} />
           </Suspense>
         )}
         {type === 'voice' && <VoiceInput onRecordComplete={processAndUpload} onCancel={handleCancel} maxSeconds={maxSeconds} />}
@@ -198,14 +197,7 @@ export default function SenderUI() {
               />
             </div>
 
-            <div className="sl-card sl-card--center">
-              <span className="sl-chip"><Icon name="text" size={24} /></span>
-              <span className="sl-caption">
-                Chỉ có chữ — không cần mã hoá nên gửi được ngay.
-              </span>
-            </div>
-
-            <Tips>Hiện trên màn hình 240x240 của hộp.</Tips>
+            <TextPreview text={text} />
 
             <Actions>
               <Button kind="pri" disabled={!text.trim()} onClick={() => processAndUpload(null)}>

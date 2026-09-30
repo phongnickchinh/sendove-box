@@ -168,25 +168,15 @@ export function ExactPreview({ widgets, fonts, bgBytes }) {
 }
 
 /**
- * Thu nhỏ 240 xuống size — chỉ để nhận mặt, không đọc chữ nên mỗi widget là
- * một khối đặc đặt đúng toạ độ đã quy đổi.
+ * Ảnh thu nhỏ THẬT của một giao diện: chính BoxScreen (nền + chữ + phông) thu 240 xuống
+ * size bằng CSS zoom — thay cho các khối nâu trừu tượng trước đây.
  */
-export function Thumb({ widgets, size = 40 }) {
-  const k = size / SCREEN;
+export function MiniScreen({ widgets, background, size = 56 }) {
   return (
-    <span style={{
-      flex: '0 0 auto', position: 'relative',
-      width: size, height: size,
-      borderRadius: 8, background: '#F6DFB3', overflow: 'hidden',
-    }}>
-      {widgets.map((w, i) => (
-        <span key={i} style={{
-          position: 'absolute',
-          left: w.x * k, top: w.y * k,
-          width: Math.max(2, w.w * k), height: Math.max(2, w.h * k * 0.7),
-          background: BOX_INK, borderRadius: 1,
-        }} />
-      ))}
+    <span style={{ flex: '0 0 auto', width: size, height: size, borderRadius: 8, overflow: 'hidden', display: 'block' }}>
+      <span style={{ display: 'block', zoom: size / SCREEN, pointerEvents: 'none' }} aria-hidden="true">
+        <BoxScreen widgets={widgets} background={background} />
+      </span>
     </span>
   );
 }

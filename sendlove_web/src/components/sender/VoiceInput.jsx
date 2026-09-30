@@ -205,9 +205,12 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
 
       {error && <div className="sl-reason">{error}</div>}
 
-      <Tips>
-        Tối đa {maxSeconds} giây, mono. {t.tip}
-      </Tips>
+      {/* Tin thoại: đồng hồ 0:00 / tối đa đã nói thay dải gợi ý. Nhạc nền (tin tĩnh) giữ nguyên. */}
+      {purpose !== 'voice' && (
+        <Tips>
+          Tối đa {maxSeconds} giây, mono. {t.tip}
+        </Tips>
+      )}
 
       <Actions>
         {clip ? (

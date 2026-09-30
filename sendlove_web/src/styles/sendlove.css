@@ -45,7 +45,9 @@
     min-height: min(932px, calc(100dvh - var(--sp-8) * 2));
     border: 1px solid var(--shell-line);
     border-radius: var(--r-lg);
-    overflow: hidden;
+    /* clip, không hidden: hidden biến shell thành khung cuộn riêng và position:sticky bên
+       trong (màn xem trước của trình sửa giao diện) không còn dính. */
+    overflow: clip;
   }
 }
 
@@ -752,6 +754,63 @@
 
 /* nút chọn nguồn âm thanh: thu trực tiếp / chọn file */
 .sl-srcpick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); width: 100%; }
+
+/* ---------- trình sửa giao diện (ThemeEditor) ----------
+   Màn xem trước ghim đầu trang để bảng thuộc tính bên dưới cuộn mà vẫn thấy kết quả. */
+.sl-editor__stage {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
+  margin: 0 calc(-1 * var(--sp-5));
+  padding: var(--sp-2) var(--sp-5) var(--sp-3);
+  background: var(--bg-page);
+  border-bottom: 0.5px solid var(--line-card);
+}
+.sl-editor__screen { display: flex; }
+/* Màn thấp (điện thoại ngang, máy nhỏ): 240px xem trước + hàng chip ăn gần hết chiều cao,
+   bảng thuộc tính chỉ còn một khe. Thu nhỏ xem trước; kéo thả vẫn đúng vì BoxScreen quy
+   đổi toạ độ theo kích thước hiển thị thật. */
+@media (max-height: 760px) { .sl-editor__screen { zoom: .75; } }
+.sl-editor__chips {
+  display: flex; gap: var(--sp-2); width: 100%;
+  overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+}
+.sl-editor__chips::-webkit-scrollbar { display: none; }
+.sl-editor__chip {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 var(--sp-3);
+  border-radius: var(--r-full);
+  border: 0.5px solid var(--line-card);
+  background: var(--neutral-0);
+  font-family: var(--font); font-size: 13px; font-weight: 500; line-height: 1;
+  color: var(--caramel-800);
+  cursor: pointer;
+}
+.sl-editor__chip[aria-pressed="true"] {
+  background: var(--chip-accent-bg); border-color: var(--boxcard-line-sender);
+  color: var(--chip-accent-fg); font-weight: 600;
+}
+.sl-editor__chip--bad { border-color: var(--error-fill); color: var(--error-text); }
+.sl-editor__chip--add { border-style: dashed; border-color: var(--add-line); color: var(--text-accent); background: transparent; }
+.sl-editor__chip--add:disabled { color: var(--neutral-400); border-color: var(--neutral-100); cursor: not-allowed; }
+.sl-editor__panel { padding: var(--sp-4); gap: var(--sp-4); }
+.sl-editor__pos { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); }
+.sl-editor__num {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  border: 0.5px solid var(--line-input);
+  background: var(--neutral-0);
+}
+.sl-editor__num input {
+  width: 100%; border: none; outline: none; background: none;
+  font-family: var(--font); font-size: 15px; font-weight: 600; color: var(--caramel-900);
+  font-variant-numeric: tabular-nums;
+}
+.sl-editor__num:focus-within { border-color: var(--rose-400); box-shadow: 0 0 0 3px var(--rose-50); }
+.sl-editor__num:has(input:disabled) { opacity: .5; }
+.sl-editor__nudge { display: flex; justify-content: center; gap: var(--sp-2); }
+.sl-editor__nudge .sl-iconbtn { border: 0.5px solid var(--line-card); }
 
 /* ---------- ảnh thu nhỏ thay chip icon trong dòng tin nhắn (MessageRow) ---------- */
 .sl-thumb { position: relative; overflow: hidden; background: var(--chip-bg); }

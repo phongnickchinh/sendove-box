@@ -29,9 +29,36 @@ const textOf = (w) => (w.type === 'clock_date' ? formatDate(w) : w.sample);
  *
  * background: ảnh nền đã lượng tử RGB565 (utils/rgb565.js).
  */
-export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes, background }) {
+export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showBoxes, background }) {
+  const screenRef = useRef(null);
+  const drag = useRef(null); // { id, px, py, x, y, maxX, maxY, k }
+
+  /* Kéo widget: toạ độ con trỏ đổi về đơn vị 240 của hộp (màn xem trước có thể bị
+     co nhỏ hơn 240 trên điện thoại hẹp), làm tròn nguyên và kẹp trong màn. */
+  const startDrag = (e, w) => {
+    onSelect?.(w.id);
+    if (!onMove) return;
+    const rect = screenRef.current.getBoundingClientRect();
+    drag.current = {
+      id: w.id, px: e.clientX, py: e.clientY, x: w.x, y: w.y,
+      maxX: SCREEN - w.w, maxY: SCREEN - w.h, k: SCREEN / rect.width,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const moveDrag = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    const clamp = (v, max) => Math.max(0, Math.min(max, Math.round(v)));
+    onMove(d.id, {
+      x: clamp(d.x + (e.clientX - d.px) * d.k, d.maxX),
+      y: clamp(d.y + (e.clientY - d.py) * d.k, d.maxY),
+    });
+  };
+  const endDrag = () => { drag.current = null; };
+
   return (
     <div
+      ref={screenRef}
       style={{
         position: 'relative',
         width: SCREEN, height: SCREEN,
@@ -41,6 +68,8 @@ export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes, ba
         background: background ? `center / cover no-repeat url(${background})` : NO_BG,
         alignSelf: 'center',
         flex: '0 0 auto',
+        // Không có dòng này thì trên điện thoại kéo ngón tay là cuộn trang, không phải dời widget.
+        touchAction: onMove ? 'none' : undefined,
       }}
     >
       {widgets.map((w) => {
@@ -80,8 +109,10 @@ export default function BoxScreen({ widgets, selectedId, onSelect, showBoxes, ba
         return (
           <button
             key={w.id} type="button" onClick={() => onSelect(w.id)}
+            onPointerDown={(e) => startDrag(e, w)} onPointerMove={moveDrag}
+            onPointerUp={endDrag} onPointerCancel={endDrag}
             aria-label={`Chọn ${w.label}`}
-            style={{ ...common, ...box, padding: 0, cursor: 'pointer' }}
+            style={{ ...common, ...box, padding: 0, cursor: onMove ? 'grab' : 'pointer', zIndex: sel ? 1 : undefined }}
           >
             {inner}
           </button>

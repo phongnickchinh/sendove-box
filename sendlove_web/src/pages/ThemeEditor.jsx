@@ -14,6 +14,10 @@ import {
 /**
  * Màn 20 "theme editor".
  *
+ * Bố cục: màn xem trước GHIM ở đầu (sticky) — chạm để chọn, kéo để dời widget — và bảng
+ * thuộc tính nằm ngay dưới nó. Trước đây bảng thuộc tính là popup che mất màn xem trước,
+ * nên sửa vị trí mà không thấy kết quả.
+ *
  * Mỗi ô trong bảng thuộc tính chỉ có mặt nếu LayoutEngine.cpp THẬT SỰ đọc
  * trường đó cho loại widget này (WIDGET_TYPES trong theme/layout.js):
  *   font    -> họ phông web (cắt thành VLW khi gửi) hoặc phông có sẵn trong firmware
@@ -40,6 +44,8 @@ export default function ThemeEditor() {
   const [adding, setAdding] = useState(false);
   const [bgBusy, setBgBusy] = useState(false);
   const [bgError, setBgError] = useState(null);
+  const [touched, setTouched] = useState(false); // có thay đổi chưa đưa sang bước lưu
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   // Nạp các họ phông để xem trước đúng hình chữ (web cắt đúng các phông này thành VLW).
   useEffect(() => {
@@ -61,33 +67,37 @@ export default function ThemeEditor() {
 
   const sel = widgets.find((w) => w.id === selectedId);
   const meta = sel ? WIDGET_TYPES[sel.type] : null;
-  const patch = (fields) =>
-    setWidgets((prev) => prev.map((w) => (w.id === selectedId ? { ...w, ...fields } : w)));
+  const patchWidget = (id, fields) => {
+    setTouched(true);
+    setWidgets((prev) => prev.map((w) => (w.id === id ? { ...w, ...fields } : w)));
+  };
+  const patch = (fields) => patchWidget(selectedId, fields);
 
   const tooSmall = sel && meta && (sel.w < meta.min.w || sel.h < meta.min.h);
   const badHex = sel && meta?.color && !/^#[0-9A-Fa-f]{6}$/.test(sel.color || '');
   const problems = widgets.map(widgetProblem).filter(Boolean);
+  const selProblem = sel ? widgetProblem(sel) : null;
 
   const addWidget = (type) => {
     const w = newWidget(type, widgets);
+    setTouched(true);
     setWidgets((prev) => [...prev, w]);
     setAdding(false);
     setSelectedId(w.id);
   };
 
   const removeSelected = () => {
+    setTouched(true);
     setWidgets((prev) => prev.filter((w) => w.id !== selectedId));
     setSelectedId(null);
   };
 
-  const pickBackground = async (e) => {
-    const file = e.target.files[0];
-    e.target.value = '';
-    if (!file) return;
+  const changeBg = async (load) => {
     setBgBusy(true);
     setBgError(null);
     try {
-      setBg(await imageToRgb565(file));
+      setBg(await load());
+      setTouched(true);
     } catch {
       setBgError('Không đọc được ảnh này. Thử một ảnh JPG hoặc PNG khác.');
     } finally {
@@ -95,32 +105,243 @@ export default function ThemeEditor() {
     }
   };
 
-  const useDefaultBg = async () => {
-    setBgBusy(true);
-    setBgError(null);
-    try {
-      setBg(await loadDefaultBackground(DEFAULT_BG_URL));
-    } catch {
-      setBgError('Không tải được nền mặc định.');
-    } finally {
-      setBgBusy(false);
-    }
+  const pickBackground = (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) changeBg(() => imageToRgb565(file));
   };
 
   const fontIssue = sharedFontIssue(widgets);
   const bgUrl = bg?.url || bg?.previewUrl || null;
   const goSend = () => navigate(`/box/${boxId}/receiver/theme/send`, { state: { name, widgets, bg } });
+  const goBack = () => navigate(`/box/${boxId}/receiver/theme`);
+
+  /* Ô số: cho phép xoá trắng khi đang gõ (trước đây ô trống lập tức thành 0). Ô trống thì
+     widgetProblem báo lỗi cho tới khi gõ lại số. */
+  const numField = (k) => (
+    <label key={k} className="sl-editor__num">
+      <span className="sl-caption">{k.toUpperCase()}</span>
+      <input
+        type="number" inputMode="numeric" min={0} max={SCREEN} step={1}
+        value={sel[k]}
+        disabled={meta.fixedSize && (k === 'w' || k === 'h')}
+        onChange={(e) => patch({ [k]: e.target.value === '' ? '' : Math.round(Number(e.target.value)) })}
+      />
+    </label>
+  );
+
+  /* Nút dời 1px — kéo bằng ngón tay khó chính xác tới từng điểm ảnh. */
+  const nudge = (dx, dy) => {
+    const clamp = (v, max) => Math.max(0, Math.min(max, v));
+    patch({
+      x: clamp((Number(sel.x) || 0) + dx, SCREEN - (Number(sel.w) || 0)),
+      y: clamp((Number(sel.y) || 0) + dy, SCREEN - (Number(sel.h) || 0)),
+    });
+  };
 
   return (
     <Screen>
-      <AppBar onBack={() => navigate(`/box/${boxId}/receiver/theme`)} />
+      <AppBar onBack={() => (touched ? setConfirmLeave(true) : goBack())} />
       <Body>
         <Header title="Sửa giao diện" to={name} />
 
-        <div className="sl-card" style={{ padding: 10, gap: 10 }}>
-          <BoxScreen widgets={widgets} selectedId={selectedId} onSelect={setSelectedId} showBoxes background={bgUrl} />
-          <span className="sl-caption" style={{ alignSelf: 'center' }}>Chạm một ô trên màn để sửa</span>
+        {/* --- màn xem trước, ghim đầu trang khi cuộn bảng thuộc tính --- */}
+        <div className="sl-editor__stage">
+          <div className="sl-editor__screen">
+            <BoxScreen
+              widgets={widgets} selectedId={selectedId} onSelect={setSelectedId}
+              onMove={(id, pos) => patchWidget(id, pos)} showBoxes background={bgUrl}
+            />
+          </div>
+          <div className="sl-editor__chips" role="toolbar" aria-label="Widget trên màn">
+            {widgets.map((w) => {
+              const bad = !!widgetProblem(w);
+              return (
+                <button key={w.id} type="button"
+                  className={`sl-editor__chip${bad ? ' sl-editor__chip--bad' : ''}`}
+                  aria-pressed={w.id === selectedId}
+                  onClick={() => setSelectedId(w.id === selectedId ? null : w.id)}>
+                  <Icon name={bad ? 'alert' : w.icon} size={14} />
+                  {w.label}
+                </button>
+              );
+            })}
+            <button type="button" className="sl-editor__chip sl-editor__chip--add"
+              disabled={widgets.length >= MAX_WIDGETS} onClick={() => setAdding(true)}
+              aria-label={widgets.length >= MAX_WIDGETS ? `Tối đa ${MAX_WIDGETS} widget` : 'Thêm widget'}>
+              <Icon name="plus" size={14} />
+              {widgets.length >= MAX_WIDGETS ? `${MAX_WIDGETS}/${MAX_WIDGETS}` : 'Thêm'}
+            </button>
+          </div>
         </div>
+
+        {/* --- bảng thuộc tính của widget đang chọn --- */}
+        {sel && meta ? (
+          <div className="sl-card sl-editor__panel">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+              <Icon name={sel.icon} size={20} style={{ color: 'var(--text-accent)' }} />
+              <span className="sl-heading" style={{ flex: 1 }}>{sel.label}</span>
+              <button type="button" className="sl-iconbtn sl-iconbtn--44" onClick={removeSelected}
+                aria-label={`Xoá widget ${sel.label}`} style={{ color: 'var(--error-text)' }}>
+                <Icon name="trash" size={20} />
+              </button>
+              <button type="button" className="sl-iconbtn sl-iconbtn--44" onClick={() => setSelectedId(null)} aria-label="Bỏ chọn">
+                <Icon name="x" size={20} />
+              </button>
+            </div>
+
+            {/* Vị trí + kích thước: ô số và nút dời 1px */}
+            <div className="sl-field">
+              <span className="sl-label">Vị trí và kích thước</span>
+              <div className="sl-editor__pos">
+                {['x', 'y', 'w', 'h'].map(numField)}
+              </div>
+              <div className="sl-editor__nudge" aria-label="Dời từng điểm ảnh">
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" onClick={() => nudge(-1, 0)} aria-label="Dời sang trái">
+                  <Icon name="back" size={18} />
+                </button>
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" onClick={() => nudge(0, -1)} aria-label="Dời lên">
+                  <Icon name="back" size={18} style={{ transform: 'rotate(90deg)' }} />
+                </button>
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" onClick={() => nudge(0, 1)} aria-label="Dời xuống">
+                  <Icon name="back" size={18} style={{ transform: 'rotate(-90deg)' }} />
+                </button>
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" onClick={() => nudge(1, 0)} aria-label="Dời sang phải">
+                  <Icon name="back" size={18} style={{ transform: 'rotate(180deg)' }} />
+                </button>
+              </div>
+              {selProblem ? (
+                <span className="sl-note sl-note--err"><Icon name="alert" size={16} /><span>{selProblem}</span></span>
+              ) : tooSmall ? (
+                <span className="sl-note sl-note--warn">
+                  <Icon name="alert" size={16} />
+                  <span>
+                    Ô nhỏ hơn {meta.min.w} × {meta.min.h}. Hộp xoá đúng ô này trước khi vẽ lại, nên ô hẹp
+                    hơn sẽ để lại chữ cũ dính trên màn.
+                  </span>
+                </span>
+              ) : null}
+            </div>
+
+            {sel.type === 'battery_icon' && (
+              <div className="sl-note">
+                <Icon name="alert" size={16} />
+                <span>
+                  Biểu tượng pin không đổi được màu: firmware vẽ nó bằng một ảnh nhiều màu có sẵn,
+                  và mức pin đang viết cứng chứ chưa đọc pin thật. Chỉ đổi được vị trí.
+                </span>
+              </div>
+            )}
+
+            {VLW_KEY[sel.type] && (
+              <div className="sl-field">
+                <span className="sl-label">Phông chữ</span>
+                <div className="sl-seg" style={{ flexWrap: 'wrap' }}>
+                  {FONT_FAMILIES.map((f) => (
+                    <button key={f.family} type="button" className="sl-seg__cell"
+                      aria-pressed={isVlw(sel) && sel.family === f.family}
+                      onClick={() => patch({ font: VLW_KEY[sel.type], family: f.family })}
+                      style={{ flexBasis: '30%', fontSize: 12, fontFamily: `"${f.family}"` }}>
+                      {f.label}
+                    </button>
+                  ))}
+                  <button type="button" className="sl-seg__cell"
+                    aria-pressed={!isVlw(sel)}
+                    onClick={() => patch({ font: BUILTIN_FONTS[sel.type].value })}
+                    style={{ flexBasis: '60%', fontSize: 12 }}>
+                    {BUILTIN_FONTS[sel.type].label}
+                  </button>
+                </div>
+                {isVlw(sel) ? (
+                  <>
+                    <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span className="sl-caption">Cỡ chữ</span>
+                      <span className="sl-label-s">{sel.px}px</span>
+                    </span>
+                    <input type="range" className="sl-range" min={PX_RANGE[sel.type][0]} max={PX_RANGE[sel.type][1]}
+                      step={1} value={sel.px} onChange={(e) => patch({ px: Number(e.target.value) })} />
+                  </>
+                ) : (
+                  <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
+                    Phông nằm sẵn trong hộp, chỉ có chữ Latin không dấu.
+                  </span>
+                )}
+              </div>
+            )}
+
+            {sel.type === 'clock_date' && (
+              <div style={{ display: 'flex', gap: 10 }}>
+                <label className="sl-field" style={{ flex: 2 }}>
+                  <span className="sl-label">Dạng ngày</span>
+                  <select className="sl-input" value={sel.format} onChange={(e) => patch({ format: e.target.value })}>
+                    {DATE_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  </select>
+                </label>
+                <div className="sl-field" style={{ flex: 1 }}>
+                  <span className="sl-label">Thứ</span>
+                  <div className="sl-seg">
+                    {[['vi', 'Việt'], ['en', 'Anh']].map(([v, l]) => (
+                      <button key={v} type="button" className="sl-seg__cell" aria-pressed={sel.locale === v}
+                        onClick={() => patch({ locale: v })}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(meta.color || meta.align) && (
+              <div style={{ display: 'flex', gap: 10 }}>
+                {meta.color && (
+                  <label className="sl-field" style={{ flex: 1 }}>
+                    <span className="sl-label">Màu</span>
+                    <span className="sl-input" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '6px 10px' }}>
+                      <input
+                        type="color" aria-label="Chọn màu"
+                        value={/^#[0-9A-Fa-f]{6}$/.test(sel.color || '') ? sel.color : '#000000'}
+                        onChange={(e) => patch({ color: e.target.value.toUpperCase() })}
+                        style={{ width: 24, height: 24, padding: 0, border: 'none', background: 'none', flex: '0 0 auto', cursor: 'pointer' }}
+                      />
+                      <input
+                        value={sel.color || ''} maxLength={7} spellCheck={false} aria-label="Mã màu"
+                        onChange={(e) => patch({ color: e.target.value })}
+                        style={{
+                          border: 'none', outline: 'none', background: 'none', width: '100%',
+                          font: 'inherit', fontWeight: 600, color: 'var(--caramel-900)',
+                        }}
+                      />
+                    </span>
+                  </label>
+                )}
+
+                {meta.align && (
+                  <div className="sl-field" style={{ flex: 1 }}>
+                    <span className="sl-label">Căn lề</span>
+                    <div className="sl-seg">
+                      {ALIGNS.map((a) => (
+                        <button key={a.value} type="button" className="sl-seg__cell"
+                          aria-pressed={sel.align === a.value} aria-label={a.label}
+                          onClick={() => patch({ align: a.value })}>
+                          <Icon name={a.icon} size={16} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {badHex && (
+              <div className="sl-note sl-note--err">
+                <Icon name="alert" size={16} />
+                <span>Viết đủ bảy ký tự. #000 không phải viết tắt của #000000 — hộp sẽ vẽ chữ màu trắng.</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="sl-caption" style={{ alignSelf: 'center', textAlign: 'center' }}>
+            Chạm một widget trên màn để sửa, kéo để dời chỗ.
+          </span>
+        )}
 
         {/* --- ảnh nền --- */}
         <div className="sl-listcard">
@@ -129,19 +350,19 @@ export default function ThemeEditor() {
             <span className="sl-label-s">Ảnh nền</span>
             <span className="sl-caption">
               {bgBusy ? 'Đang xử lý ảnh…'
-                : bg?.isDefault ? 'Nền mặc định của hộp · 115,2 KB'
-                : bg ? 'Ảnh riêng · 240 × 240 RGB565, 115,2 KB'
-                : 'Nền đen (hộp không còn nền dựng sẵn)'}
+                : bg?.isDefault ? 'Nền mặc định của hộp'
+                : bg ? 'Ảnh riêng, cắt vuông ở giữa'
+                : 'Nền đen'}
             </span>
           </div>
           {!bg && !bgBusy && (
-            <button type="button" className="sl-btn sl-btn--gho" onClick={useDefaultBg}
+            <button type="button" className="sl-btn sl-btn--gho" onClick={() => changeBg(() => loadDefaultBackground(DEFAULT_BG_URL))}
               style={{ minHeight: 36, padding: '0 var(--sp-3)' }}>
               Nền mặc định
             </button>
           )}
           {bg && (
-            <button type="button" className="sl-iconbtn" onClick={() => setBg(null)} aria-label="Bỏ ảnh nền">
+            <button type="button" className="sl-iconbtn" onClick={() => { setBg(null); setTouched(true); }} aria-label="Bỏ ảnh nền">
               <Icon name="trash" size={18} />
             </button>
           )}
@@ -151,47 +372,6 @@ export default function ThemeEditor() {
           </label>
         </div>
         {bgError && <div className="sl-reason">{bgError}</div>}
-        {bg?.previewUrl && (
-          <span className="sl-caption" style={{ color: 'var(--neutral-400)', marginTop: -8 }}>
-            Ảnh được cắt vuông ở giữa. Màn hộp chỉ có 65 nghìn màu nên dải màu mịn sẽ hơi bậc thang — xem trước ở trên đã tính cả điều đó.
-          </span>
-        )}
-
-        {/* --- danh sách widget --- */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-          <Icon name="layers" size={16} style={{ color: 'var(--neutral-500)' }} />
-          <span className="sl-label" style={{ flex: 1 }}>Widget</span>
-          <span className="sl-caption" style={{ fontWeight: 500 }}>{widgets.length}/{MAX_WIDGETS}</span>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-          {widgets.map((w) => {
-            const bad = widgetProblem(w);
-            return (
-              <button
-                key={w.id} type="button" className="sl-listcard sl-msgrow" onClick={() => setSelectedId(w.id)}
-                style={bad ? { borderColor: 'var(--error-fill)' } : undefined}
-              >
-                <Icon name={w.icon} size={20} style={{ color: 'var(--caramel-700)' }} />
-                <span className="sl-listcard__mid">
-                  <span className="sl-label-s">{w.label}</span>
-                  <span className="sl-caption" style={bad ? { color: 'var(--error-text)' } : undefined}>
-                    {bad || `${w.w} × ${w.h} tại ${w.x}, ${w.y}`}
-                  </span>
-                </span>
-                <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
-              </button>
-            );
-          })}
-          {widgets.length === 0 && (
-            <span className="sl-caption">Chưa có widget nào — màn hộp sẽ chỉ có ảnh nền.</span>
-          )}
-        </div>
-
-        <button type="button" className="sl-addrow" disabled={widgets.length >= MAX_WIDGETS} onClick={() => setAdding(true)}>
-          <Icon name="plus" size={20} />
-          {widgets.length >= MAX_WIDGETS ? `Tối đa ${MAX_WIDGETS} widget` : 'Thêm widget'}
-        </button>
 
         {fontIssue && (
           <div className="sl-note sl-note--warn">
@@ -233,179 +413,12 @@ export default function ThemeEditor() {
         </Modal>
       )}
 
-      {sel && meta && (
-        <Modal onClose={() => setSelectedId(null)}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-            <Icon name={sel.icon} size={20} style={{ color: 'var(--text-accent)' }} />
-            <span className="sl-heading" style={{ flex: 1 }}>{sel.label}</span>
-            <span style={{
-              padding: '3px 8px', borderRadius: 999, background: 'var(--caramel-100)',
-              fontSize: 12, fontWeight: 500, color: 'var(--caramel-800)',
-            }}>{sel.type}</span>
-            <button type="button" className="sl-iconbtn" onClick={() => setSelectedId(null)} aria-label="Đóng">
-              <Icon name="x" size={20} />
-            </button>
-          </div>
-
-          {sel.type === 'battery_icon' && (
-            <div className="sl-note">
-              <Icon name="alert" size={16} />
-              <span>
-                Biểu tượng pin không đổi được màu: firmware vẽ nó bằng một ảnh nhiều màu có sẵn,
-                và mức pin đang viết cứng chứ chưa đọc pin thật. Chỉ đổi được vị trí.
-              </span>
-            </div>
-          )}
-
-          {VLW_KEY[sel.type] && (
-            <div className="sl-field">
-              <span className="sl-label">Phông chữ</span>
-              <div className="sl-seg" style={{ flexWrap: 'wrap' }}>
-                {FONT_FAMILIES.map((f) => (
-                  <button key={f.family} type="button" className="sl-seg__cell"
-                    aria-pressed={isVlw(sel) && sel.family === f.family}
-                    onClick={() => patch({ font: VLW_KEY[sel.type], family: f.family })}
-                    style={{ flexBasis: '30%', fontSize: 12, fontFamily: `"${f.family}"` }}>
-                    {f.label}
-                  </button>
-                ))}
-                <button type="button" className="sl-seg__cell"
-                  aria-pressed={!isVlw(sel)}
-                  onClick={() => patch({ font: BUILTIN_FONTS[sel.type].value })}
-                  style={{ flexBasis: '60%', fontSize: 12 }}>
-                  {BUILTIN_FONTS[sel.type].label}
-                </button>
-              </div>
-              {isVlw(sel) ? (
-                <>
-                  <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span className="sl-caption">Cỡ chữ</span>
-                    <span className="sl-label-s">{sel.px}px</span>
-                  </span>
-                  <input type="range" className="sl-range" min={PX_RANGE[sel.type][0]} max={PX_RANGE[sel.type][1]}
-                    step={1} value={sel.px} onChange={(e) => patch({ px: Number(e.target.value) })} />
-                  <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                    Web cắt đúng các ký tự cần dùng thành phông cho hộp, có dấu tiếng Việt.
-                  </span>
-                </>
-              ) : (
-                <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                  Phông nằm sẵn trong hộp, không cần tải thêm. Chỉ có chữ Latin không dấu.
-                </span>
-              )}
-            </div>
-          )}
-
-          {sel.type === 'clock_date' && (
-            <div style={{ display: 'flex', gap: 10 }}>
-              <label className="sl-field" style={{ flex: 2 }}>
-                <span className="sl-label">Dạng ngày</span>
-                <select className="sl-input" value={sel.format} onChange={(e) => patch({ format: e.target.value })}>
-                  {DATE_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                </select>
-              </label>
-              <div className="sl-field" style={{ flex: 1 }}>
-                <span className="sl-label">Thứ</span>
-                <div className="sl-seg">
-                  {[['vi', 'Việt'], ['en', 'Anh']].map(([v, l]) => (
-                    <button key={v} type="button" className="sl-seg__cell" aria-pressed={sel.locale === v}
-                      onClick={() => patch({ locale: v })}>{l}</button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {(meta.color || meta.align) && (
-            <div style={{ display: 'flex', gap: 10 }}>
-              {meta.color && (
-                <label className="sl-field" style={{ flex: 1 }}>
-                  <span className="sl-label">Màu</span>
-                  <span className="sl-input" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: '6px 10px' }}>
-                    <input
-                      type="color" aria-label="Chọn màu"
-                      value={/^#[0-9A-Fa-f]{6}$/.test(sel.color || '') ? sel.color : '#000000'}
-                      onChange={(e) => patch({ color: e.target.value.toUpperCase() })}
-                      style={{ width: 24, height: 24, padding: 0, border: 'none', background: 'none', flex: '0 0 auto', cursor: 'pointer' }}
-                    />
-                    <input
-                      value={sel.color || ''} maxLength={7} spellCheck={false} aria-label="Mã màu"
-                      onChange={(e) => patch({ color: e.target.value })}
-                      style={{
-                        border: 'none', outline: 'none', background: 'none', width: '100%',
-                        font: 'inherit', fontWeight: 600, color: 'var(--caramel-900)',
-                      }}
-                    />
-                  </span>
-                </label>
-              )}
-
-              {meta.align && (
-                <div className="sl-field" style={{ flex: 1 }}>
-                  <span className="sl-label">Căn lề</span>
-                  <div className="sl-seg">
-                    {ALIGNS.map((a) => (
-                      <button key={a.value} type="button" className="sl-seg__cell"
-                        aria-pressed={sel.align === a.value} aria-label={a.label}
-                        onClick={() => patch({ align: a.value })}>
-                        <Icon name={a.icon} size={16} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {badHex && (
-            <div className="sl-note sl-note--err">
-              <Icon name="alert" size={16} />
-              <span>Viết đủ bảy ký tự. #000 không phải viết tắt của #000000 — hộp sẽ vẽ chữ màu trắng.</span>
-            </div>
-          )}
-
-          <div className="sl-field">
-            <span className="sl-label">Ô trên màn hình</span>
-            <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-              {['x', 'y', 'w', 'h'].map((k) => (
-                <label key={k} className="sl-input" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px' }}>
-                  <span className="sl-caption" style={{ textTransform: 'uppercase' }}>{k}</span>
-                  <input
-                    type="number" min={0} max={SCREEN} step={1} value={sel[k]}
-                    disabled={meta.fixedSize && (k === 'w' || k === 'h')}
-                    onChange={(e) => patch({ [k]: Math.round(Number(e.target.value)) || 0 })}
-                    style={{
-                      border: 'none', outline: 'none', background: 'none', width: '100%',
-                      font: 'inherit', fontSize: 15, fontWeight: 600, color: 'var(--caramel-900)',
-                    }}
-                  />
-                </label>
-              ))}
-            </div>
-            {widgetProblem(sel) ? (
-              <span className="sl-note sl-note--err">
-                <Icon name="alert" size={16} />
-                <span>{widgetProblem(sel)}</span>
-              </span>
-            ) : tooSmall ? (
-              <span className="sl-note sl-note--warn">
-                <Icon name="alert" size={16} />
-                <span>
-                  Ô nhỏ hơn {meta.min.w} × {meta.min.h}. Hộp xoá đúng ô này trước khi vẽ lại, nên ô hẹp
-                  hơn sẽ để lại chữ cũ dính trên màn.
-                </span>
-              </span>
-            ) : (
-              <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
-                Tối thiểu {meta.min.w} × {meta.min.h}. Hộp xoá đúng ô này trước khi vẽ lại.
-              </span>
-            )}
-          </div>
-
-          <Button kind="pri" onClick={() => setSelectedId(null)}>Xong</Button>
-          <Button kind="gho" onClick={removeSelected} style={{ color: 'var(--error-text)' }}>
-            Xoá widget này
-          </Button>
+      {confirmLeave && (
+        <Modal onClose={() => setConfirmLeave(false)}>
+          <span className="sl-heading">Bỏ các thay đổi?</span>
+          <span className="sl-body">Giao diện chưa được lưu. Quay lại bây giờ thì các chỉnh sửa vừa rồi sẽ mất.</span>
+          <Button kind="pri" onClick={() => setConfirmLeave(false)}>Sửa tiếp</Button>
+          <Button kind="gho" onClick={goBack}>Bỏ thay đổi</Button>
         </Modal>
       )}
     </Screen>

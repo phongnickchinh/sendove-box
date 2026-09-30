@@ -258,8 +258,8 @@ export async function decodeAudioBlob(blob) {
 }
 
 /**
- * Cắt [start, end) của một AudioBuffer, downmix mono, resample, qua bộ nén
- * đỉnh (xem renderSegment) → WAV PCM16. Dùng cho lời nhắn thoại (thu trực tiếp
+ * Cắt [start, end) của một AudioBuffer, downmix mono, resample, chuẩn hoá độ to,
+ * qua bộ nén đỉnh (xem renderSegment) → WAV PCM16. Dùng cho lời nhắn thoại (thu trực tiếp
  * hoặc file tải lên) và nhạc nền của tin tĩnh.
  */
 export async function encodeAudioSegment(buffer, range, sampleRate) {
@@ -286,12 +286,13 @@ export const ALARM_MUSIC = {
  * Cắt đoạn nhạc báo thức → file hộp phát thẳng từ thẻ: "AUDC" + u16 tần số + u32 cỡ WAV
  * (little-endian, đúng AudioPlayer::parseAudc) rồi WAV PCM16. Tin thoại thì firmware tự
  * thêm AUDC lúc tải; nhạc tải thẳng xuống thẻ nên web phải đóng gói sẵn.
- * Dùng chung renderSegment (nén + trần đỉnh 0.7) như tin thoại: đỉnh cao làm ampli kéo
+ * Dùng chung renderSegment (chuẩn hoá độ to + nén + trần đỉnh) như tin thoại: cùng độ
+ * to thì âm lượng báo thức và tin nhắn mới so được với nhau. Đỉnh cao làm ampli kéo
  * dòng đột ngột → sụt áp. Fade 50ms hai đầu để hộp phát lặp không nghe "tạch".
  */
 export async function encodeAlarmMusic(buffer, range) {
   const { start, duration } = segmentOf(buffer.duration, range);
-  const rendered = await renderSegment(buffer, start, duration, ALARM_MUSIC.RATE);
+  const rendered = await renderSegment(buffer, start, duration, ALARM_MUSIC.RATE, PROFILE_ALARM);
 
   const data = rendered.getChannelData(0);
   const fade = Math.min(Math.floor(ALARM_MUSIC.FADE_S * ALARM_MUSIC.RATE), Math.floor(data.length / 2));
@@ -349,10 +350,84 @@ export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
 };
 
 /**
+ * Chuẩn hoá độ to (user chốt 2026-09-25): mọi đoạn gửi xuống hộp — tin thoại, tiếng video,
+ * nhạc báo thức — về cùng một độ to, để % âm lượng trên hộp là % so với một mức chuẩn của
+ * loa chứ không phụ thuộc file gốc thu to hay nhỏ.
+ *
+ * Độ to = RMS (dBFS) của các khối 400ms, bỏ khối im lặng (cổng tuyệt đối -60 dB và cổng
+ * tương đối -10 dB dưới trung bình, cùng ý với LUFS) để khoảng lặng giữa câu không làm file
+ * bị nâng quá tay. Đo sau lọc thông cao SPEAKER_LOW_HZ: loa nhỏ của hộp gần như không
+ * phát được âm trầm, bài nhiều bass không được tính là "to".
+ *
+ * "To thật to" (user chốt 2026-09-25, sau khi nghe bản -20 dB: mọi file đều nhỏ hơn tiếng bíp,
+ * "ru ngủ người dùng"; user tự nghe rồi hạ dần nếu cần): mức -10 dB, nén mạnh, bỏ hẳn phần
+ * trầm loa không phát được (chỉ tốn biên độ và dòng ampli), rồi limiter ghim đỉnh sát 0 dBFS.
+ * Muốn nhỏ lại: hạ targetDb của profile trước, rồi mới hạ AUDIO_PEAK_CEILING.
+ */
+// Tin thoại / tiếng video: vẫn phải nghe rõ lời, không nén tới mức méo.
+const PROFILE_VOICE = { targetDb: -10, lowHz: 250, presenceDb: 0 };
+// Nhạc báo thức (user nghe: bản -10 dB vẫn thua tiếng bíp khi cả hai 100%): mục đích là đánh
+// thức, không phải nghe hay. Bíp là một âm 1,6 kHz — đúng vùng tai nhạy nhất và loa nhỏ kêu
+// khoẻ nhất — nên cùng RMS nó vẫn to hơn nhạc. Nhạc báo thức vì vậy: bỏ thêm trầm (< 400 Hz),
+// nâng +6 dB quanh PRESENCE_HZ để dồn năng lượng về vùng đó, rồi ghim tới -6 dB RMS (khoảng
+// cách đỉnh / trung bình chỉ còn ~6 dB: nghe "dẹt", chấp nhận cho báo thức).
+const PROFILE_ALARM = { targetDb: -6, lowHz: 400, presenceDb: 6 };
+const PRESENCE_HZ = 2000;
+// File thu quá nhỏ phần lớn là tiếng ồn nền: nâng hơn mức này chỉ nghe thấy ồn.
+const LOUDNESS_MAX_BOOST_DB = 30;
+
+/**
  * Resample về `rate` mono. OfflineAudioContext lo cả downmix (destination 1
  * kênh) lẫn nội suy tần số, chính xác hơn tự viết tay.
+ * Lượt 1 chỉ resample để đo độ to; lượt 2 lọc trầm, nhân hệ số chuẩn hoá rồi nén. Đo lại sau
+ * nén: DynamicsCompressorNode của trình duyệt TỰ cộng độ lợi bù (makeup gain, đo được ~+4 dB
+ * trên Chrome), không tắt được, nên phải kéo về mức chuẩn bằng một hệ số cuối, rồi limiter.
  */
-async function renderSegment(decoded, start, duration, rate) {
+async function renderSegment(decoded, start, duration, rate, profile = PROFILE_VOICE) {
+  const { targetDb, lowHz } = profile;
+  const plain = await renderPass(decoded, start, duration, rate, { process: false });
+  const loudness = await measureLoudness(plain, lowHz);
+  const gainDb = loudness === null ? 0 : Math.min(LOUDNESS_MAX_BOOST_DB, targetDb - loudness);
+  const rendered = await renderPass(decoded, start, duration, rate, { process: true, gainDb, profile });
+  const data = rendered.getChannelData(0);
+  // Limiter hạ đỉnh thì độ to tụt dưới mức chuẩn (giọng nói nhiều đỉnh nhọn tụt ~3 dB):
+  // lặp đo → bù → ghim đỉnh vài lượt để tiến sát mức chuẩn.
+  for (let pass = 0; pass < 5; pass++) {
+    const after = await measureLoudness(rendered, lowHz);
+    if (after === null || Math.abs(targetDb - after) < 0.3) break;
+    const fix = 10 ** ((targetDb - after) / 20);
+    for (let i = 0; i < data.length; i++) data[i] *= fix;
+    limitPeaks(data, rate, AUDIO_PEAK_CEILING);
+  }
+  limitPeaks(data, rate, AUDIO_PEAK_CEILING);  // vòng trên có thể thoát trước khi ghim lượt nào
+  logAndCapPeak(rendered, loudness, gainDb);
+  return rendered;
+}
+
+/**
+ * Limiter nhìn trước 5ms: hệ số tại mỗi mẫu = nhỏ nhất trong cửa sổ phía trước (hạ kịp trước
+ * đỉnh, không cắt méo), nhả về 1 trong ~80ms. Ghim đỉnh mà không phải hạ CẢ bài như
+ * logAndCapPeak — hạ cả bài là mất độ to vừa chuẩn hoá.
+ */
+function limitPeaks(data, rate, ceiling) {
+  const look = Math.max(1, Math.round(0.005 * rate));
+  const release = Math.exp(-1 / (0.08 * rate));
+  const need = new Float32Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    const a = Math.abs(data[i]);
+    need[i] = a > ceiling ? ceiling / a : 1;
+  }
+  let g = 1;
+  for (let i = 0; i < data.length; i++) {
+    let target = 1;
+    const end = Math.min(data.length, i + look + 1);
+    for (let j = i; j < end; j++) if (need[j] < target) target = need[j];
+    g = target < g ? target : target + (g - target) * release;
+    data[i] *= g;
+  }
+}
+
+async function renderPass(decoded, start, duration, rate, { process, gainDb = 0, profile = PROFILE_VOICE }) {
   const frames = Math.max(1, Math.ceil(duration * rate));
   const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   const offlineCtx = new OfflineCtx(1, frames, rate);
@@ -360,31 +435,86 @@ async function renderSegment(decoded, start, duration, rate) {
   const source = offlineCtx.createBufferSource();
   source.buffer = decoded;
 
-  // Nén đỉnh trước khi ghi WAV. Ampli MAX98357A trên box dùng chung nguồn với
-  // đèn nền; mỗi đỉnh transient của giọng nói làm nó kéo dòng đột ngột → sụt áp
-  // → tiếng rè và màn hình nhấp nháy. Ngưỡng đặt ở -6dB nên file vốn nhỏ tiếng
-  // gần như không bị động tới — chỉ các đỉnh thật sự cao mới bị ghim lại.
-  const compressor = offlineCtx.createDynamicsCompressor();
-  compressor.threshold.value = -6;
-  compressor.knee.value = 6;
-  compressor.ratio.value = 4;
-  compressor.attack.value = 0.003;
-  compressor.release.value = 0.15;
+  if (!process) {
+    source.connect(offlineCtx.destination);
+  } else {
+    // Phần dưới lowHz loa không phát ra tiếng, chỉ chiếm biên độ (làm đỉnh chạm
+    // trần sớm) và kéo dòng ampli. Bỏ đi thì cùng trần đỉnh, phần nghe được to hơn.
+    const highpass = offlineCtx.createBiquadFilter();
+    highpass.type = 'highpass';
+    highpass.frequency.value = profile.lowHz;
+    highpass.Q.value = Math.SQRT1_2;
 
-  source.connect(compressor);
-  compressor.connect(offlineCtx.destination);
+    // Nâng vùng tai nhạy / loa kêu khoẻ (0 dB = không đổi gì).
+    const presence = offlineCtx.createBiquadFilter();
+    presence.type = 'peaking';
+    presence.frequency.value = PRESENCE_HZ;
+    presence.Q.value = 0.7;
+    presence.gain.value = profile.presenceDb;
+
+    const gain = offlineCtx.createGain();
+    gain.gain.value = 10 ** (gainDb / 20);
+
+    // Nén mạnh để khoảng cách đỉnh / trung bình nhỏ lại: cùng trần đỉnh thì độ to trung bình
+    // lên được cao. Ampli MAX98357A dùng chung nguồn với đèn nền; nếu breadboard rè / nháy
+    // màn khi phát, hạ LOUDNESS_TARGET_DB (user nhận rủi ro, 2026-09-25).
+    const compressor = offlineCtx.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 12;
+    compressor.ratio.value = 6;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.15;
+
+    source.connect(highpass);
+    highpass.connect(presence);
+    presence.connect(gain);
+    gain.connect(compressor);
+    compressor.connect(offlineCtx.destination);
+  }
   source.start(0, start, duration);
-
-  const rendered = await offlineCtx.startRendering();
-  logAndCapPeak(rendered);
-  return rendered;
+  return offlineCtx.startRendering();
 }
 
-// Trần biên độ gửi xuống box. Chỉ hạ xuống, KHÔNG bao giờ nâng lên: nâng đỉnh
-// là nâng đúng dòng đỉnh đang gây sụt áp.
-const AUDIO_PEAK_CEILING = 0.7;
+/** Độ to (dBFS) theo khối 400ms có cổng im lặng; null = cả đoạn im lặng. */
+async function measureLoudness(buffer, lowHz) {
+  const rate = buffer.sampleRate;
+  const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const ctx = new OfflineCtx(1, buffer.length, rate);
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  // Chỉ lọc lúc ĐO; file gửi xuống giữ nguyên dải tần.
+  const highpass = ctx.createBiquadFilter();
+  highpass.type = 'highpass';
+  highpass.frequency.value = lowHz;
+  highpass.Q.value = Math.SQRT1_2;
+  source.connect(highpass);
+  highpass.connect(ctx.destination);
+  source.start();
+  const data = (await ctx.startRendering()).getChannelData(0);
 
-function logAndCapPeak(buffer) {
+  const block = Math.max(1, Math.round(0.4 * rate));
+  const energies = [];
+  for (let i = 0; i < data.length; i += block) {
+    const end = Math.min(i + block, data.length);
+    let sum = 0;
+    for (let j = i; j < end; j++) sum += data[j] * data[j];
+    energies.push(sum / (end - i));
+  }
+  const mean = (arr) => arr.reduce((s, e) => s + e, 0) / arr.length;
+  const loud = energies.filter((e) => e > 1e-6); // -60 dB
+  if (!loud.length) return null;
+  const relGate = mean(loud) * 0.1; // -10 dB dưới trung bình
+  const kept = loud.filter((e) => e > relGate);
+  return 10 * Math.log10(mean(kept));
+}
+
+// Trần biên độ gửi xuống box (limitPeaks ghim, logAndCapPeak là lưới an toàn cuối).
+// 0,7 (-3,1 dBFS) → 0,98 (-0,2 dBFS) ngày 2026-09-25: user muốn to hết mức, tự nghe rồi hạ
+// dần. Trước đây 0,7 để đỡ sụt áp do ampli dùng chung nguồn đèn nền — nếu hộp rè / nháy màn
+// khi phát thì đây là nút thứ hai cần hạ, sau LOUDNESS_TARGET_DB.
+const AUDIO_PEAK_CEILING = 0.98;
+
+function logAndCapPeak(buffer, loudness, gainDb) {
   const data = buffer.getChannelData(0);
   let peak = 0;
   for (let i = 0; i < data.length; i++) {
@@ -401,5 +531,7 @@ function logAndCapPeak(buffer) {
   if (gain < 1) {
     for (let i = 0; i < data.length; i++) data[i] *= gain;
   }
-  console.log(`[VOICE] đỉnh sau nén ${peak.toFixed(3)} → ${(peak * gain).toFixed(3)} (gain ${gain.toFixed(2)})`);
+  console.log(`[VOICE] độ to ${loudness === null ? 'im lặng' : loudness.toFixed(1) + ' dB'}, `
+    + `chuẩn hoá ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB; `
+    + `đỉnh sau nén ${peak.toFixed(3)} → ${(peak * gain).toFixed(3)} (gain ${gain.toFixed(2)})`);
 }

@@ -77,6 +77,10 @@ export default function SenderUI() {
     return () => { alive = false; };
   }, [boxId]);
 
+  // Ba bước cùng một route: đổi bước thì tự cuộn lên đầu, không thì bước 2 mở ra ở vị
+  // trí cuộn của lưới thẻ bước 1 và che mất tiêu đề + ô lời nhắn.
+  useEffect(() => { window.scrollTo(0, 0); }, [step]);
+
   const handleTypeSelect = (selectedType) => {
     setType(selectedType);
     setStep(2);

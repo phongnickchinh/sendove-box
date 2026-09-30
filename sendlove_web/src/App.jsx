@@ -1,6 +1,6 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { Screen, Body } from './components/ui/Screen';
-import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import PairBox from './pages/PairBox';
@@ -17,9 +17,17 @@ const ReceiverMusic = lazy(() => import('./pages/ReceiverMusic'));
 import AuthRoute from './components/AuthRoute';
 import BoxRoute from './components/BoxRoute';
 
+/** SPA không tự cuộn lên đầu khi đổi trang: trang mới mở ra ở đúng vị trí cuộn của trang cũ. */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
 function App() {
   return (
     <Router>
+      <ScrollToTop />
       <Suspense fallback={<Screen><Body center><span className="sl-heading">Đang tải…</span></Body></Screen>}>
       <Routes>
         {/* Trang Login công khai */}

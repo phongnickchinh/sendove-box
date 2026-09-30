@@ -16,6 +16,7 @@ const ThemeSend = lazy(() => import('./pages/ThemeSend'));
 const ReceiverMusic = lazy(() => import('./pages/ReceiverMusic'));
 import AuthRoute from './components/AuthRoute';
 import BoxRoute from './components/BoxRoute';
+import { SendProvider } from './context/SendContext';
 
 /** SPA không tự cuộn lên đầu khi đổi trang: trang mới mở ra ở đúng vị trí cuộn của trang cũ. */
 function ScrollToTop() {
@@ -27,6 +28,7 @@ function ScrollToTop() {
 function App() {
   return (
     <Router>
+      <SendProvider>
       <ScrollToTop />
       <Suspense fallback={<Screen><Body center><span className="sl-heading">Đang tải…</span></Body></Screen>}>
       <Routes>
@@ -62,6 +64,7 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>
+      </SendProvider>
     </Router>
   );
 }

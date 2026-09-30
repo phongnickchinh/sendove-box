@@ -777,6 +777,34 @@
 }
 .sl-player__main:disabled { opacity: .5; cursor: default; }
 
+/* ---------- thanh nổi của lượt gửi chạy nền (context/SendContext.jsx) ---------- */
+.sl-sendpill {
+  position: fixed; z-index: 25;
+  bottom: calc(var(--safe-bottom) + 16px); left: 50%; transform: translateX(-50%);
+  width: min(390px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--neutral-0);
+  border: 0.5px solid var(--line-card);
+  box-shadow: var(--shadow-modal);
+  color: var(--caramel-900);
+}
+.sl-sendpill__row { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
+.sl-sendpill__row > svg { flex: 0 0 auto; }
+.sl-sendpill__text { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 500; line-height: 1.4; }
+.sl-sendpill--done .sl-sendpill__row > svg { color: var(--success-fill); }
+.sl-sendpill--error .sl-sendpill__row > svg { color: var(--error-fill); }
+.sl-sendpill--encoding .sl-sendpill__row > svg,
+.sl-sendpill--uploading .sl-sendpill__row > svg { color: var(--text-accent); }
+.sl-sendpill__btn {
+  flex: 0 0 auto; min-height: 36px; padding: 0 var(--sp-3);
+  border: none; border-radius: var(--r-sm);
+  background: var(--rose-400); color: var(--on-accent);
+  font-family: var(--font); font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.sl-sendpill__err { font-size: 12px; line-height: 1.4; color: var(--error-text); }
+
 /* ---------- toast (components/ui/Toast.jsx) ----------
    fixed ở mép trên VIEWPORT, không phải đầu trang: nút lưu thường nằm cuối trang dài. */
 .sl-toast {

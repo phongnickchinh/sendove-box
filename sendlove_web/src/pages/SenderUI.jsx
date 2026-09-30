@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import VideoInput from '../components/sender/VideoInput';
 // Kéo theo react-easy-crop — chỉ tải khi chọn thẻ Ảnh / Tin tĩnh.
@@ -10,9 +10,9 @@ import Icon from '../components/ui/Icon';
 import { Screen, AppBar, Body, Actions, Button, Header, Tips } from '../components/ui/Screen';
 import { getBoxDetails } from '../api/box';
 import { useAuth } from '../context/AuthContext';
-import { encodeVideoToBin, encodeImageToBin, extractAudioFromVideo } from '../utils/mediaEncoder';
-import { uploadMessage } from '../utils/mediaUploader';
-import { MAX_BIN_BYTES, MAX_SECONDS, maxSecondsFor } from '../utils/boxStatus';
+import { useSend } from '../context/SendContext';
+import { useToast } from '../components/ui/Toast';
+import { MAX_SECONDS, maxSecondsFor } from '../utils/boxStatus';
 
 /** Thẻ loại nội dung; hint là hàm vì trần thời lượng phụ thuộc loại hộp. */
 const TYPES = [
@@ -22,9 +22,6 @@ const TYPES = [
   { key: 'text', icon: 'text', label: 'Văn bản', hint: () => 'Gửi được ngay' },
   { key: 'static', icon: 'layers', label: 'Tin nhắn tĩnh', hint: () => 'Ảnh, chữ, nhạc nền' },
 ];
-
-/** Lỗi đọc được cho người dùng; lỗi lạ thì rơi về câu mặc định của EncodingProgress. */
-class SendError extends Error {}
 
 const STEP2_TITLE = {
   video: 'Gửi một đoạn video',
@@ -47,18 +44,10 @@ export default function SenderUI() {
   const [staticImageBlob, setStaticImageBlob] = useState(null);
   const [staticAudioData, setStaticAudioData] = useState(null); // { wavBlob, duration }
 
-  // Encoding & Uploading states
-  const [phase, setPhase] = useState('encoding'); // 'encoding' | 'uploading' | 'done' | 'error'
-  const [progress, setProgress] = useState(0);
-  // Thông tin hiển thị trên thẻ tóm tắt của bước 3
-  const [summary, setSummary] = useState({ fileName: null, duration: 0 });
-  // Giữ lại media của lần gửi gần nhất để nút "Thử lại" gửi lại đúng file đó,
-  // đúng như dòng "còn giữ trên máy này" ở màn báo lỗi.
-  const [lastMedia, setLastMedia] = useState(null);
-  // Mỗi lần gửi có một số thứ tự; promise của lần cũ không được ghi đè
-  // trạng thái của lần mới (xảy ra khi người dùng bấm "Để sau" rồi gửi tiếp).
-  const sendIdRef = useRef(0);
-  const [errorText, setErrorText] = useState(null);
+  // Lượt gửi sống trong SendContext (sống lâu hơn trang này): "Để sau" hay rời trang thì
+  // thanh nổi đáy màn hình báo tiến độ và kết quả, lỗi thì có nút Thử lại.
+  const { job, running, start, retry, leave } = useSend();
+  const [toast, showToast] = useToast();
 
   const { profile } = useAuth();
   const boxName = profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`;
@@ -94,139 +83,42 @@ export default function SenderUI() {
     setStaticAudioData(null);
   };
 
-  const processAndUpload = async (mediaData, range) => {
-    const sendId = ++sendIdRef.current;
-    const alive = () => sendIdRef.current === sendId;
-    const setProgressIfAlive = (v) => { if (alive()) setProgress(v); };
-
-    setLastMedia({ mediaData, range });
-    setStep(3);
-    setPhase('encoding');
-    setProgress(0);
-    setErrorText(null);
-
-    try {
-      let payload = { type, text };
-
-      if (type === 'video') {
-        const file = mediaData;
-        setSummary({ fileName: file.name, duration: 0 });
-        const encodeRes = await encodeVideoToBin(file, setProgressIfAlive, range);
-        // Chặn TRƯỚC khi tải lên: máy chủ từ chối file bin quá MAX_BIN_BYTES.
-        if (encodeRes.binBlob.size > MAX_BIN_BYTES) {
-          const mb = (b) => (b / 1e6).toFixed(1).replace('.', ',');
-          const fitSecs = Math.max(1, Math.floor(encodeRes.duration * (MAX_BIN_BYTES / encodeRes.binBlob.size)));
-          throw new SendError(
-            `Đoạn video sau khi nén nặng ${mb(encodeRes.binBlob.size)} MB, máy chủ chỉ nhận tối đa `
-            + `${mb(MAX_BIN_BYTES)} MB mỗi tin. Chọn đoạn ngắn hơn — khoảng ${fitSecs} giây là vừa.`,
-          );
-        }
-        setSummary({ fileName: file.name, duration: encodeRes.duration });
-        setProgress(0); // Reset progress cho bước trích xuất âm thanh
-        const voiceBlob = await extractAudioFromVideo(file, setProgressIfAlive, range);
-
-        payload = {
-          ...payload,
-          binBlob: encodeRes.binBlob,
-          thumbBlob: encodeRes.thumbBlob,
-          voiceBlob,
-          originalBlob: file,
-          metadata: {
-            duration: encodeRes.duration,
-            frameCount: encodeRes.frameCount,
-            width: 240,
-            height: 240
-          }
-        };
-      } else if (type === 'image') {
-        const file = mediaData;
-        const encodeRes = await encodeImageToBin(file);
-
-        payload = {
-          ...payload,
-          binBlob: encodeRes.binBlob,
-          thumbBlob: encodeRes.thumbBlob,
-          originalBlob: file,
-          metadata: {
-            frameCount: 1,
-            width: 240,
-            height: 240
-          }
-        };
-      } else if (type === 'voice') {
-        const { wavBlob, duration } = mediaData; // from VoiceRecorder
-        setSummary({ fileName: null, duration });
-
-        payload = {
-          ...payload,
-          voiceBlob: wavBlob,
-          metadata: { duration }
-        };
-      } else if (type === 'static') {
-        // Tin nhắn tĩnh: tuỳ tổ hợp ảnh / text / nhạc nền — tái dùng type "image"
-        // có sẵn ở backend (không thêm enum mới). mediaData = { imageBlob, audioData }.
-        const { imageBlob, audioData } = mediaData || {};
-        let extra = {};
-
-        if (imageBlob) {
-          const encodeRes = await encodeImageToBin(imageBlob);
-          extra = {
-            ...extra,
-            binBlob: encodeRes.binBlob,
-            thumbBlob: encodeRes.thumbBlob,
-            metadata: { frameCount: 1, width: 240, height: 240 }
-          };
-        }
-        if (audioData?.wavBlob) {
-          extra = { ...extra, bgMusicBlob: audioData.wavBlob };
-          setSummary({ fileName: null, duration: audioData.duration });
-        }
-
-        payload = {
-          ...payload,
-          // Chỉ có chữ thì gửi đúng là tin chữ — type 'image' không kèm ảnh nào
-          // làm lịch sử và hộp tưởng có ảnh.
-          type: imageBlob || audioData?.wavBlob ? 'image' : 'text',
-          ...extra,
-        };
-      }
-
-      setPhase('uploading');
-      setProgress(0);
-
-      await uploadMessage(boxId, payload, setProgressIfAlive);
-
-      if (alive()) setPhase('done');
-    } catch (err) {
-      console.error(err);
-      if (!alive()) return;
-      // Lỗi từ backend (vd. vượt rate limit 100 tin/ngày) có message riêng.
-      setErrorText(err instanceof SendError ? err.message : err.response?.data?.error?.message || null);
-      setPhase('error');
+  const processAndUpload = (mediaData, range) => {
+    if (running) {
+      showToast('Tin trước vẫn đang gửi. Đợi xong rồi gửi tiếp nhé.', 'err');
+      return;
     }
+    start(boxId, boxName, { type, text, mediaData, range });
+    setStep(3);
   };
 
+  // Rời trang khi bước 3 còn mở (nút back trình duyệt, bấm link khác): chuyển lượt gửi ra
+  // thanh nổi thay vì để nó chạy mà không ai thấy.
+  useEffect(() => () => leave(), [leave]);
+
   // ---------- Bước 3: popup mã hoá / màn kết quả ----------
-  if (step === 3) {
+  const mine = job && !job.detached && job.boxId === boxId;
+  if (step === 3 && mine) {
     return (
       <EncodingProgress
-        phase={phase}
-        progress={progress}
-        type={type}
-        duration={summary.duration}
-        fileName={summary.fileName}
+        phase={job.phase}
+        progress={Math.round(job.progress)}
+        type={job.input.type}
+        duration={job.summary.duration}
+        fileName={job.summary.fileName}
         boxName={boxName}
-        onHome={() => navigate('/dashboard')}
-        onRetry={() => processAndUpload(lastMedia?.mediaData, lastMedia?.range)}
-        onSendAnother={handleCancel}
-        onLeave={handleCancel}
-        errorText={errorText}
+        onHome={() => { leave(); navigate('/dashboard'); }}
+        onRetry={retry}
+        onSendAnother={() => { leave(); handleCancel(); }}
+        onLeave={() => { leave(); handleCancel(); }}
+        errorText={job.errorText}
       />
     );
   }
 
   // ---------- Bước 1: chọn loại nội dung ----------
-  if (step === 1) {
+  // step 3 mà lượt gửi đã được bỏ/chuyển ra thanh nổi → về lưới chọn loại.
+  if (step === 1 || step === 3) {
     return (
       <Screen>
         <AppBar step="Bước 1/3" onBack={() => navigate('/dashboard')} />
@@ -369,6 +261,7 @@ export default function SenderUI() {
           </>
         )}
       </Body>
+      {toast}
     </Screen>
   );
 }

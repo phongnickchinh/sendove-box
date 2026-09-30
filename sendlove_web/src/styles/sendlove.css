@@ -852,6 +852,8 @@
   box-shadow: var(--shadow-modal);
   color: var(--caramel-900);
 }
+/* Trang có thanh Lưu nổi (Cài đặt hộp): đẩy thanh gửi lên trên, không che nút Lưu. */
+body:has(.sl-savebar) .sl-sendpill { bottom: calc(var(--safe-bottom) + 84px); }
 .sl-sendpill__row { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
 .sl-sendpill__row > svg { flex: 0 0 auto; }
 .sl-sendpill__text { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 500; line-height: 1.4; }

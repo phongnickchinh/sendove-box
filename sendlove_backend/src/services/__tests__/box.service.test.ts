@@ -65,4 +65,28 @@ describe('BoxService', () => {
       });
     });
   });
+
+  describe('updateWifi', () => {
+    beforeEach(() => {
+      mockBoxRepo.getById.mockResolvedValue({ id: 'box123', pairing: { receiver_id: 'user_123' } });
+      mockBoxRepo.update.mockResolvedValue(undefined);
+    });
+
+    it('keeps the stored password when none is sent', async () => {
+      await boxService.updateWifi('user_123', 'box123', 'Nha_Duyen');
+      const updates = mockBoxRepo.update.mock.calls[0][1];
+      expect(updates['config/wifi_config/ssid']).toBe('Nha_Duyen');
+      expect(updates).not.toHaveProperty('config/wifi_config');
+    });
+
+    it('writes ssid and password together when a password is sent', async () => {
+      await boxService.updateWifi('user_123', 'box123', 'Nha_Duyen', 'secret123');
+      expect(mockBoxRepo.update.mock.calls[0][1]['config/wifi_config']).toEqual({ ssid: 'Nha_Duyen', pwd: 'secret123' });
+    });
+
+    it('stores an empty password only when the user chose an open network', async () => {
+      await boxService.updateWifi('user_123', 'box123', 'Cafe', '');
+      expect(mockBoxRepo.update.mock.calls[0][1]['config/wifi_config']).toEqual({ ssid: 'Cafe', pwd: '' });
+    });
+  });
 });

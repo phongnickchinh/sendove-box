@@ -103,15 +103,21 @@ class BoxService {
         return { ...rest, config: safeConfig };
     }
     /**
-     * Cập nhật cấu hình WiFi cho box
+     * Cập nhật cấu hình WiFi cho box.
+     * pwd undefined = người dùng không đụng ô mật khẩu → GIỮ mật khẩu đã lưu, chỉ đổi ssid.
+     * (Web không bao giờ đọc lại được mật khẩu, nên trước đây mỗi lần lưu là ghi đè "".)
+     * pwd "" = mạng mở, người dùng chọn rõ ràng.
      */
     async updateWifi(uid, boxId, ssid, pwd) {
         await this.getBoxDetails(uid, boxId); // Validates ownership
-        const now = Date.now();
-        await this.boxRepo.update(boxId, {
-            'config/wifi_config': { ssid, pwd: pwd || '' },
-            updated_at: now,
-        });
+        const updates = { updated_at: Date.now() };
+        if (pwd === undefined) {
+            updates['config/wifi_config/ssid'] = ssid;
+        }
+        else {
+            updates['config/wifi_config'] = { ssid, pwd };
+        }
+        await this.boxRepo.update(boxId, updates);
     }
     /**
      * Cập nhật led_state / display_brightness / playback_volume cho box.

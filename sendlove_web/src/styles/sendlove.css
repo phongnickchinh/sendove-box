@@ -73,6 +73,9 @@
   color: var(--caramel-800);
 }
 .sl-iconbtn:hover { background: var(--rose-50); }
+/* Biến thể 44px cho hàng nút icon thay nút chữ (thư viện nhạc) — đủ vùng chạm ngón tay. */
+.sl-iconbtn--44 { width: 44px; height: 44px; }
+.sl-iconbtn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* Nút back của appbar: group "leave" trong Figma = ellipse 40x40 viền 0.5,
    khác hẳn .sl-iconbtn (36px, không viền) dùng ở những chỗ khác (mắt mật khẩu,
@@ -757,6 +760,22 @@
   background: rgba(0, 0, 0, .55); color: #FFFFFF;
 }
 .sl-thumb__badge svg { fill: currentColor; stroke: none; }
+
+/* ---------- popup nghe nhạc (ReceiverMusic MusicPlayer) ---------- */
+.sl-player__times {
+  display: flex; justify-content: space-between;
+  font-size: 12px; line-height: 1.4; color: var(--neutral-500);
+  font-variant-numeric: tabular-nums;
+}
+.sl-player__ctrls { display: flex; align-items: center; justify-content: center; gap: var(--sp-6); }
+.sl-player__main {
+  width: 56px; height: 56px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--r-full);
+  background: var(--rose-400); color: var(--on-accent);
+  cursor: pointer;
+}
+.sl-player__main:disabled { opacity: .5; cursor: default; }
 
 /* ---------- toast (components/ui/Toast.jsx) ----------
    fixed ở mép trên VIEWPORT, không phải đầu trang: nút lưu thường nằm cuối trang dài. */

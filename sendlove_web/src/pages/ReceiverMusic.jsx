@@ -35,7 +35,7 @@ export default function ReceiverMusic() {
   const [renaming, setRenaming] = useState(null); // null | { id, name }
   const [deleting, setDeleting] = useState(null); // null | track
   const [busy, setBusy] = useState(false);
-  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(null); // track đang mở popup nghe
 
   const load = useCallback(async () => {
     try {
@@ -50,24 +50,8 @@ export default function ReceiverMusic() {
   }, [boxId]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => () => audioRef.current?.pause(), []);
 
   const full = tracks.length >= MAX_TRACKS;
-
-  const preview = async (t) => {
-    try {
-      audioRef.current?.pause();
-      const res = await getMusicPreviewUrl(boxId, t.music_id);
-      const buf = await (await fetch(res.data.url)).arrayBuffer();
-      const url = URL.createObjectURL(await audFileToWavBlob(buf));
-      const a = new Audio(url);
-      a.onended = () => URL.revokeObjectURL(url);
-      audioRef.current = a;
-      await a.play();
-    } catch {
-      setError('Không phát được bài này.');
-    }
-  };
 
   const doRename = async () => {
     setBusy(true);
@@ -126,20 +110,28 @@ export default function ReceiverMusic() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {tracks.map((t) => (
-              <div className="sl-listcard" key={t.music_id} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Icon name="bell" size={20} style={{ color: 'var(--chip-fg)' }} />
-                  <div className="sl-listcard__mid">
-                    <span className="sl-label-s">{t.name}</span>
-                    <span className="sl-caption">{fmt(t.duration_ms / 1000)}</span>
-                  </div>
+              <div className="sl-listcard" key={t.music_id} style={{ gap: 'var(--sp-2)', padding: '10px var(--sp-2) 10px var(--sp-4)' }}>
+                <Icon name="bell" size={20} style={{ color: 'var(--chip-fg)', flex: '0 0 auto' }} />
+                <div className="sl-listcard__mid">
+                  <span className="sl-label-s" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                  <span className="sl-caption">{fmt(t.duration_ms / 1000)}</span>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Button kind="gho" block={false} onClick={() => preview(t)}>Nghe</Button>
-                  <Button kind="gho" block={false} onClick={() => setRenaming({ id: t.music_id, name: t.name })}>Đổi tên</Button>
-                  <Button kind="gho" block={false} onClick={() => setAdding({ musicId: t.music_id, name: t.name })}>Thay file</Button>
-                  <Button kind="gho" block={false} onClick={() => setDeleting(t)} style={{ color: 'var(--error-text)' }}>Xoá</Button>
-                </div>
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" aria-label={`Nghe ${t.name}`} title="Nghe"
+                  onClick={() => setPlaying(t)}>
+                  <Icon name="play" size={20} />
+                </button>
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" aria-label={`Đổi tên ${t.name}`} title="Đổi tên"
+                  onClick={() => setRenaming({ id: t.music_id, name: t.name })}>
+                  <Icon name="pencil" size={20} />
+                </button>
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" aria-label={`Thay file ${t.name}`} title="Thay file"
+                  onClick={() => setAdding({ musicId: t.music_id, name: t.name })}>
+                  <Icon name="replace" size={20} />
+                </button>
+                <button type="button" className="sl-iconbtn sl-iconbtn--44" aria-label={`Xoá ${t.name}`} title="Xoá"
+                  onClick={() => setDeleting(t)} style={{ color: 'var(--error-text)' }}>
+                  <Icon name="trash" size={20} />
+                </button>
               </div>
             ))}
           </div>
@@ -169,6 +161,8 @@ export default function ReceiverMusic() {
         />
       )}
 
+      {playing && <MusicPlayer boxId={boxId} track={playing} onClose={() => setPlaying(null)} />}
+
       {renaming && (
         <Modal onClose={busy ? undefined : () => setRenaming(null)}>
           <span className="sl-heading">Đổi tên bài nhạc</span>
@@ -195,6 +189,103 @@ export default function ReceiverMusic() {
         </Modal>
       )}
     </Screen>
+  );
+}
+
+/**
+ * Popup nghe thử một bài trong thư viện: tên bài, thanh tiến độ, phát/tạm dừng, dừng.
+ * Đóng popup (nút, Esc, chạm nền) là dừng hẳn và thu hồi object URL.
+ */
+function MusicPlayer({ boxId, track, onClose }) {
+  const [state, setState] = useState('loading'); // loading | ready | error
+  const [paused, setPaused] = useState(true);
+  const [pos, setPos] = useState(0);
+  const [dur, setDur] = useState(track.duration_ms / 1000);
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    let url = null;
+    (async () => {
+      try {
+        const res = await getMusicPreviewUrl(boxId, track.music_id);
+        const buf = await (await fetch(res.data.url)).arrayBuffer();
+        if (!alive) return;
+        url = URL.createObjectURL(await audFileToWavBlob(buf));
+        const a = new Audio(url);
+        a.ontimeupdate = () => setPos(a.currentTime);
+        a.onloadedmetadata = () => Number.isFinite(a.duration) && setDur(a.duration);
+        a.onplay = () => setPaused(false);
+        a.onpause = () => setPaused(true);
+        a.onended = () => { setPaused(true); setPos(0); };
+        audioRef.current = a;
+        setState('ready');
+        a.play().catch(() => {}); // trình duyệt chặn tự phát thì người dùng bấm nút phát
+      } catch {
+        if (alive) setState('error');
+      }
+    })();
+    return () => {
+      alive = false;
+      audioRef.current?.pause();
+      audioRef.current = null;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [boxId, track.music_id]);
+
+  const toggle = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (a.paused) a.play().catch(() => {});
+    else a.pause();
+  };
+
+  const stop = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.pause();
+    a.currentTime = 0;
+    setPos(0);
+  };
+
+  const pct = dur > 0 ? Math.min(100, (pos / dur) * 100) : 0;
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+        <Icon name="bell" size={20} style={{ color: 'var(--chip-fg)', flex: '0 0 auto' }} />
+        <span className="sl-heading" style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{track.name}</span>
+        <button type="button" className="sl-iconbtn" onClick={onClose} aria-label="Đóng">
+          <Icon name="x" size={20} />
+        </button>
+      </div>
+
+      {state === 'error' ? (
+        <div className="sl-reason">Không phát được bài này. Kiểm tra kết nối rồi thử lại.</div>
+      ) : (
+        <>
+          <div className="sl-progress">
+            <div className="sl-track"><div className="sl-track__bar" style={{ width: `${pct}%`, transition: 'none' }} /></div>
+            <span className="sl-player__times">
+              <span>{fmt(pos)}</span><span>{fmt(dur)}</span>
+            </span>
+          </div>
+          <div className="sl-player__ctrls">
+            <button type="button" className="sl-iconbtn sl-iconbtn--44" onClick={stop}
+              disabled={state !== 'ready'} aria-label="Dừng">
+              <Icon name="stop" size={20} />
+            </button>
+            <button type="button" className="sl-player__main" onClick={toggle}
+              disabled={state !== 'ready'} aria-label={paused ? 'Phát' : 'Tạm dừng'}>
+              {state === 'loading'
+                ? <span className="sl-caption-s">…</span>
+                : <Icon name={paused ? 'play' : 'pause'} size={24} sw={2} />}
+            </button>
+            <span style={{ width: 44 }} aria-hidden="true" />
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 

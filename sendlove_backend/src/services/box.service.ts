@@ -3,7 +3,10 @@ import { IUserRepository } from '../repositories/interfaces/user.repository.inte
 import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { FirebaseUserRepository } from '../repositories/firebase/firebase-user.repository';
 import { AppError } from '../middleware/error-handler.middleware';
-import * as admin from 'firebase-admin';
+// Import module con, KHÔNG `import * as admin` rồi `admin.database.ServerValue`: TypeScript
+// biên dịch thành __importStar, mà firebase-admin 12 không để `database` là khoá riêng của
+// module -> undefined lúc chạy ("reading 'increment'", 2026-09-25).
+import { ServerValue } from 'firebase-admin/database';
 
 export class BoxService {
   constructor(
@@ -153,7 +156,7 @@ export class BoxService {
     // Hộp ghi lại số này vào status/config_rev sau khi áp dụng xong -> web so hai số để
     // hiện "đã áp dụng" hay "đang chờ hộp". Tăng nguyên tử phía server, hai lần lưu
     // gần nhau không bao giờ ra cùng một rev.
-    updates['config/config_rev'] = admin.database.ServerValue.increment(1);
+    updates['config/config_rev'] = ServerValue.increment(1);
 
     await this.boxRepo.update(boxId, updates as any);
 

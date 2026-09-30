@@ -7,6 +7,7 @@ const firebase_message_repository_1 = require("../repositories/firebase/firebase
 const firebase_rate_limit_repository_1 = require("../repositories/firebase/firebase-rate-limit.repository");
 const firebase_storage_repository_1 = require("../repositories/firebase/firebase-storage.repository");
 const firebase_alarm_repository_1 = require("../repositories/firebase/firebase-alarm.repository");
+const firebase_music_repository_1 = require("../repositories/firebase/firebase-music.repository");
 const firebase_ota_repository_1 = require("../repositories/firebase/firebase-ota.repository");
 const firebase_firmware_repository_1 = require("../repositories/firebase/firebase-firmware.repository");
 const box_service_1 = require("../services/box.service");
@@ -16,6 +17,7 @@ const message_service_1 = require("../services/message.service");
 const device_service_1 = require("../services/device.service");
 const alarm_service_1 = require("../services/alarm.service");
 const music_service_1 = require("../services/music.service");
+const theme_service_1 = require("../services/theme.service");
 const box_controller_1 = require("../controllers/box.controller");
 const auth_controller_1 = require("../controllers/auth.controller");
 const user_controller_1 = require("../controllers/user.controller");
@@ -23,6 +25,7 @@ const message_controller_1 = require("../controllers/message.controller");
 const device_controller_1 = require("../controllers/device.controller");
 const alarm_controller_1 = require("../controllers/alarm.controller");
 const music_controller_1 = require("../controllers/music.controller");
+const theme_controller_1 = require("../controllers/theme.controller");
 function createContainer() {
     // 1. Instantiating Repositories
     const boxRepo = new firebase_box_repository_1.FirebaseBoxRepository();
@@ -39,8 +42,9 @@ function createContainer() {
     const userService = new user_service_1.UserService(userRepo);
     const messageService = new message_service_1.MessageService(messageRepo, storageRepo);
     const deviceService = new device_service_1.DeviceService(boxRepo, messageRepo, alarmRepo, fwRepo, otaRepo);
-    const alarmService = new alarm_service_1.AlarmService(alarmRepo);
-    const musicService = new music_service_1.MusicService(); // No deps
+    const musicService = new music_service_1.MusicService(new firebase_music_repository_1.FirebaseMusicRepository(), storageRepo);
+    const alarmService = new alarm_service_1.AlarmService(alarmRepo, musicService);
+    const themeService = new theme_service_1.ThemeService(boxRepo, storageRepo);
     // 3. Instantiating Controllers with dependencies injected
     const boxController = new box_controller_1.BoxController(boxService);
     const authController = new auth_controller_1.AuthController(authService);
@@ -49,13 +53,14 @@ function createContainer() {
     const deviceController = new device_controller_1.DeviceController(deviceService);
     const alarmController = new alarm_controller_1.AlarmController(alarmService);
     const musicController = new music_controller_1.MusicController(musicService);
+    const themeController = new theme_controller_1.ThemeController(themeService);
     return {
         boxRepo, userRepo, messageRepo, rateLimitRepo,
         storageRepo, alarmRepo, otaRepo, fwRepo,
         boxService, authService, userService,
-        messageService, deviceService, alarmService, musicService,
+        messageService, deviceService, alarmService, musicService, themeService,
         boxController, authController, userController,
-        messageController, deviceController, alarmController, musicController
+        messageController, deviceController, alarmController, musicController, themeController
     };
 }
 //# sourceMappingURL=container.js.map

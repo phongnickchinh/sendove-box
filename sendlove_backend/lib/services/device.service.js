@@ -156,6 +156,23 @@ class DeviceService {
             };
             await this.boxRepo.updateFlags(boxId, { config_flag: false });
         }
+        // Nếu theme_flag = true → trả bố cục màn chờ + URL ký sẵn của ảnh nền.
+        // (Firmware hiện tại đọc RTDB trực tiếp, không gọi /device/poll — đường này
+        // dành cho khi firmware chuyển sang poll; xem memory sendlove-fw-todo-tu-fe.)
+        if (box.flags.theme_flag) {
+            const theme = box.config?.theme;
+            if (theme) {
+                response.theme = {
+                    theme_name: theme.theme_name,
+                    widgets: theme.widgets,
+                    background_url: theme.background
+                        ? await this.storageRepo.generateDownloadUrl(theme.background, 15)
+                        : null,
+                    updated_at: theme.updated_at,
+                };
+            }
+            await this.boxRepo.updateFlags(boxId, { theme_flag: false });
+        }
         return response;
     }
     /**
@@ -168,6 +185,7 @@ class DeviceService {
             ...(data.battery !== undefined && { battery: data.battery }),
             ...(data.charging !== undefined && { charging: data.charging }),
             ...(data.fw_version !== undefined && { fw_version: data.fw_version }),
+            ...(data.storage_type !== undefined && { storage_type: data.storage_type }),
         });
     }
     /**

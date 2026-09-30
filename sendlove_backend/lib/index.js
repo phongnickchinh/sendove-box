@@ -52,6 +52,7 @@ const device_routes_1 = __importDefault(require("./routes/device.routes"));
 const music_routes_1 = __importDefault(require("./routes/music.routes"));
 const message_routes_1 = __importDefault(require("./routes/message.routes"));
 const alarm_routes_1 = __importDefault(require("./routes/alarm.routes"));
+const theme_routes_1 = __importDefault(require("./routes/theme.routes"));
 // Import DI Container
 const container_1 = require("./di/container");
 const app = (0, express_1.default)();
@@ -75,9 +76,11 @@ app.use('/auth', (0, auth_routes_1.default)(container.authController));
 app.use('/users', (0, user_routes_1.default)(container.userController));
 const msgRouter = (0, message_routes_1.default)(container.messageController);
 const alrmRouter = (0, alarm_routes_1.default)(container.alarmController);
-app.use('/boxes', (0, box_routes_1.default)(container.boxController, msgRouter, alrmRouter));
+const themeRouter = (0, theme_routes_1.default)(container.themeController);
+// Nhạc báo thức theo hộp (2026-09-24). Route /music cũ (thư viện giả 2 bài) đã gỡ.
+const musicRouter = (0, music_routes_1.default)(container.musicController);
+app.use('/boxes', (0, box_routes_1.default)(container.boxController, msgRouter, alrmRouter, themeRouter, musicRouter));
 app.use('/device', (0, device_routes_1.default)(container.deviceController));
-app.use('/music', (0, music_routes_1.default)(container.musicController));
 // Error Handling Middleware (must be the last middleware)
 app.use(error_handler_middleware_1.errorHandler);
 // Export the API as a Firebase Cloud Function

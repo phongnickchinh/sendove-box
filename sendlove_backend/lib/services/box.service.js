@@ -4,6 +4,10 @@ exports.BoxService = void 0;
 const firebase_box_repository_1 = require("../repositories/firebase/firebase-box.repository");
 const firebase_user_repository_1 = require("../repositories/firebase/firebase-user.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
+// Import module con, KHÔNG `import * as admin` rồi `admin.database.ServerValue`: TypeScript
+// biên dịch thành __importStar, mà firebase-admin 12 không để `database` là khoá riêng của
+// module -> undefined lúc chạy ("reading 'increment'", 2026-09-25).
+const database_1 = require("firebase-admin/database");
 class BoxService {
     constructor(boxRepo = new firebase_box_repository_1.FirebaseBoxRepository(), userRepo = new firebase_user_repository_1.FirebaseUserRepository()) {
         this.boxRepo = boxRepo;
@@ -122,6 +126,10 @@ class BoxService {
             updates['config/display_brightness'] = data.display_brightness;
         if (data.playback_volume !== undefined)
             updates['config/playback_volume'] = data.playback_volume;
+        // Hộp ghi lại số này vào status/config_rev sau khi áp dụng xong -> web so hai số để
+        // hiện "đã áp dụng" hay "đang chờ hộp". Tăng nguyên tử phía server, hai lần lưu
+        // gần nhau không bao giờ ra cùng một rev.
+        updates['config/config_rev'] = database_1.ServerValue.increment(1);
         await this.boxRepo.update(boxId, updates);
         // Set config_flag để ESP32 biết cần đọc lại cấu hình
         await this.boxRepo.updateFlags(boxId, { config_flag: true });

@@ -34,7 +34,10 @@ class MessageController {
         this.getMessages = async (req, res, next) => {
             try {
                 const { boxId } = req.params;
-                const limit = req.query.limit ? parseInt(req.query.limit) : 20;
+                // Kẹp 1..100: limit=abc ra NaN làm limitToLast() ném lỗi 500, còn limit
+                // quá lớn thì kéo cả cây messages/{boxId} về một lượt.
+                const parsed = parseInt(req.query.limit, 10);
+                const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 100) : 20;
                 const messages = await this.msgService.getMessages(boxId, limit);
                 res.status(200).json({ success: true, data: { messages, pagination: { limit, total: messages.length } } });
             }

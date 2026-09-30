@@ -4,6 +4,8 @@ exports.MessageService = void 0;
 const firebase_message_repository_1 = require("../repositories/firebase/firebase-message.repository");
 const firebase_storage_repository_1 = require("../repositories/firebase/firebase-storage.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
+/** Signed URL đọc media cho web, hết hạn sau 15 phút (cùng mức /device/poll). */
+const MEDIA_URL_MINUTES = 15;
 class MessageService {
     constructor(msgRepo = new firebase_message_repository_1.FirebaseMessageRepository(), storageRepo = new firebase_storage_repository_1.FirebaseStorageRepository()) {
         this.msgRepo = msgRepo;
@@ -18,7 +20,9 @@ class MessageService {
         const basePath = `media/${boxId}/${messageId}`;
         // Map loại file → đường dẫn Storage, content type, giới hạn dung lượng
         const typeMap = {
-            bin: { path: `${basePath}/video.bin`, contentType: 'application/octet-stream', maxSize: 15 * 1024 * 1024 }, // 15MB
+            // 25MB: hộp thẻ SD cho video tới 60s × 15 fps JPEG 240×240 (~10-25KB/khung).
+            // Trần phía hộp (MAX_MEDIA_BYTES 5,5MB) còn thấp hơn — việc của firmware.
+            bin: { path: `${basePath}/video.bin`, contentType: 'application/octet-stream', maxSize: 25 * 1024 * 1024 }, // 25MB
             voice: { path: `${basePath}/voice.wav`, contentType: 'audio/wav', maxSize: 2 * 1024 * 1024 }, // 2MB
             original_video: { path: `${basePath}/original.mp4`, contentType: 'video/mp4', maxSize: 50 * 1024 * 1024 }, // 50MB
             original_image: { path: `${basePath}/original.jpg`, contentType: 'image/jpeg', maxSize: 10 * 1024 * 1024 }, // 10MB
@@ -112,13 +116,38 @@ class MessageService {
         return this.msgRepo.listMessages(boxId, limit);
     }
     /**
-     * Lấy chi tiết 1 tin nhắn
+     * Lấy chi tiết 1 tin nhắn, kèm signed URL đọc được cho web xem lại.
+     *
+     * Các trường *_url trong RTDB là storage path thô (confirmMessage), trình
+     * duyệt không mở được vì storage.rules chặn mọi thứ trừ box. Chỉ ký các file
+     * trình duyệt phát được — KHÔNG ký bin_url (định dạng SLBX riêng của hộp).
      */
     async getMessageDetails(boxId, messageId) {
         const msg = await this.msgRepo.getMessage(boxId, messageId);
         if (!msg)
             throw new error_handler_middleware_1.AppError(404, 'message_not_found', 'Message not found');
-        return msg;
+        const sources = {
+            video: msg.video_url,
+            image: msg.image_url || msg.gif_url,
+            thumbnail: msg.thumbnail_url,
+            voice: msg.voice_url,
+            bg_music: msg.bg_music_url,
+        };
+        const media = {};
+        await Promise.all(Object.keys(sources).map(async (key) => {
+            const path = sources[key];
+            if (!path)
+                return;
+            try {
+                media[key] = await this.storageRepo.generateDownloadUrl(path, MEDIA_URL_MINUTES);
+            }
+            catch (error) {
+                // Một file hỏng không được làm hỏng cả popup — thiếu file nào thì
+                // web ẩn đúng phần đó.
+                console.error(`[MessageService] Failed to sign ${path}`, error);
+            }
+        }));
+        return { ...msg, media };
     }
 }
 exports.MessageService = MessageService;

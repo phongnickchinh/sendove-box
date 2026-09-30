@@ -66,6 +66,10 @@ class FirebaseStorageRepository {
         const file = bucket.file(filePath);
         await file.download({ destination: localDestination });
     }
+    async downloadToBuffer(filePath) {
+        const [buf] = await firebase_1.storage.bucket().file(filePath).download();
+        return buf;
+    }
     /**
      * Uploads a local file to Storage.
      */

@@ -128,12 +128,19 @@ exports.createAlarmSchema = {
     time: { type: 'string', required: true, pattern: ALARM_TIME_PATTERN },
     is_enable: { type: 'boolean', required: true },
     repeatable: { type: 'boolean', required: true },
+    // "" = không nhạc (tiếng bíp). < 24 ký tự: buffer musicId[24] của firmware.
+    music_id: { type: 'string', maxLength: 23 },
+    volume: { type: 'number', min: 0, max: 100 },
+    ramp: { type: 'boolean' },
 };
 /** PATCH /boxes/:boxId/alarms/:alarmId */
 exports.updateAlarmSchema = {
     time: { type: 'string', pattern: ALARM_TIME_PATTERN },
     is_enable: { type: 'boolean' },
     repeatable: { type: 'boolean' },
+    music_id: { type: 'string', maxLength: 23 },
+    volume: { type: 'number', min: 0, max: 100 },
+    ramp: { type: 'boolean' },
 };
 /** POST /device/register */
 exports.registerDeviceSchema = {
@@ -146,5 +153,6 @@ exports.heartbeatSchema = {
     battery: { type: 'number', min: 0, max: 100 },
     charging: { type: 'boolean' },
     fw_version: { type: 'string', maxLength: 20 },
+    storage_type: { type: 'string', enum: ['sd', 'nand'] },
 };
 //# sourceMappingURL=validation.middleware.js.map

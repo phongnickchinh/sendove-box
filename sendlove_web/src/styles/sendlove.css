@@ -747,6 +747,17 @@
 /* nút chọn nguồn âm thanh: thu trực tiếp / chọn file */
 .sl-srcpick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); width: 100%; }
 
+/* ---------- ảnh thu nhỏ thay chip icon trong dòng tin nhắn (MessageRow) ---------- */
+.sl-thumb { position: relative; overflow: hidden; background: var(--chip-bg); }
+.sl-thumb > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sl-thumb__badge {
+  position: absolute; right: 3px; bottom: 3px;
+  width: 16px; height: 16px; border-radius: var(--r-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .55); color: #FFFFFF;
+}
+.sl-thumb__badge svg { fill: currentColor; stroke: none; }
+
 /* ---------- toast (components/ui/Toast.jsx) ----------
    fixed ở mép trên VIEWPORT, không phải đầu trang: nút lưu thường nằm cuối trang dài. */
 .sl-toast {

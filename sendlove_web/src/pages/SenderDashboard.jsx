@@ -5,9 +5,10 @@ import { getBoxDetails } from '../api/box';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
 import MessageDetail from '../components/MessageDetail';
+import MessageRow from '../components/MessageRow';
 import UnpairConfirm from '../components/UnpairConfirm';
 import { Screen, AppBar, Body, Actions, Header, Button, Tips, CircleIcon } from '../components/ui/Screen';
-import { clock, dayLabel, iconOf, kindOf, timeAgo, titleOf } from '../utils/messageFormat';
+import { clock, dayLabel, kindOf, timeAgo } from '../utils/messageFormat';
 import { lastSeenMs } from '../utils/boxStatus';
 
 /**
@@ -140,23 +141,8 @@ export default function SenderDashboard() {
                   {showDay && (
                     <span className="sl-caption" style={{ color: 'var(--neutral-400)', marginTop: 'var(--sp-1)' }}>{day}</span>
                   )}
-                  <button type="button" className="sl-listcard sl-msgrow" style={{ alignItems: 'flex-start' }}
-                    onClick={() => setOpenMsg(msg)}>
-                    <span className="sl-chip sl-chip--muted">
-                      <Icon name={iconOf(msg)} size={20} />
-                    </span>
-                    <span className="sl-listcard__mid">
-                      <span className="sl-label-s">{titleOf(msg)}</span>
-                      <span className="sl-caption" style={{
-                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                      }}>
-                        {msg.text || 'Không kèm dòng chữ nào'}
-                      </span>
-                    </span>
-                    <span className="sl-caption" style={{ color: 'var(--neutral-400)', flex: '0 0 auto' }}>
-                      {clock(msg.timestamp)}
-                    </span>
-                  </button>
+                  <MessageRow msg={msg} meta={clock(msg.timestamp)} noText="Không kèm dòng chữ nào"
+                    onOpen={() => setOpenMsg(msg)} />
                 </React.Fragment>
               );
             })}

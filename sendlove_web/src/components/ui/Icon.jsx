@@ -252,6 +252,28 @@ const PATHS = {
 
   /* Hộp thư — thay cho "heart" ở dòng "Love to <tên>" trong Header, đúng
      ẩn dụ mailbox của Figma (solar:mailbox-linear) hơn là trái tim. */
+  play: <path d="M8 5.5l11 6.5-11 6.5z" />,
+  pause: (
+    <>
+      <path d="M8.5 5.5v13" />
+      <path d="M15.5 5.5v13" />
+    </>
+  ),
+  stop: <rect x="6.5" y="6.5" width="11" height="11" rx="2" />,
+  pencil: (
+    <>
+      <path d="M4 20l1-4.5L15.5 5a2.1 2.1 0 013 3L8 18.5z" />
+      <path d="M13.5 7l3 3" />
+    </>
+  ),
+  replace: (
+    <>
+      <path d="M4 9h13" />
+      <path d="M14 5.5L17.5 9 14 12.5" />
+      <path d="M20 15H7" />
+      <path d="M10 11.5L6.5 15l3.5 3.5" />
+    </>
+  ),
   mailbox: (
     <>
       <path d="M4 11a5 5 0 015-5h6a5 5 0 015 5v7a1 1 0 01-1 1H5a1 1 0 01-1-1z" />

@@ -5,8 +5,9 @@ import { getBoxDetails } from '../api/box';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
 import MessageDetail from '../components/MessageDetail';
+import MessageRow from '../components/MessageRow';
 import { Screen, AppBar, Body, Header, CircleIcon } from '../components/ui/Screen';
-import { iconOf, timeAgo, titleOf } from '../utils/messageFormat';
+import { timeAgo } from '../utils/messageFormat';
 import { fwVersion, lastSeenMs, syncTone } from '../utils/boxStatus';
 
 /**
@@ -136,16 +137,7 @@ export default function ReceiverUI() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[...messages].sort((a, b) => b.timestamp - a.timestamp).map((msg) => (
-              <button type="button" className="sl-listcard sl-msgrow" key={msg.id} onClick={() => setOpenMsg(msg)}>
-                <span className="sl-chip sl-chip--muted">
-                  <Icon name={iconOf(msg)} size={20} />
-                </span>
-                <span className="sl-listcard__mid">
-                  <span className="sl-label-s">{titleOf(msg)}</span>
-                  <span className="sl-caption">{timeAgo(msg.timestamp)}</span>
-                </span>
-                <Icon name="chevron" size={16} style={{ color: 'var(--neutral-400)' }} />
-              </button>
+              <MessageRow key={msg.id} msg={msg} meta={timeAgo(msg.timestamp)} onOpen={() => setOpenMsg(msg)} />
             ))}
           </div>
         )}

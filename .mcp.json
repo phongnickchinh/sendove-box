@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "konnect": {
+      "command": "C:\\KiCad3rdparty\\plugins\\com_github_mixelpixx_konnect\\bin\\konnect.exe"
+    }
+  }
+}

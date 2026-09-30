@@ -5,6 +5,7 @@ import { listMusic } from '../api/music';
 import { useAuth } from '../context/AuthContext';
 import Icon from '../components/ui/Icon';
 import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal, Tips } from '../components/ui/Screen';
+import { useToast } from '../components/ui/Toast';
 
 /**
  * Màn 10 "alarm config dialog" + màn 12 "alarm config full".
@@ -35,6 +36,7 @@ export default function ReceiverAlarms() {
   const [editing, setEditing] = useState(null); // null | { id?, time, repeatable, music_id, volume, ramp }
   const [saving, setSaving] = useState(false);
   const [music, setMusic] = useState([]);
+  const [toast, showToast] = useToast();
 
   const load = useCallback(async () => {
     try {
@@ -63,7 +65,7 @@ export default function ReceiverAlarms() {
     try {
       await updateAlarm(boxId, alarm.id, { is_enable: !alarm.is_enable });
     } catch {
-      setError('Không lưu được. Đang tải lại danh sách.');
+      showToast('Không lưu được. Đang tải lại danh sách.', 'err');
       load();
     }
   };
@@ -79,14 +81,17 @@ export default function ReceiverAlarms() {
         ramp: editing.ramp,
       };
       if (editing.id) {
-        await updateAlarm(boxId, editing.id, fields);
+        // Đổi giờ một báo thức đang tắt = muốn nó kêu vào giờ mới → bật luôn.
+        // Chỉ sửa nhạc / âm lượng thì giữ nguyên trạng thái bật-tắt.
+        const wake = editing.time !== editing.origTime && !editing.origEnabled;
+        await updateAlarm(boxId, editing.id, wake ? { ...fields, is_enable: true } : fields);
       } else {
         await createAlarm(boxId, { ...fields, is_enable: true });
       }
       setEditing(null);
       await load();
     } catch (err) {
-      setError(err.response?.data?.error?.message || 'Không lưu được báo thức.');
+      showToast(err.response?.data?.error?.message || 'Không lưu được báo thức.', 'err');
     } finally {
       setSaving(false);
     }
@@ -99,7 +104,7 @@ export default function ReceiverAlarms() {
       setEditing(null);
       await load();
     } catch {
-      setError('Không xoá được báo thức.');
+      showToast('Không xoá được báo thức.', 'err');
     } finally {
       setSaving(false);
     }
@@ -139,6 +144,7 @@ export default function ReceiverAlarms() {
                   onClick={() => setEditing({
                     id: a.id, time: a.time, repeatable: a.repeatable,
                     music_id: a.music_id || '', volume: a.volume ?? DEFAULT_VOLUME, ramp: a.ramp ?? true,
+                    origTime: a.time, origEnabled: a.is_enable,
                   })}
                   style={{ border: 'none', background: 'none', padding: 0, textAlign: 'left', cursor: 'pointer' }}
                 >
@@ -195,14 +201,31 @@ export default function ReceiverAlarms() {
         {full && <Tips>Hộp chứa được 10 báo thức. Xoá bớt một cái để có chỗ cho cái mới.</Tips>}
       </Body>
 
-      {editing && (
+      {toast}
+
+      {/* Xác nhận xoá là một BƯỚC trong cùng modal, không phải modal chồng: mỗi Modal gắn
+          một listener Esc riêng, hai modal chồng nhau sẽ đóng cùng lúc. */}
+      {editing?.confirmDelete && (
+        <Modal onClose={saving ? undefined : () => setEditing({ ...editing, confirmDelete: false })}>
+          <span className="sl-heading">Xoá báo thức {editing.origTime}?</span>
+          <span className="sl-body">Hộp sẽ không kêu vào giờ này nữa. Không hoàn tác được.</span>
+          <Button kind="dan" onClick={remove} disabled={saving}>
+            {saving ? 'Đang xoá…' : 'Xoá báo thức'}
+          </Button>
+          <Button kind="gho" onClick={() => setEditing({ ...editing, confirmDelete: false })} disabled={saving}>
+            Giữ lại
+          </Button>
+        </Modal>
+      )}
+
+      {editing && !editing.confirmDelete && (
         <Modal onClose={saving ? undefined : () => setEditing(null)}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--sp-2)' }}>
             <div className="sl-listcard__mid">
               <span className="sl-heading">{editing.id ? 'Sửa báo thức' : 'Thêm báo thức'}</span>
               <span className="sl-caption">Hộp sẽ kêu vào giờ này.</span>
             </div>
-            <button type="button" className="sl-iconbtn" onClick={() => setEditing(null)} aria-label="Đóng">
+            <button type="button" className="sl-iconbtn" onClick={() => setEditing(null)} disabled={saving} aria-label="Đóng">
               <Icon name="x" size={20} />
             </button>
           </div>
@@ -288,7 +311,8 @@ export default function ReceiverAlarms() {
             {saving ? 'Đang lưu…' : 'Lưu báo thức'}
           </Button>
           {editing.id ? (
-            <Button kind="gho" onClick={remove} disabled={saving} style={{ color: 'var(--error-text)' }}>
+            <Button kind="gho" onClick={() => setEditing({ ...editing, confirmDelete: true })} disabled={saving}
+              style={{ color: 'var(--error-text)' }}>
               Xoá báo thức này
             </Button>
           ) : (

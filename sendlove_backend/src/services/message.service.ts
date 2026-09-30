@@ -146,8 +146,20 @@ export class MessageService {
   /**
    * Lấy danh sách tin nhắn (cho Receiver xem lịch sử)
    */
-  async getMessages(boxId: string, limit?: number): Promise<Message[]> {
-    return this.msgRepo.listMessages(boxId, limit);
+  async getMessages(boxId: string, limit?: number): Promise<(Message & { thumbnail?: string })[]> {
+    const messages = await this.msgRepo.listMessages(boxId, limit);
+    // Ảnh thu nhỏ cho từng dòng danh sách: chỉ ký thumbnail (nhỏ, ≤ 1 MB), song song.
+    // Mỗi chữ ký là một lời gọi IAM signBlob — tối đa `limit` (≤ 100) lời gọi mỗi request.
+    // Ký hỏng thì dòng đó hiện icon như cũ, không làm hỏng cả danh sách.
+    return Promise.all(messages.map(async (msg) => {
+      if (!msg.thumbnail_url) return msg;
+      try {
+        return { ...msg, thumbnail: await this.storageRepo.generateDownloadUrl(msg.thumbnail_url, MEDIA_URL_MINUTES) };
+      } catch (error) {
+        console.error(`[MessageService] Failed to sign ${msg.thumbnail_url}`, error);
+        return msg;
+      }
+    }));
   }
 
   /**

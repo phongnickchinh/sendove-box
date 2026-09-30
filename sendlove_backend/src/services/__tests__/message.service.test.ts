@@ -72,3 +72,30 @@ describe('MessageService.getMessageDetails', () => {
     await expect(service.getMessageDetails('b', 'x')).rejects.toBeInstanceOf(AppError);
   });
 });
+
+describe('MessageService.getMessages', () => {
+  it('ký thumbnail cho từng tin có ảnh thu nhỏ, bỏ qua tin không có', async () => {
+    const { msgRepo, storageRepo, service } = makeRepos();
+    msgRepo.listMessages.mockResolvedValue([
+      { id: 'a', type: 'video', timestamp: 2, thumbnail_url: 't/a.jpg' },
+      { id: 'b', type: 'text', timestamp: 1, text: 'hi' },
+    ]);
+
+    const res = await service.getMessages('box', 20);
+
+    expect(res[0].thumbnail).toBe('https://signed/t/a.jpg');
+    expect(res[1]).not.toHaveProperty('thumbnail');
+    expect(storageRepo.generateDownloadUrl).toHaveBeenCalledTimes(1);
+    expect(msgRepo.listMessages).toHaveBeenCalledWith('box', 20);
+  });
+
+  it('một thumbnail ký lỗi không làm hỏng danh sách', async () => {
+    const { msgRepo, storageRepo, service } = makeRepos();
+    msgRepo.listMessages.mockResolvedValue([{ id: 'a', type: 'image', timestamp: 1, thumbnail_url: 'x.jpg' }]);
+    storageRepo.generateDownloadUrl.mockRejectedValue(new Error('boom'));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await service.getMessages('box');
+    expect(res).toEqual([{ id: 'a', type: 'image', timestamp: 1, thumbnail_url: 'x.jpg' }]);
+  });
+});

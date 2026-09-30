@@ -137,14 +137,24 @@ export default function ThemePicker() {
         )}
 
         <Actions>
-          <Button kind="pri" disabled={!draft}
-            onClick={() => navigate(`/box/${boxId}/receiver/theme/edit`, { state: draft })}>
-            Sửa giao diện này
-          </Button>
-          <Button kind="gho" disabled={!draft || selected === 'saved'}
-            onClick={() => navigate(`/box/${boxId}/receiver/theme/send`, { state: draft })}>
-            Dùng luôn mẫu này
-          </Button>
+          {/* Giao diện đã lưu: việc chính là sửa nó. Mẫu có sẵn: việc chính là dùng luôn. */}
+          {selected === 'saved' ? (
+            <Button kind="pri" disabled={!draft}
+              onClick={() => navigate(`/box/${boxId}/receiver/theme/edit`, { state: draft })}>
+              Sửa giao diện này
+            </Button>
+          ) : (
+            <>
+              <Button kind="pri" disabled={!draft}
+                onClick={() => navigate(`/box/${boxId}/receiver/theme/send`, { state: draft })}>
+                Dùng mẫu này
+              </Button>
+              <Button kind="sec" disabled={!draft}
+                onClick={() => navigate(`/box/${boxId}/receiver/theme/edit`, { state: draft })}>
+                Sửa trước khi dùng
+              </Button>
+            </>
+          )}
         </Actions>
       </Body>
     </Screen>

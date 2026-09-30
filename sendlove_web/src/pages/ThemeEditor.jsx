@@ -356,7 +356,7 @@ export default function ThemeEditor() {
             </span>
           </div>
           {!bg && !bgBusy && (
-            <button type="button" className="sl-btn sl-btn--gho" onClick={() => changeBg(() => loadDefaultBackground(DEFAULT_BG_URL))}
+            <button type="button" className="sl-btn sl-btn--sec" onClick={() => changeBg(() => loadDefaultBackground(DEFAULT_BG_URL))}
               style={{ minHeight: 36, padding: '0 var(--sp-3)' }}>
               Nền mặc định
             </button>
@@ -366,7 +366,7 @@ export default function ThemeEditor() {
               <Icon name="trash" size={18} />
             </button>
           )}
-          <label className="sl-btn sl-btn--gho" style={{ minHeight: 36, padding: '0 var(--sp-3)', cursor: 'pointer' }}>
+          <label className="sl-btn sl-btn--sec" style={{ minHeight: 36, padding: '0 var(--sp-3)', cursor: 'pointer' }}>
             {bg ? 'Đổi' : 'Chọn ảnh'}
             <input type="file" accept="image/*" onChange={pickBackground} disabled={bgBusy} style={{ display: 'none' }} />
           </label>

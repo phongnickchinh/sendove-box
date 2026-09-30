@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getMessageDetails } from '../api/message';
 import { fullDate, iconOf, isStatic, titleOf } from '../utils/messageFormat';
 import Icon from './ui/Icon';
-import { Button, Modal } from './ui/Screen';
+import { Modal } from './ui/Screen';
 
 /**
  * Popup "message-detail-popup" (+ biến thể voice), dùng chung cho người gửi
@@ -67,8 +67,6 @@ export default function MessageDetail({ boxId, message, onClose }) {
           <p className="sl-body" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.text}</p>
         </div>
       )}
-
-      <Button kind="gho" onClick={onClose}>Đóng</Button>
     </Modal>
   );
 }

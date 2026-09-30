@@ -406,7 +406,7 @@ function AddMusicModal({ boxId, initial, onClose, onSaved }) {
             Hộp kêu tối đa 1 phút; đoạn ngắn hơn sẽ phát lặp lại. Âm thanh được đổi sang 16 kHz mono cho loa của hộp.
           </span>
 
-          <Button kind="gho" onClick={listen} disabled={stage === 'saving'}>Nghe thử đoạn này</Button>
+          <Button kind="sec" onClick={listen} disabled={stage === 'saving'}>Nghe thử đoạn này</Button>
         </>
       )}
 

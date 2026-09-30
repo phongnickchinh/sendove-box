@@ -144,7 +144,7 @@ export default function SenderUI() {
           </div>
 
           <Actions>
-            <Button kind="gho" onClick={() => navigate(`/box/${boxId}/sender/dashboard`)}>
+            <Button kind="sec" onClick={() => navigate(`/box/${boxId}/sender/dashboard`)}>
               Lịch sử tin nhắn
             </Button>
           </Actions>

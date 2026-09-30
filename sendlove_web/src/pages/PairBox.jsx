@@ -120,17 +120,10 @@ export default function PairBox() {
             />
           </label>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-4)', marginTop: 'var(--sp-2)' }}>
-            <Button kind="pri" type="submit" disabled={isLoading} block={false} style={{ minWidth: 134 }}>
-              {isLoading ? 'Đang ghép đôi…' : 'Ghép đôi ngay'}
-            </Button>
-            <button
-              type="button" onClick={() => navigate('/dashboard')}
-              style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--caramel-800)', fontFamily: 'var(--font)', fontSize: 14, fontWeight: 600 }}
-            >
-              Huỷ
-            </button>
-          </div>
+          {/* Nút chính tràn ngang như mọi màn khác; thoát bằng nút X ở góc (bỏ "Huỷ" trùng lặp). */}
+          <Button kind="pri" type="submit" disabled={isLoading} style={{ marginTop: 'var(--sp-2)' }}>
+            {isLoading ? 'Đang ghép đôi…' : 'Ghép đôi ngay'}
+          </Button>
         </form>
       </Body>
     </Screen>

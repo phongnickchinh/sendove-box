@@ -211,6 +211,12 @@
 .sl-btn--dan { background: var(--error-fill); color: #FFFFFF; }
 .sl-btn--dan:hover:not(:disabled) { filter: brightness(.94); }
 .sl-btn--block { width: 100%; }
+/* Thứ bậc nút: mỗi màn MỘT nút hồng đặc (việc chính); việc quan trọng thứ hai = nút
+   viền (sec); huỷ/đóng/để sau = chữ trơn (gho); đỏ đặc chỉ ở bước xác nhận xoá (dan). */
+.sl-btn--sec { background: transparent; color: var(--text-accent); box-shadow: inset 0 0 0 1px var(--text-accent); }
+.sl-btn--sec:hover:not(:disabled) { background: var(--rose-50); }
+/* Nút chính bị khoá: xám trung tính — hồng nhạt trông vẫn như bấm được. */
+.sl-btn--pri:disabled { background: var(--neutral-100); color: var(--neutral-500); opacity: 1; }
 
 /* ---------- acts(): hàng nút ghim đáy, cách safe-area 34 ----------
    Nằm trong .sl-body-col nên thừa hưởng padding ngang 20 của thân; 24 ở đây

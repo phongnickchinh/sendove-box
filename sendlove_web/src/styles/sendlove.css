@@ -256,14 +256,17 @@
 .sl-typecard:hover { border-color: var(--rose-400); background: var(--rose-50); }
 
 /* ---------- scrim + modal (nơi DUY NHẤT có đổ bóng) ---------- */
+/* fixed theo VIEWPORT, không absolute theo .sl-shell: shell cao bằng cả trang, nên trên
+   trang dài popup từng nằm ở đáy trang — ngoài màn hình khi người dùng đang ở đầu trang. */
 .sl-scrim {
-  position: absolute; inset: 0;
+  position: fixed; inset: 0;
   background: rgba(61, 42, 32, 0.45);
   display: flex; flex-direction: column; justify-content: flex-end;
   padding: var(--sp-5) var(--sp-5) calc(var(--safe-bottom) + 34px);
   z-index: 10;
 }
 .sl-modal {
+  width: 100%; max-width: calc(var(--frame-w) - 40px); margin-inline: auto;
   display: flex; flex-direction: column; gap: var(--sp-4);
   padding: var(--sp-6);
   border-radius: var(--r-lg);

@@ -82,7 +82,9 @@ export const WIDGET_TYPES = {
 
 export const MAX_WIDGETS = 8;
 
-export const isVlw = (w) => w.font === VLW_KEY[w.type];
+// Loại không có phông (pin, Wi-Fi): VLW_KEY[type] và w.font đều undefined — phải chặn,
+// không thì undefined === undefined coi pin là widget phông và PX_RANGE[type] làm sập editor.
+export const isVlw = (w) => !!VLW_KEY[w.type] && w.font === VLW_KEY[w.type];
 
 /** Ngày như hộp sẽ vẽ, ở thời điểm `now`. */
 export function formatDate(w, now = new Date()) {

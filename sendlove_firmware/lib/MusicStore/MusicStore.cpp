@@ -84,7 +84,7 @@ void load() {
                     e.size = kv.value()["size"] | 0u;
                     e.crc = kv.value()["crc"] | 0u;
                     e.used = kv.value()["used"] | 0u;
-                    // Kiểm size lúc nạp (rẻ), không tính crc (đắt). File sai -> tải lại.
+                    // Check the size at load (cheap), not the crc (expensive). A wrong file -> download again.
                     char path[48];
                     pathFor(e.id, path, sizeof(path));
                     if (SdStore::fileSize(path) == (int32_t)e.size) s_count++;
@@ -111,7 +111,7 @@ bool put(const char* id, uint32_t rev, uint32_t size, uint32_t crc) {
     int i = findLocked(id);
     if (i < 0) {
         if (s_count >= ALARM_MUSIC_MAX_TRACKS) {
-            // Đầy chỗ: bỏ bài lâu nhất không dùng (thường là bài đã bỏ khỏi báo thức).
+            // Full: evict the least recently used track (usually one no alarm uses anymore).
             size_t oldest = 0;
             for (size_t k = 1; k < s_count; k++) {
                 if (s_items[k].used < s_items[oldest].used) oldest = k;
@@ -155,7 +155,7 @@ void pruneExcept(const char (*keepIds)[24], size_t keepCount) {
     if (changed) saveLocked();
     unlock();
 
-    // .part mồ côi (bài đã xoá khi đang tải dở).
+    // Orphan .part files (tracks deleted mid-download).
     SDCardManager* card = SdStore::card();
     if (!card) return;
     struct Ctx {

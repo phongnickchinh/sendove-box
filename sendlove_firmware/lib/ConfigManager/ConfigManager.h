@@ -6,30 +6,30 @@
 #include "config.h"
 
 // ============================================================================
-// ConfigManager — Quản lý cấu hình lưu trữ trên NVS (Non-Volatile Storage)
+// ConfigManager — configuration stored in NVS (Non-Volatile Storage)
 // ============================================================================
-// Chỉ lưu dữ liệu cần tồn tại qua mất điện:
-// - Wi-Fi credentials (SSID + Password)
-// - Wi-Fi backup (rollback khi đổi Wi-Fi thất bại)
+// Holds what must survive a power loss: Wi-Fi credentials (+ a backup for
+// rollback), the sync timestamp, alarms, user settings and the auth token.
 // ============================================================================
 
 struct AlarmItem {
-    // 24 chu khong phai 16: backend sinh id "alarm_<ms>" = 19 ky tu. Ban 16 cu
-    // cat mat duoi -> day nguoc len cloud thanh mot key KHAC. Doi kich thuoc
-    // lam blob NVS cu khong con khop -> loadAlarms() bo qua, lan sync dau tai lai.
+    // 24 chars, not 16: the backend generates ids "alarm_<ms>" = 19 chars. A
+    // 16-char buffer cut the tail off -> pushing it back to the cloud created a
+    // DIFFERENT key. Changing the size makes an old NVS blob no longer match ->
+    // loadAlarms() discards it and the first sync downloads the list again.
     char id[24] = "";
     char time[6] = "00:00"; // "HH:MM"
     bool isEnable = false;
     bool repeatable = false;
-    // Nhạc báo thức (2026-09-24). Rỗng = tiếng bíp. Đổi kích thước struct -> blob NVS cũ
-    // lệch cỡ -> loadAlarms() bỏ blob VÀ hạ cờ dirty (không thì lần sync đầu đẩy danh
-    // sách rỗng lên, xoá sạch báo thức trên cloud).
+    // Alarm music. Empty = beep. Changing the struct size -> an old NVS blob has the
+    // wrong size -> loadAlarms() drops the blob AND clears the dirty flag (otherwise
+    // the first sync would push an empty list and wipe the alarms in the cloud).
     char musicId[24] = "";
-    uint8_t volume = 80;   // 0..100, riêng từng báo thức (user chốt mặc định 80)
-    bool ramp = true;      // tăng dần từ 30% mức đã chọn trong ALARM_RAMP_MS
+    uint8_t volume = 80;   // 0..100, per alarm (product decision: default 80)
+    bool ramp = true;      // fade in from 30% of the chosen level over ALARM_RAMP_MS
 };
 
-/// Cài đặt người dùng đặt trên web (boxes/<id>/config). rev = config_rev lần áp dụng gần nhất.
+/// User settings made on the web (boxes/<id>/config). rev = the config_rev last applied.
 struct UserSettings {
     uint8_t brightness = SETTINGS_DEFAULT_BRIGHTNESS;
     uint8_t volume = SETTINGS_DEFAULT_VOLUME;
@@ -38,77 +38,77 @@ struct UserSettings {
 
 class ConfigManager {
 public:
-    /// Khởi tạo NVS namespace
-    /// @param namespaceName Tên namespace NVS (ví dụ: "sendlove")
-    /// @return true nếu thành công
+    /// Open the NVS namespace
+    /// @param namespaceName NVS namespace (e.g. "sendlove")
+    /// @return true on success
     bool init(const char* namespaceName);
 
-    /// Đóng NVS handle
+    /// Close the NVS handle
     void end();
 
     // --- Wi-Fi Credentials ---
 
-    /// Lưu Wi-Fi credentials vào NVS
-    /// @return true nếu ghi thành công
+    /// Save Wi-Fi credentials to NVS
+    /// @return true if written
     bool saveWiFi(const char* ssid, const char* password);
 
-    /// Đọc Wi-Fi credentials từ NVS
-    /// @param ssid Buffer nhận SSID (tối thiểu WIFI_SSID_MAX_LEN bytes)
-    /// @param password Buffer nhận password (tối thiểu WIFI_PASS_MAX_LEN bytes)
-    /// @return true nếu đọc thành công
+    /// Load Wi-Fi credentials from NVS
+    /// @param ssid buffer for the SSID (at least WIFI_SSID_MAX_LEN bytes)
+    /// @param password buffer for the password (at least WIFI_PASS_MAX_LEN bytes)
+    /// @return true if loaded
     bool loadWiFi(char* ssid, char* password);
 
-    /// Kiểm tra đã có Wi-Fi credentials trong NVS chưa
-    /// @return true nếu đã lưu SSID
+    /// Whether NVS holds Wi-Fi credentials
+    /// @return true if an SSID is stored
     bool hasWiFiConfig();
 
     // --- Wi-Fi Backup (Rollback) ---
 
-    /// Lưu Wi-Fi hiện tại làm backup trước khi đổi sang Wi-Fi mới
+    /// Save the current Wi-Fi as a backup before switching to a new one
     bool saveBackupWiFi(const char* ssid, const char* password);
 
-    /// Đọc Wi-Fi backup
+    /// Load the Wi-Fi backup
     bool loadBackupWiFi(char* ssid, char* password);
 
-    /// Xóa toàn bộ config (factory reset)
+    /// Erase all config (factory reset)
     bool clearAll();
 
     // --- Firebase Sync & Alarms ---
 
-    /// Lưu mốc timestamp (ms) của tin nhắn cuối cùng đã tải
+    /// Save the timestamp (ms) of the last downloaded message
     bool saveLastDownloadTimestamp(uint64_t ts);
 
-    /// Đọc mốc timestamp (ms) của tin nhắn cuối cùng đã tải
+    /// Load the timestamp (ms) of the last downloaded message
     uint64_t loadLastDownloadTimestamp();
 
-    /// Lưu danh sách báo thức
+    /// Save the alarm list
     bool saveAlarms(const AlarmItem* alarms, size_t count);
 
-    /// Đọc danh sách báo thức
+    /// Load the alarm list
     size_t loadAlarms(AlarmItem* alarms, size_t maxCount);
 
-    /// Cờ "danh sách báo thức trong hộp đã sửa (portal / tự tắt báo thức một lần)
-    /// mà chưa đẩy lên cloud". Nằm trong NVS để sống qua lần khởi động lại sau
-    /// khi lưu Wi-Fi trên portal.
+    /// The "alarm list was edited on the box (portal / a one-shot alarm turning
+    /// itself off) and not yet pushed to the cloud" flag. Kept in NVS so it
+    /// survives the reboot that follows saving Wi-Fi on the portal.
     bool saveAlarmDirty(bool dirty);
     bool loadAlarmDirty();
 
-    // --- Cài đặt người dùng (độ sáng, âm lượng) ---
+    // --- User settings (brightness, volume) ---
 
-    /// Chưa từng lưu thì trả giá trị mặc định trong config.h, không phải lỗi.
+    /// If never saved, returns the config.h defaults — not an error.
     void loadSettings(UserSettings& out);
     bool saveSettings(const UserSettings& s);
 
     // --- Firebase Auth ---
 
-    /// Lưu refresh token của Firebase Auth (đổi lấy idToken mới mà không cần
-    /// gửi lại mật khẩu). Token này không hết hạn theo thời gian.
+    /// Save the Firebase Auth refresh token (exchanged for a new idToken without
+    /// resending the password). It doesn't expire with time.
     bool saveRefreshToken(const char* token);
 
-    /// Đọc refresh token. Trả về false nếu chưa từng lưu.
+    /// Load the refresh token. Returns false if never saved.
     bool loadRefreshToken(char* outToken, size_t maxLen);
 
-    /// Xoá refresh token (khi Firebase báo token đã bị thu hồi/không hợp lệ)
+    /// Delete the refresh token (when Firebase reports it revoked/invalid)
     void clearRefreshToken();
 
 private:

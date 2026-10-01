@@ -5,7 +5,7 @@
 #include "NandStorage.h"
 #include "Preferences.h"
 
-/// Implementation của IStorageProvider dành cho chip W25Q128 NAND Flash 16MB
+/// IStorageProvider implementation for the 16MB W25Q128 flash chip
 class NandStorageProvider : public IStorageProvider {
 public:
     NandStorageProvider() = default;
@@ -13,7 +13,7 @@ public:
 
     bool init(SemaphoreHandle_t spiMutex = nullptr) override;
 
-    // --- Thao tác ĐỌC ---
+    // --- READ operations ---
     bool openForRead(const char* identifier) override;
     int readData(uint8_t* buffer, uint32_t len) override;
     void seek(uint32_t offset) override;
@@ -21,7 +21,7 @@ public:
     void closeRead() override;
     StorageItemInfo getItemInfo(const char* identifier = nullptr) const override;
 
-    // --- Thao tác GHI ---
+    // --- WRITE operations ---
     bool openForWrite(const char* identifier) override;
     size_t writeChunk(const uint8_t* data, size_t len) override;
     void closeWrite(uint32_t maxDisplayTime = 60) override;
@@ -29,13 +29,13 @@ public:
     void setItemText(const char* identifier, const char* text) override;
     bool getItemText(const char* identifier, char* outBuf, size_t maxLen) const override;
 
-    /// Ghi tiếp dữ liệu vào slot vừa đóng (dùng để append audio sau video)
+    /// Keep writing into the slot just closed (appends audio after the video)
     bool openForAppend(const char* identifier = nullptr) override;
 
-    /// Chốt append: ghi audioSize vào bảng slot rồi flush ra NAND
+    /// Commit the append: store audioSize in the slot table and flush it to flash
     void closeAppend() override;
 
-    // --- Quản lý Hàng chờ & Slot ---
+    // --- Queue & slot management ---
     bool isFull() const override;
     bool getNextWriteSlotIdentifier(char* outId, size_t maxLen) override;
     bool hasUnreadMessage() const override;
@@ -50,24 +50,25 @@ public:
 private:
     NandStorage _nand;
     Preferences _prefs;
-    /// Mọi slot chưa đọc -> đầy. Suy ra từ NAND_SLOT_COUNT, không hardcode 0x1F.
+    /// All slots unread -> full. Derived from NAND_SLOT_COUNT, not a hardcoded 0x1F.
     static constexpr uint8_t SLOT_ALL_MASK = (uint8_t)((1u << NAND_SLOT_COUNT) - 1u);
 
     uint8_t _unreadBitmask = 0;
-    /// Con trỏ HÀNG CHỜ: slot kế tiếp sẽ nhận tin mới. openForAppend không được đụng vào.
+    /// The QUEUE cursor: the next slot to receive a message. openForAppend must not touch it.
     int8_t _writeSlotIndex = 0;
-    /// Slot đang mở để ghi/append. writeChunk/closeWrite/closeAppend dùng biến này.
+    /// The slot open for write/append. Used by writeChunk/closeWrite/closeAppend.
     int8_t _activeSlot = 0;
     uint32_t _writeOffset = 0;
     uint32_t _slotCapacity = 0;
-    /// Erase-as-you-write: địa chỉ tuyệt đối đã erase tới đâu trong slot đang ghi.
-    /// openForWrite() chỉ erase 1 block 64KB đầu (không erase nguyên slot ~5.3MB —
-    /// từng gây block đồng bộ 15-25s khiến socket HTTP bị TCP Zero-Window/timeout
-    /// giữa chừng). writeChunk() erase thêm từng block khi con trỏ ghi sắp chạm tới.
+    /// Erase-as-you-write: the absolute address erased so far in the slot being
+    /// written. openForWrite() erases only the first 64KB block (erasing a whole
+    /// ~5.3MB slot blocks synchronously for 15-25s, long enough for the HTTP socket
+    /// to hit TCP zero-window/timeout). writeChunk() erases further blocks as the
+    /// write cursor approaches them.
     uint32_t _erasedUpToAddr = 0;
 
     int8_t parseSlotId(const char* identifier) const;
-    /// Số byte vật lý của một slot (slot cuối chạy tới hết chip 16MB)
+    /// Physical size of a slot in bytes (the last slot runs to the end of the 16MB chip)
     static uint32_t slotSpan(int8_t slot);
     void loadNvsState();
     void saveNvsState();

@@ -12,17 +12,15 @@
 class DisplayDriver;
 
 // ============================================================================
-// MediaPlayer — Phát video VJPG / ảnh VIMG từ IStorageProvider (NAND / SD)
+// MediaPlayer — plays VJPG video / VIMG images from IStorageProvider (NAND / SD)
 // ============================================================================
-// Phục vụ Task_MediaPlayer trong kiến trúc FreeRTOS.
-//
-// Cơ chế hoạt động:
-// - Đọc JPEG frame từ IStorageProvider
-// - Giải mã bằng JPEGDEC → callback pushImage lên DisplayDriver
-// - Hỗ trợ 2 mode: VJPG (video lặp vô hạn) và VIMG (ảnh tĩnh)
+// Serves Task_MediaPlayer:
+// - reads JPEG frames from IStorageProvider
+// - decodes with JPEGDEC → the callback pushes pixels to DisplayDriver
+// - two modes: VJPG (video, looping) and VIMG (still image)
 // ============================================================================
 
-/// Trạng thái phát
+/// Playback state
 enum class PlaybackState : uint8_t {
     IDLE,
     PLAYING,
@@ -50,13 +48,13 @@ public:
     /// Test I2S speaker beep
     void testAudioBeep();
 
-    /// Một hồi bíp báo thức (block ~0.6s) ở âm lượng 0..100. Gọi khi player đang IDLE.
+    /// One alarm beep (blocks ~0.6s) at volume 0..100. Call while the player is IDLE.
     void alarmBeep(uint8_t volume);
 
-    /// Phát nhạc báo thức (lặp) từ file trên thẻ. false = không mở/không đọc được ->
-    /// bên gọi dùng tiếng bíp (một nhánh dự phòng duy nhất, case bắt buộc #4).
+    /// Play alarm music (looping) from a file on the card. false = it couldn't be
+    /// opened/read -> the caller falls back to the beep (the single fallback path; mandatory case, MEMORY.md §28).
     bool startAlarmMusic(const char* path, uint8_t volume);
-    /// Gọi mỗi vòng khi đang kêu: đổi âm lượng (tăng dần) + nạp DMA. Không block.
+    /// Call every loop while ringing: updates the volume (ramp) + refills the DMA. Non-blocking.
     void tickAlarmMusic(uint8_t volume);
     bool isAlarmMusicPlaying() const { return _alarmMusic; }
 
@@ -70,8 +68,8 @@ public:
 private:
     static constexpr size_t JPEG_BUFFER_SIZE = 32 * 1024;
 
-    // Khoảng nghỉ tối thiểu giữa hai lần giải mã. Chặn trường hợp hai frame
-    // dính liền nhau — đó là lúc dòng tiêu thụ vọt lên và làm sụt áp.
+    // Minimum idle time between two decodes. Prevents back-to-back frames — that
+    // is when the current draw spikes and the supply sags.
     static constexpr uint32_t FRAME_MIN_IDLE_MS = 2;
 
     IStorageProvider* _storage = nullptr;
@@ -79,13 +77,14 @@ private:
     PlaybackState     _state   = PlaybackState::IDLE;
     SemaphoreHandle_t _playerMutex = nullptr;
 
-    // 17.884 byte — thành phần to nhất của cả appCtx (24.508 byte RAM tĩnh), nhưng
-    // chỉ sống trong _jpeg->decode(). Để nó là member trực tiếp nghĩa là giữ 17,9KB
-    // BSS suốt đời máy, đúng loại RAM mà mbedTLS cần khối ~16KB liền mạch, đúng lúc
-    // hộp đứng ở màn hình chờ bắt tay TLS (§21). Cấp/giải phóng cùng nhịp với
-    // _jpegBuffer: đỉnh RAM lúc phát không đổi, chỉ lúc chờ mới dư ra.
-    // An toàn: openRAM() mở đầu bằng memset(&_jpeg, 0, sizeof(JPEGIMAGE)) nên đối
-    // tượng cấp trên heap với rác vẫn đúng — nó không dựa vào BSS được xoá sẵn.
+    // 17,884 bytes — the largest piece of the whole appCtx (24,508 bytes of static
+    // RAM), yet only alive inside _jpeg->decode(). As a direct member it would hold
+    // 17.9KB of BSS for the box's whole uptime — exactly the RAM mbedTLS needs as a
+    // ~16KB contiguous block while the box sits on standby doing a TLS handshake
+    // (MEMORY.md §21). It is allocated/freed together with _jpegBuffer: peak RAM
+    // during playback is unchanged, and the idle state gets the memory back.
+    // Safe: openRAM() starts with memset(&_jpeg, 0, sizeof(JPEGIMAGE)), so a
+    // heap object with garbage is fine — it doesn't rely on zeroed BSS.
     JPEGDEC* _jpeg          = nullptr;
     uint8_t* _jpegBuffer    = nullptr;
     int8_t   _currentSlot   = -1;
@@ -93,22 +92,22 @@ private:
     uint16_t _fps          = 10;
     uint16_t _totalFrames  = 0;
     uint16_t _currentFrame = 0;
-    uint32_t _nextFrameDeadline = 0;   // Mốc millis() của frame kế; cộng dồn để không trôi
+    uint32_t _nextFrameDeadline = 0;   // millis() deadline of the next frame; accumulated so it doesn't drift
     uint32_t _currentDataSize = 0;
-    uint32_t _currentAudioSize = 0;   // Byte audio nối sau video (từ SlotEntry.audioSize)
+    uint32_t _currentAudioSize = 0;   // audio bytes appended after the video (from SlotEntry.audioSize)
     uint32_t _frameBaseOffset = 0;
     bool     _readFrameSizeHeader = true;
-    bool     _lastFrameSkipped = false;  // Không bỏ hai frame liên tiếp
+    bool     _lastFrameSkipped = false;  // never skip two frames in a row
 
-    bool     _alarmMusic    = false;  // đang phát nhạc báo thức (không có video)
+    bool     _alarmMusic    = false;  // playing alarm music (no video)
 
     bool     _isSlbxRgb565  = false;
     uint16_t _slbxWidth     = 128;
     uint16_t _slbxHeight    = 160;
 
     /// Decode and render single JPEG frame.
-    /// skipRender = true: vẫn nuốt đúng số byte của frame để giữ vị trí file,
-    /// nhưng bỏ phần đắt nhất: giải mã JPEG và đẩy nguyên frame qua SPI.
+    /// skipRender = true: still consume the frame's bytes to keep the file position,
+    /// but skip the expensive part: decoding the JPEG and pushing the frame over SPI.
     bool decodeOneFrame(bool skipRender);
 
     /// Callback function for JPEGDEC pixel output

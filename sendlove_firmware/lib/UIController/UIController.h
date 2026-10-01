@@ -9,18 +9,13 @@ class DisplayDriver;
 // ============================================================================
 // UIController — Touch Debounce + Display UI
 // ============================================================================
-// Phục vụ Task_UI_Controller trong kiến trúc FreeRTOS.
-//
-// Chống nhiễu tín hiệu chạm TTP223 + màn hình chào lúc boot.
-//
-// Các hàm LED (breathing/solid/blink) đã bị xoá 2026-09-18: bo mạch chưa nối chân
-// LED nào (PIN_LED vẫn đang comment trong config.h), thân hàm rỗng, và updateLED()
-// được gọi mỗi 10ms trong vòng lặp chính chỉ để không làm gì. Đồng hồ và thanh pin
-// giờ do LayoutEngine vẽ.
+// Serves Task_UIController: debounces the TTP223 touch signal and shows the boot
+// screen. There are no LED functions (no LED pin is wired; PIN_LED is commented
+// out in config.h). The clock and battery bar are drawn by LayoutEngine.
 // ============================================================================
 
-// VERY_LONG_PRESS: giữ TOUCH_OTA_HOLD_MS (6s) — bước cuối của chuỗi chạm OTA
-// (main.cpp). LONG_PRESS 3s vẫn bắn trước trong cùng một lần giữ.
+// VERY_LONG_PRESS: a TOUCH_OTA_HOLD_MS (6s) hold — the last step of the OTA touch
+// sequence (main.cpp). The 3s LONG_PRESS still fires first within the same hold.
 enum class TouchEvent { NONE, SHORT_PRESS, LONG_PRESS, VERY_LONG_PRESS };
 
 /// UI controller and touch debounce manager
@@ -35,8 +30,8 @@ public:
     /// Show startup boot logo screen
     void showBootScreen();
 
-    /// Đang giữ bao lâu (ms), 0 khi không chạm. Để task render vẽ thanh tiến trình
-    /// cho cú giữ 6s cuối của chuỗi OTA.
+    /// How long the touch has been held (ms), 0 when not touching. Lets the render
+    /// task draw the progress bar for the final 6s hold of the OTA sequence.
     uint32_t getTouchHoldMs() const { return _touchHoldMs; }
 
 private:
@@ -49,8 +44,9 @@ private:
     uint32_t _touchStartTime   = 0;
     bool     _longPressEmitted = false;
     bool     _veryLongEmitted  = false;
-    // Ghi ở Task_UIController, đọc ở Task_MediaPlayer. Một từ 32-bit căn lề nên
-    // đọc/ghi là nguyên tử trên RV32; chỉ dùng để vẽ, lệch một nhịp là vô hại.
+    // Written by Task_UIController, read by Task_MediaPlayer. One aligned 32-bit
+    // word, so reads/writes are atomic on RV32; it is only used for drawing, and
+    // being one tick stale is harmless.
     volatile uint32_t _touchHoldMs = 0;
 };
 

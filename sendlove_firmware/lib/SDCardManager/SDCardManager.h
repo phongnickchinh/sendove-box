@@ -6,150 +6,153 @@
 #include <SPI.h>
 
 // ============================================================================
-// SDCardManager — Quản lý file system trên thẻ MicroSD + SPI Mutex
+// SDCardManager — MicroSD file system access + the SPI mutex
 // ============================================================================
-// Module chia sẻ — được gọi bởi:
-// - NetworkHandler (ghi file tải từ Firebase)
-// - MediaPlayer (đọc file để phát)
+// Shared module, used by:
+// - the network layer (writes files downloaded from Firebase)
+// - MediaPlayer (reads files for playback)
 //
-// Mọi thao tác SPI đều bọc trong xSemaphoreTake/Give(spiMutex)
-// để tránh xung đột với DisplayDriver (cùng bus SPI).
+// Every SPI operation is wrapped in xSemaphoreTake/Give(spiMutex) to avoid
+// clashing with DisplayDriver (same SPI bus).
 //
-// RANH GIỚI MODULE: file này chỉ biết tới đường dẫn, file handle và bus SPI.
-// Toàn bộ ngữ nghĩa slot / manifest / hàng chờ nằm ở SDStorageProvider —
-// đúng cách chia NandStorage / NandStorageProvider.
+// MODULE BOUNDARY: this file only knows paths, file handles and the SPI bus.
+// All slot / manifest / queue semantics live in SDStorageProvider — the same
+// split as NandStorage / NandStorageProvider.
 //
-// BỐN FILE HANDLE thường trú + handle tạm của readFile/readFileAt (SD.begin dành sẵn
-// max_files = 7 từ 2026-09-24; trước đó 5 cho 3 handle):
-//   _genFile   : ghi file tổng quát (nhạc, theme) của WakeSync, không đụng đường tải tin.
-//                CHỈ Task_WakeSync dùng: openGenWrite() đóng handle đang mở, nên task khác
-//                dùng chung sẽ cướp file đang tải (log dùng appendFile(), 2026-09-24).
-//   _writeFile : đường ghi (download)
-//   _readFile  : đọc tuần tự cho MediaPlayer (con trỏ do provider quản)
-//   _atFile    : đọc ngẫu nhiên cho AudioPlayer — PHẢI là handle RIÊNG, vì
-//                readAt() không được phép đụng con trỏ tuần tự (xem
-//                IStorageProvider.h:44-47). Seek-rồi-seek-lại trên một handle
-//                chung chính là bug mà comment đó tồn tại để chặn.
+// FOUR resident FILE HANDLES + the temporary one of readFile/readFileAt
+// (SD.begin reserves max_files = 7):
+//   _genFile   : general file writes (music, theme) for WakeSync, separate from the
+//                message download path. Task_WakeSync ONLY: openGenWrite() closes
+//                the open handle, so another task sharing it would hijack the file
+//                being downloaded (the log uses appendFile() instead).
+//   _writeFile : the write (download) path
+//   _readFile  : sequential reads for MediaPlayer (cursor managed by the provider)
+//   _atFile    : random reads for AudioPlayer — MUST be a SEPARATE handle, because
+//                readAt() must not move the sequential cursor (see readAt in
+//                IStorageProvider.h). Seek-then-seek-back on a shared handle is
+//                exactly the bug that rule exists to prevent.
 // ============================================================================
 
 class SDCardManager {
 public:
-    /// Khởi tạo SD card
-    /// @param csPin Chân Chip Select cho SD module
-    /// @param spiMutex Mutex chia sẻ bus SPI (tạo trong main.cpp)
-    /// @return true nếu mount thành công
+    /// Initialize the SD card
+    /// @param csPin Chip Select pin of the SD module
+    /// @param spiMutex mutex guarding the shared SPI bus (created in main.cpp)
+    /// @return true if the card mounted
     bool init(uint8_t csPin, SemaphoreHandle_t spiMutex);
 
-    /// Thẻ đã mount được hay chưa. Không mount được KHÔNG phải lỗi chí mạng:
-    /// thẻ rút ra được, provider phải chạy tiếp ở chế độ rỗng.
+    /// Whether the card is mounted. Failing to mount is NOT fatal: the card is
+    /// removable, and the provider must keep running in empty mode.
     bool isMounted() const { return _mounted; }
 
     // --- Write Operations ---
 
-    /// Ghi dữ liệu vào file (tạo mới hoặc ghi đè)
-    /// @return Số bytes đã ghi, hoặc -1 nếu lỗi
+    /// Write data to a file (create or overwrite)
+    /// @return bytes written, or -1 on error
     int32_t writeFile(const char* path, const uint8_t* data, size_t len);
 
-    /// Ghi tiếp vào cuối file (tạo nếu chưa có), mở-ghi-đóng trong một lần giữ mutex
-    /// @return Số bytes đã ghi, hoặc -1 nếu lỗi
+    /// Append to a file (create if missing); open-write-close under one mutex hold
+    /// @return bytes written, or -1 on error
     int32_t appendFile(const char* path, const uint8_t* data, size_t len);
 
-    /// Mở file để ghi stream (cắt sạch nội dung cũ)
+    /// Open a file for streamed writing (truncates existing content)
     bool openFileForWrite(const char* path);
 
-    /// Mở lại file đã có để ghi tiếp tại offset chỉ định (mode "r+", không cắt file).
-    /// Dùng cho đường append audio nối sau video.
+    /// Reopen an existing file to keep writing at a given offset (mode "r+", no truncation).
+    /// Used to append audio after the video.
     bool openFileForAppend(const char* path, uint32_t atOffset);
 
-    /// Ghi thêm chunk dữ liệu vào file đang mở
-    /// @return Số bytes đã ghi. Trả về ÍT HƠN len khi lỗi — đây là tín hiệu
-    ///         mà NetworkManager dùng để phát hiện writeError.
+    /// Write another chunk to the open file
+    /// @return bytes written. Returns LESS than len on error — the signal
+    ///         NetworkManager uses to detect a writeError.
     size_t appendChunk(const uint8_t* data, size_t len);
 
-    /// Vá 4 byte tại offset 0 của file đang mở (tiền tố kích thước payload).
-    /// Mode "w" là O_TRUNC — cắt file xảy ra lúc OPEN chứ không phải lúc write,
-    /// nên ghi đè 4 byte tại đầu file không thể làm ngắn file.
+    /// Patch 4 bytes at offset 0 of the open file (the payload size prefix).
+    /// Mode "w" is O_TRUNC — truncation happens at OPEN, not at write, so
+    /// overwriting 4 bytes at the start can't shorten the file.
     bool patchWriteFileAt0(const uint8_t* buf4);
 
-    /// Đóng file đang ghi
+    /// Close the file being written
     void closeWriteFile();
 
     // --- Sequential Read (MediaPlayer) ---
 
-    /// Mở file để đọc tuần tự
+    /// Open a file for sequential reading
     bool openFileForRead(const char* path);
 
-    /// Dời con trỏ đọc tuần tự
+    /// Move the sequential read cursor
     bool seekReadFile(uint32_t offset);
 
-    /// Đọc một block từ con trỏ tuần tự
-    /// @return Số bytes thực tế đã đọc (0 nếu hết file / lỗi)
+    /// Read a block at the sequential cursor
+    /// @return bytes actually read (0 at end of file / on error)
     size_t readBlock(uint8_t* buffer, size_t len);
 
-    /// Đóng file đang đọc tuần tự
+    /// Close the sequential read file
     void closeReadFile();
 
-    // --- Random Read (AudioPlayer) — handle riêng, KHÔNG đụng con trỏ tuần tự ---
+    // --- Random Read (AudioPlayer) — its own handle, NEVER touches the sequential cursor ---
 
-    /// Mở handle đọc ngẫu nhiên trên cùng đường dẫn (cache sẵn kích thước file)
+    /// Open the random-read handle on the same path (caches the file size)
     bool openAtFile(const char* path);
 
-    /// Đọc tại offset tuyệt đối. Chặn theo kích thước file vật lý.
-    /// Bỏ qua seek khi offset trùng vị trí hiện tại — AudioPlayer đọc đơn điệu
-    /// tăng dần từng AUDIO_READ_CHUNK_SIZE byte, seek mỗi lần sẽ phá readahead.
+    /// Read at an absolute offset, clamped to the physical file size.
+    /// Skips the seek when the offset equals the current position — AudioPlayer
+    /// reads monotonically in AUDIO_READ_CHUNK_SIZE steps, and seeking every time
+    /// would defeat readahead.
     int readAtFile(uint32_t offset, uint8_t* buffer, uint32_t len);
 
-    /// Đóng handle đọc ngẫu nhiên
+    /// Close the random-read handle
     void closeAtFile();
 
-    /// Kích thước file đang mở ở handle đọc ngẫu nhiên (0 nếu chưa mở)
+    /// Size of the file open on the random-read handle (0 if none)
     uint32_t atFileSize() const { return _atSize; }
 
     // --- Utility ---
 
-    /// Kiểm tra file tồn tại
+    /// Whether a file exists
     bool fileExists(const char* path) const;
 
-    /// Xóa file. Trả false nếu file không tồn tại hoặc xoá thất bại.
+    /// Delete a file. Returns false if it doesn't exist or the delete failed.
     bool deleteFile(const char* path);
 
-    /// Lấy kích thước file (bytes), hoặc -1 nếu không tồn tại
+    /// File size in bytes, or -1 if it doesn't exist
     int32_t getFileSize(const char* path) const;
 
-    /// Đọc trọn một file nhỏ (manifest / caption) vào buffer
-    /// @return Số bytes đọc được, hoặc -1 nếu không mở được
+    /// Read a whole small file (manifest / caption) into a buffer
+    /// @return bytes read, or -1 if it couldn't be opened
     int32_t readFile(const char* path, uint8_t* buf, size_t maxLen) const;
 
-    // --- File tổng quát (theme, nhạc báo thức, log) — thêm 2026-09-24 ---
+    // --- General files (theme, alarm music, log) ---
 
-    /// Tháo rồi mount lại thẻ (thẻ vừa cắm lại). Gọi khi KHÔNG có handle nào đang mở.
+    /// Unmount and remount the card (it was just reinserted). Call only with NO handle open.
     bool remount();
 
-    /// Thẻ còn trả lời không (SD.cardType() != CARD_NONE). Sai -> đánh dấu chưa mount.
+    /// Whether the card still responds (opens a file and reads one byte). If not -> marked unmounted.
     bool probe();
 
-    /// Đọc `len` byte tại `offset` của một file (mở-đọc-đóng). -1 nếu không mở được.
+    /// Read `len` bytes at `offset` of a file (open-read-close). -1 if it couldn't be opened.
     int32_t readFileAt(const char* path, uint32_t offset, uint8_t* buf, size_t len) const;
 
-    /// Đổi tên. FAT không ghi đè: `to` đã có thì trả false (bên gọi xoá trước).
+    /// Rename. FAT doesn't overwrite: returns false if `to` exists (the caller deletes it first).
     bool renameFile(const char* from, const char* to);
 
-    /// Tạo thư mục (và thư mục cha một cấp). true nếu đã có sẵn hoặc tạo được.
+    /// Create a directory (and one level of parent). true if it already exists or was created.
     bool makeDir(const char* path);
 
-    /// Xoá thư mục RỖNG (SD.rmdir). Xoá cả cây: SdStore::removeTree().
+    /// Remove an EMPTY directory (SD.rmdir). For a whole tree: SdStore::removeTree().
     bool removeDir(const char* path);
 
-    /// Duyệt tên các mục trong thư mục (không đệ quy). cb nhận tên KHÔNG kèm đường dẫn
-    /// và cờ isDir. Tên được chép ra rồi mới gọi cb sau khi nhả mutex, nên cb được phép
-    /// gọi lại các hàm của lớp này (xoá, đổi tên).
+    /// List a directory's entries (non-recursive). cb receives the name WITHOUT the path
+    /// and an isDir flag. Names are copied out first and cb runs after the mutex is
+    /// released, so cb may call back into this class (delete, rename).
     size_t listDir(const char* dir, void (*cb)(const char* name, bool isDir, void* ctx), void* ctx);
 
-    /// Dung lượng còn trống (MB). 0 nếu chưa mount.
+    /// Free space (MB). 0 if not mounted.
     uint32_t freeMB() const;
 
-    /// Handle ghi THỨ HAI cho file tổng quát (tải nhạc/theme) — tách khỏi _writeFile
-    /// của đường tải tin nhắn. append = mở "a" (ghi tiếp cuối file, cho tải tiếp bằng Range).
+    /// A SECOND write handle for general files (music/theme downloads) — separate from
+    /// the message download path's _writeFile. append = open "a" (continue at the end,
+    /// for resuming with Range).
     bool openGenWrite(const char* path, bool append);
     size_t genWrite(const uint8_t* data, size_t len);
     void closeGenWrite();
@@ -162,20 +165,20 @@ private:
     File _writeFile;
     File _readFile;
     File _atFile;
-    File _genFile;  // ghi file tổng quát (xem openGenWrite)
+    File _genFile;  // general file writes (see openGenWrite)
 
     uint32_t _atSize = 0;
     uint32_t _atPos = 0;
     bool _atPosKnown = false;
 
-    /// Lấy quyền sử dụng SPI bus (blocking, timeout 1 giây) + NOP Hack cho ST7789
+    /// Acquire the SPI bus (blocking, 1s timeout) + the NOP hack for the ST7789
     bool acquireSPI() const;
 
-    /// Trả quyền sử dụng SPI bus
+    /// Release the SPI bus
     void releaseSPI() const;
 
-    /// Tạo thư mục cha của path nếu chưa có. GIẢ ĐỊNH ĐANG GIỮ MUTEX
-    /// (mutex không đệ quy — không được acquire lồng nhau).
+    /// Create path's parent directory if missing. ASSUMES THE MUTEX IS HELD
+    /// (it is non-recursive — never acquire it nested).
     void mkParentDirLocked(const char* path);
 };
 

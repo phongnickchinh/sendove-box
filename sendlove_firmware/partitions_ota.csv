@@ -1,19 +1,21 @@
-# Flash 4MB (0x400000). Bo `spiffs` 0x6F000 (444KB) ngay 2026-09-18: khong co
-# SPIFFS/LittleFS o bat ky dau trong firmware (da grep ca src/ lan lib/), no chi
-# ngoi khong. Cho cho hai phan vung app: 0x1C0000 -> 0x1F0000 moi ben (+192KB).
+# 4MB flash (0x400000). No `spiffs` partition: nothing in the firmware uses
+# SPIFFS/LittleFS, so its 0x6F000 (444KB) went to the app partitions.
 #
-# 2026-09-24 (thiet ke the SD, MEMORY.md §28, user chot cach B): bot moi app
-# 0x1F0000 -> 0x1D0000 (1,81MB; firmware dang ~1,43MB) de lay 256KB cho phan vung
-# `theme`: ban chieu cua goi theme tren the SD (nen 240x240 + phong + layout), doc
-# bang esp_partition_mmap nhu mang PROGMEM truoc day. The SD van la kho goc.
-# app1 DOI OFFSET 0x200000 -> 0x1E0000: nap cap se ghi lai boot_app0.bin vao otadata
-# (PlatformIO lam san) -> hop khoi dong tu app0, khong chay theo otadata cu.
+# SD-card design (MEMORY.md §28, product decision: option B): each app is 0x1D0000
+# (1.81MB; the firmware is ~1.43MB), which leaves 256KB for the `theme` partition:
+# a projection of the theme bundle on the SD card (240x240 background + fonts +
+# layout), read with esp_partition_mmap like a PROGMEM array. The SD card stays
+# the source of truth.
+# app1 sits at 0x1E0000 (it used to be 0x200000): a cable flash rewrites
+# boot_app0.bin into otadata (PlatformIO does this) -> the box boots from app0
+# instead of following stale otadata.
 #
-# nvs GIU NGUYEN offset 0x9000 va size 0x5000 -> Wi-Fi creds, bao thuc, last_dl_ts
-# song qua lan nap nay. `nvs_keys` chi can khi bat ma hoa NVS (dang tat) nen doi
-# cho xuong cuoi la vo hai.
+# nvs KEEPS offset 0x9000 and size 0x5000 -> Wi-Fi creds, alarms and last_dl_ts
+# survive a reflash. `nvs_keys` is only needed with NVS encryption (off), so
+# sitting at the end is harmless.
 #
-# Bang nay doi thi PHAI nap qua cap (partition table nam ngoai vung OTA ghi duoc).
+# Changing this table REQUIRES a cable flash (the partition table lies outside
+# the area OTA can write).
 # Name,     Type, SubType,  Offset,   Size
 nvs,        data, nvs,      0x9000,   0x5000
 otadata,    data, ota,      0xe000,   0x2000

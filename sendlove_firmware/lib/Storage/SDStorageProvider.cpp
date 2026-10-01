@@ -4,7 +4,7 @@
 #include "ScreenLogger.h"
 #include "config.h"
 
-// Đủ cho "/media/slot_19.bin" (19 ký tự) + dư an toàn
+// Enough for "/media/slot_19.bin" (19 chars) plus margin
 static constexpr size_t SD_PATH_MAX = 48;
 
 // ============================================================================
@@ -52,14 +52,15 @@ void SDStorageProvider::resetManifest() {
     _m.writeSlotIndex = 0;
 }
 
-// Manifest ghi kiểu nguyên tử (2026-09-24): ghi file tạm, xoá bản cũ, đổi tên. Mất điện
-// giữa chừng (pin cạn, rút sạc — case bắt buộc #1 trong tài liệu thiết kế) thì lúc boot
-// còn đúng một trong hai file đầy đủ. Trước đây writeFile() mở "w" cắt cụt index.bin
-// trước khi ghi -> mất điện đúng lúc đó là mất cả hàng chờ tin nhắn.
+// The manifest is written atomically: write a temp file, delete the old one, rename.
+// After a power loss midway (dead battery, charger pulled — a mandatory case,
+// MEMORY.md §28) exactly one of the two
+// files is complete at boot. Writing index.bin in place with "w" would truncate it
+// first -> a power loss at that moment loses the whole message queue.
 static constexpr const char* SD_MANIFEST_TMP = "/media/index.tmp";
 
 bool SDStorageProvider::loadManifest() {
-    // Lần ghi trước chết sau khi xoá bản cũ, trước khi đổi tên -> bản tạm là bản đúng.
+    // The previous write died after deleting the old file, before the rename -> the temp file is the right one.
     if (!_sd.fileExists(SD_MANIFEST_PATH) && _sd.fileExists(SD_MANIFEST_TMP)) {
         _sd.renameFile(SD_MANIFEST_TMP, SD_MANIFEST_PATH);
     }
@@ -109,20 +110,20 @@ bool SDStorageProvider::init(SemaphoreHandle_t spiMutex) {
     _mounted = _sd.init(PIN_SD_CS, spiMutex);
 
     if (!_mounted) {
-        // TUYỆT ĐỐI KHÔNG trả false: main.cpp treo vĩnh viễn (while(1) delay)
-        // khi storage->init() thất bại. NandStorage::init() không bao giờ trả
-        // false nên nhánh đó chưa từng chạy — nhưng SD.begin() trả false mỗi khi
-        // thẻ vắng/lỏng/không phải FAT, là tình huống BÌNH THƯỜNG với thẻ rút được.
+        // NEVER return false: main.cpp hangs forever (while(1) delay) when
+        // storage->init() fails. NandStorage::init() never returns false, so that
+        // branch never ran — but SD.begin() returns false whenever the card is
+        // missing/loose/not FAT, which is NORMAL for a removable card.
         resetManifest();
         DLOG("[SDP] khong co the -> chay rong");
         return true;
     }
 
     if (!loadManifest()) {
-        // Manifest hỏng: tạo mới nhưng KHÔNG xoá file đang có. Dựng lại manifest
-        // bằng cách quét file là bất khả thi (không tách được dataSize khỏi
-        // audioSize) và sẽ cho ra playback sai một cách tự tin — tệ hơn hẳn
-        // trạng thái "không có tin" trung thực.
+        // Corrupt manifest: create a new one but do NOT delete existing files.
+        // Rebuilding the manifest by scanning files is impossible (dataSize can't
+        // be told apart from audioSize) and would produce confidently wrong
+        // playback — far worse than an honest "no messages".
         DLOG("[SDP] manifest moi (giu nguyen file cu)");
         resetManifest();
         saveManifest();
@@ -133,13 +134,13 @@ bool SDStorageProvider::init(SemaphoreHandle_t spiMutex) {
 }
 
 // ============================================================================
-// Đọc
+// Read
 // ============================================================================
 
 bool SDStorageProvider::openForRead(const char* identifier) {
-    // MediaPlayer để item mở lửng khi rơi vào nhánh lỗi rồi gọi lại openForRead()
-    // đè lên. NAND chịu được vì openSlot() chỉ gán biến; SD có file descriptor
-    // thật nên phải đóng tường minh, không thì rò FD.
+    // MediaPlayer leaves an item open on its error branches and then calls
+    // openForRead() again over it. NAND tolerates that because openSlot() only
+    // assigns variables; SD has real file descriptors, so close explicitly or leak one.
     closeRead();
 
     if (!_mounted) return false;
@@ -155,14 +156,15 @@ bool SDStorageProvider::openForRead(const char* identifier) {
         return false;
     }
 
-    // Thẻ rút được nên file có thể NGẮN HƠN manifest khai (rút giữa chừng lúc
-    // tải, hoặc bị sửa trên máy tính) — kiểu hỏng mà fileExists() không thấy.
-    // Nếu bỏ qua: _readCeil > độ dài thật -> MỖI decodeOneFrame() đâm vào
-    // "Read short" + showMessage() + delay(2000) của MediaPlayer, lặp từng frame
-    // trong Task_MediaPlayer và toast đó còn giữ SPI mutex.
-    // Trả false ở đây đẩy slot vào đúng đường mà NAND đã có: getNextUnreadIdentifier()
-    // bỏ cờ unread rồi đi tiếp. Bản NAND miễn nhiễm vì openSlot() soi dữ liệu
-    // flash thật, không thể lệch với bảng slot theo kiểu này.
+    // The card is removable, so a file can be SHORTER than the manifest says
+    // (pulled mid-download, or edited on a computer) — damage fileExists() can't
+    // see. If ignored: _readCeil > the real length -> EVERY decodeOneFrame() hits
+    // MediaPlayer's "Read short" + showMessage() + delay(2000), frame after frame
+    // in Task_MediaPlayer, with that toast holding the SPI mutex.
+    // Returning false here sends the slot down the path NAND already has:
+    // getNextUnreadIdentifier() clears the unread flag and moves on. The NAND build
+    // is immune because openSlot() inspects the actual flash data, which can't
+    // diverge from the slot table this way.
     if (_sd.atFileSize() < _m.slots[idx].dataSize) {
         DLOG("[SDP] slot %d cut: file %lu < dataSize %lu", (int)idx,
              (unsigned long)_sd.atFileSize(), (unsigned long)_m.slots[idx].dataSize);
@@ -179,8 +181,8 @@ bool SDStorageProvider::openForRead(const char* identifier) {
 
 int SDStorageProvider::readData(uint8_t* buffer, uint32_t len) {
     if (_readIndex < 0 || !buffer || len == 0) return 0;
-    // Trần là dataSize (chỉ phần video). Vùng audio nằm SAU dataSize và chỉ
-    // readAt() với tới được — đúng như NandStorage::readData().
+    // The ceiling is dataSize (the video part). The audio region sits AFTER
+    // dataSize and only readAt() can reach it — same as NandStorage::readData().
     if (_readCursor >= _readCeil) return 0;
 
     uint32_t avail = _readCeil - _readCursor;
@@ -193,8 +195,8 @@ int SDStorageProvider::readData(uint8_t* buffer, uint32_t len) {
 
 void SDStorageProvider::seek(uint32_t offset) {
     if (_readIndex < 0) return;
-    // Bỏ qua khi đã đúng vị trí: MediaPlayer gọi seek(20) ngay sau khi đọc đủ
-    // 20 byte header, seek thật ở đó chỉ phá readahead của stdio.
+    // Skip when already in position: MediaPlayer calls seek(20) right after
+    // reading the 20 header bytes, and a real seek there only defeats stdio's readahead.
     if (offset != _readCursor) {
         _sd.seekReadFile(offset);
     }
@@ -202,7 +204,7 @@ void SDStorageProvider::seek(uint32_t offset) {
 }
 
 int SDStorageProvider::readAt(uint32_t offset, uint8_t* buffer, uint32_t len) {
-    // Handle RIÊNG trong SDCardManager — không đụng con trỏ tuần tự.
+    // A SEPARATE handle in SDCardManager — the sequential cursor is untouched.
     return _sd.readAtFile(offset, buffer, len);
 }
 
@@ -215,8 +217,8 @@ void SDStorageProvider::closeRead() {
 }
 
 StorageItemInfo SDStorageProvider::getItemInfo(const char* identifier) const {
-    // THUẦN RAM, ZERO I/O: main.cpp:183 gọi hàm này MỖI vòng player.update()
-    // (tức mỗi frame lúc phát video).
+    // PURE RAM, ZERO I/O: main.cpp calls this on EVERY player.update() loop
+    // (i.e. every frame during video playback).
     StorageItemInfo info;
     int8_t idx = parseIndex(identifier);
     if (idx < 0) idx = _readIndex;
@@ -230,7 +232,7 @@ StorageItemInfo SDStorageProvider::getItemInfo(const char* identifier) const {
     info.totalFrames = e.totalFrames;
     info.maxDisplayTime = e.maxDisplayTime > 0 ? e.maxDisplayTime : 60;
 
-    // Ánh xạ magic -> type giống hệt NandStorageProvider::getItemInfo()
+    // Same magic -> type mapping as NandStorageProvider::getItemInfo()
     if (memcmp(e.magic, "VJPG", 4) == 0) {
         info.type = StorageItemType::VIDEO;
     } else if (memcmp(e.magic, "VIMG", 4) == 0 || memcmp(e.magic, "SLBX", 4) == 0) {
@@ -242,7 +244,7 @@ StorageItemInfo SDStorageProvider::getItemInfo(const char* identifier) const {
 }
 
 // ============================================================================
-// Ghi
+// Write
 // ============================================================================
 
 bool SDStorageProvider::openForWrite(const char* identifier) {
@@ -266,8 +268,8 @@ bool SDStorageProvider::openForWrite(const char* identifier) {
     buildPath(idx, path, sizeof(path));
     if (!_sd.openFileForWrite(path)) return false;
 
-    // 4 byte placeholder cho tiền tố kích thước, vá lại ở closeWrite().
-    // Giữ đúng bố cục slot NAND để MediaPlayer kiểm magic tại offset 4.
+    // A 4-byte placeholder for the size prefix, patched in closeWrite(). Keeps the
+    // NAND slot layout so MediaPlayer finds the magic at offset 4.
     const uint8_t zero4[4] = {0, 0, 0, 0};
     if (_sd.appendChunk(zero4, sizeof(zero4)) != sizeof(zero4)) {
         _sd.closeWriteFile();
@@ -288,9 +290,10 @@ bool SDStorageProvider::openForWrite(const char* identifier) {
 size_t SDStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     if (!_writeOpen || !data || len == 0) return 0;
 
-    // Chụp 16 byte header container vào RAM ngay lúc đi qua, thay vì đọc ngược
-    // từ file lúc closeWrite() như NAND. NAND đọc lại được vì ghi thẳng xuống
-    // flash; trên SD còn buffer stdio xen giữa nên đọc lại sẽ phải flush trước.
+    // Capture the 16-byte container header into RAM as it passes, instead of
+    // reading it back from the file in closeWrite() like NAND does. NAND can read
+    // back because it writes straight to flash; on SD a stdio buffer sits in
+    // between, so reading back would need a flush first.
     if (_capturingHeader && _writeSize < 20) {
         uint32_t need = 20 - _writeSize;
         uint32_t take = (len < need) ? (uint32_t)len : need;
@@ -301,8 +304,8 @@ size_t SDStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     size_t w = _sd.appendChunk(data, len);
     _writeSize += (uint32_t)w;
 
-    // KHÔNG DLOG ở đây (R1): hàm này chạy mỗi 2KB suốt quá trình tải.
-    // Trả w < len chính là tín hiệu writeError mà NetworkManager trông vào.
+    // NO DLOG here (R1): this runs every 2KB throughout a download.
+    // Returning w < len is the writeError signal NetworkManager relies on.
     return w;
 }
 
@@ -310,22 +313,22 @@ void SDStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     int8_t idx = _activeIndex;
     if (idx < 0 || idx >= SD_SLOT_COUNT) return;
 
-    // 1. Vá tiền tố kích thước vào offset 0.
-    //    Mode "w" là O_TRUNC — cắt file xảy ra lúc OPEN, nên ghi đè 4 byte ở đầu
-    //    không thể làm ngắn file.
+    // 1. Patch the size prefix at offset 0.
+    //    Mode "w" is O_TRUNC — truncation happens at OPEN, so overwriting 4 bytes
+    //    at the start can't shorten the file.
     uint32_t rawSize = (_writeSize >= 4) ? (_writeSize - 4) : 0;
     const uint8_t sizeBytes[4] = {(uint8_t)(rawSize & 0xFF), (uint8_t)((rawSize >> 8) & 0xFF),
                                   (uint8_t)((rawSize >> 16) & 0xFF),
                                   (uint8_t)((rawSize >> 24) & 0xFF)};
     _sd.patchWriteFileAt0(sizeBytes);
 
-    // 2. Đóng file (flush) TRƯỚC khi manifest quảng cáo nó — cùng lập luận với
-    //    NAND ghi slot table trước khi commit unread bitmask vào NVS.
+    // 2. Close (flush) the file BEFORE the manifest advertises it — same reasoning
+    //    as NAND writing the slot table before committing the unread bitmask to NVS.
     _sd.closeWriteFile();
     _writeOpen = false;
     _capturingHeader = false;
 
-    // 3. Phân loại container từ _hdrPeek — logic nhánh giống hệt
+    // 3. Classify the container from _hdrPeek — same branch logic as
     //    NandStorageProvider::closeWrite().
     SdSlotEntry& e = _m.slots[idx];
     memset(&e, 0, sizeof(e));
@@ -361,26 +364,27 @@ void SDStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         e.fps = (fps > 0) ? fps : 10;
         e.totalFrames = totalFrames;
     } else {
-        // Raw JPEG, hoặc đường "tin nhắn tĩnh" không ảnh (0 byte payload ->
-        // _hdrPeek toàn 0) -> dataSize = 4 chính là SENTINEL mà
-        // MediaPlayer::playItem() dò (type==IMAGE && dataSize<=4).
+        // Raw JPEG, or the image-less "still message" path (0 payload bytes ->
+        // _hdrPeek all zero) -> dataSize = 4 is the SENTINEL
+        // MediaPlayer::playItem() looks for (type==IMAGE && dataSize<=4).
         memcpy(e.magic, "VIMG", 4);
         e.dataSize = _writeSize;
         e.fps = 1;
         e.totalFrames = 1;
     }
 
-    // 4. Xoá caption cũ của slot. NAND miễn nhiễm vì setSlotInfo() memset cả
-    //    SlotEntry (giết luôn textLen); file sidecar không có ràng buộc đó nên
-    //    caption của tin cũ sẽ hiện đè lên tin mới dùng lại slot này.
+    // 4. Delete the slot's old caption. NAND is immune because setSlotInfo()
+    //    memsets the whole SlotEntry (killing textLen); a sidecar file has no such
+    //    coupling, so an old message's caption would show on a new message
+    //    reusing the slot.
     char tpath[SD_PATH_MAX];
     buildTextPath(idx, tpath, sizeof(tpath));
     _sd.deleteFile(tpath);
 
-    // 5. Đánh dấu chưa đọc + dịch con trỏ hàng chờ
+    // 5. Mark unread + advance the queue cursor
     e.unread = 1;
     _lastWrittenIndex = idx;
-    _lastWrittenSize = e.dataSize; // Gốc append audio = dataSize
+    _lastWrittenSize = e.dataSize; // audio append base = dataSize
     _m.writeSlotIndex = (int8_t)((idx + 1) % SD_SLOT_COUNT);
 
     saveManifest();
@@ -406,10 +410,10 @@ void SDStorageProvider::discardWrite() {
         bool wasUnread = (_m.slots[idx].unread != 0);
         memset(&_m.slots[idx], 0, sizeof(SdSlotEntry));
 
-        // Đường ghi "không ảnh" đã closeWrite() commit placeholder TRƯỚC rồi mới
-        // biết audio có tải được không -> cờ unread và writeSlotIndex có thể ĐÃ
-        // bị set/dịch. Lùi lại đúng slot này để lần sync sau retry vào nó, không
-        // đốt thêm một slot mới mỗi lần fail.
+        // The "no image" write path already ran closeWrite() to commit a placeholder
+        // BEFORE knowing whether the audio downloads -> the unread flag and
+        // writeSlotIndex may ALREADY be set/advanced. Step back to this slot so the
+        // next sync retries it instead of burning a new slot on every failure.
         if (wasUnread) _m.writeSlotIndex = idx;
 
         saveManifest();
@@ -423,9 +427,9 @@ bool SDStorageProvider::openForAppend(const char* identifier) {
     if (idx < 0) idx = _lastWrittenIndex;
     if (idx < 0 || idx >= SD_SLOT_COUNT || !_mounted) return false;
 
-    // Seek tới dataSize chứ KHÔNG phải EOF: như vậy header AUDC rơi đúng offset
-    // mà AudioPlayer::loadFromStorage() dò (readAt(dataSize, ...)), kể cả trường
-    // hợp sentinel dataSize == 4 của tin nhắn tĩnh không ảnh.
+    // Seek to dataSize, NOT EOF: the AUDC header then lands at the exact offset
+    // AudioPlayer::loadFromStorage() probes (readAt(dataSize, ...)), including the
+    // dataSize == 4 sentinel of an image-less still message.
     uint32_t at = _m.slots[idx].dataSize;
 
     char path[SD_PATH_MAX];
@@ -444,13 +448,13 @@ bool SDStorageProvider::openForAppend(const char* identifier) {
 void SDStorageProvider::closeAppend() {
     uint32_t finalSize = _writeSize;
 
-    // Đóng handle TRƯỚC mọi guard: SD có file descriptor thật, NAND thì không
-    // nên bản của nó early-return được mà không rò gì.
+    // Close the handle BEFORE any guard: SD has real file descriptors; NAND
+    // doesn't, so its version can early-return without leaking.
     _sd.closeWriteFile();
     _writeOpen = false;
 
     if (_activeIndex < 0 || _activeIndex >= SD_SLOT_COUNT) return;
-    if (_activeIndex != _lastWrittenIndex) return; // Không phải phiên append
+    if (_activeIndex != _lastWrittenIndex) return; // not an append session
 
     uint32_t audioSize = (finalSize > _lastWrittenSize) ? (finalSize - _lastWrittenSize) : 0;
     _m.slots[_activeIndex].audioSize = audioSize;
@@ -464,8 +468,8 @@ void SDStorageProvider::setItemText(const char* identifier, const char* text) {
 
     uint16_t len = (uint16_t)strlen(text);
     uint16_t copyLen = (len < SD_TEXT_MAX_LEN - 1) ? len : (uint16_t)(SD_TEXT_MAX_LEN - 1);
-    // Cắt bớt an toàn tại ranh giới UTF-8 — giống hệt NandStorage::setSlotText()
-    // để caption trên SD hiển thị y như trên NAND.
+    // Truncate safely at a UTF-8 boundary — same as NandStorage::setSlotText(), so
+    // captions on SD display exactly as on NAND.
     while (copyLen > 0 && (((uint8_t)text[copyLen]) & 0xC0) == 0x80) {
         copyLen--;
     }
@@ -498,15 +502,15 @@ bool SDStorageProvider::getItemText(const char* identifier, char* outBuf, size_t
 }
 
 // ============================================================================
-// Hàng chờ
+// Queue
 // ============================================================================
 
 bool SDStorageProvider::isFull() const {
-    // THUẦN RAM: main.cpp:234 gọi mỗi tick UI.
-    // Không có thẻ -> báo đầy để hệ thống không cố tải về hư không.
+    // PURE RAM: main.cpp calls this every UI tick.
+    // No card -> report full so the system doesn't try to download into nothing.
     if (!_mounted) return true;
-    // Tương đương NAND (allUnread || unread[writeSlotIndex]): nếu mọi slot đều
-    // chưa đọc thì unread[writeSlotIndex] tất yếu = 1, nên vế trái là thừa.
+    // Equivalent to NAND's (allUnread || unread[writeSlotIndex]): if every slot is
+    // unread then unread[writeSlotIndex] is necessarily 1, so the left term is redundant.
     return _m.slots[writeIndexSafe()].unread != 0;
 }
 
@@ -516,7 +520,7 @@ bool SDStorageProvider::getNextWriteSlotIdentifier(char* outId, size_t maxLen) {
         DLOG("[SDP] FULL");
         return false;
     }
-    // Thập phân trần, tối đa 2 ký tự -> vừa char writeSlotId[16] của NetworkManager.
+    // Plain decimal, at most 2 chars -> fits NetworkManager's char writeSlotId[16].
     snprintf(outId, maxLen, "%d", (int)writeIndexSafe());
     return true;
 }
@@ -542,7 +546,7 @@ bool SDStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
     if (!_mounted || !outId || maxLen == 0) return false;
 
     bool healed = false;
-    // Duyệt tin chưa đọc CŨ NHẤT trước, bắt đầu từ con trỏ ghi theo vòng tròn.
+    // OLDEST unread first, scanning circularly from the write cursor.
     for (uint8_t i = 0; i < SD_SLOT_COUNT; i++) {
         int8_t idx = (int8_t)((writeIndexSafe() + i) % SD_SLOT_COUNT);
         if (!_m.slots[idx].unread) continue;
@@ -550,7 +554,7 @@ bool SDStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
         char path[SD_PATH_MAX];
         buildPath(idx, path, sizeof(path));
         if (!isSlotValid(idx) || !_sd.fileExists(path)) {
-            // Tự chữa lành: thẻ rút được nên file có thể bị xoá trên máy tính.
+            // Self-healing: the card is removable, so the file may have been deleted on a computer.
             DLOG("[SDP] WARN: slot %d mat file -> bo co", (int)idx);
             _m.slots[idx].unread = 0;
             healed = true;
@@ -624,8 +628,8 @@ bool SDStorageProvider::formatStorage() {
     _writeSize = 0;
     saveManifest();
 
-    // Reset mốc last_download_ts về 0 để sẵn sàng kéo lại tin nhắn từ đầu —
-    // giống hệt NandStorageProvider::formatStorage().
+    // Reset last_download_ts to 0 so messages download from scratch — same as
+    // NandStorageProvider::formatStorage().
     ConfigManager cfg;
     if (cfg.init(NVS_NAMESPACE)) {
         cfg.saveLastDownloadTimestamp(0);

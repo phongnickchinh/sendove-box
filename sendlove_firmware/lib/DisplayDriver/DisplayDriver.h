@@ -7,7 +7,7 @@
 #include <esp_sleep.h>
 
 /// LovyanGFX configuration for ST7789 240x240 (CS-less, Mode 3 (obligatory), Shared SPI2)
-/// Mode lay tu SPI_BUS_MODE (config.h). Da thu 2026-09-17: MODE0 -> man hinh den.
+/// The mode comes from SPI_BUS_MODE (config.h). Tested on hardware: MODE0 -> black screen.
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI _bus_instance;
@@ -18,14 +18,14 @@ public:
       auto cfg = _bus_instance.config();
       cfg.spi_host = SPI2_HOST;
       cfg.spi_mode = SPI_BUS_MODE;
-      // 40MHz thay vi 20MHz. Day mot frame 240x240 RGB565 = 921.600 bit;
-      // o 20MHz rieng phan day len LCD da ton ~46ms, trong khi ngan sach
-      // mot frame o 15fps chi la 66ms -> cong them giai ma JPEG (~22ms) va
-      // doc flash (~4ms) thanh ~74ms, vuot ngan sach ~8ms va troi dan so voi
-      // audio (I2S chay bang clock phan cung, khong bao gio cho).
-      // 40MHz cat phan day con ~23ms -> ~52ms, du duoi ngan sach.
-      // Khong day cao hon: chan 4/5/6 khong trung IOMUX cua FSPI tren
-      // ESP32-C3 nen SPI di qua GPIO matrix, tran thuc te quanh 40MHz.
+      // 40MHz rather than 20MHz. Pushing one 240x240 RGB565 frame = 921,600 bits;
+      // at 20MHz the push alone takes ~46ms while the frame budget at 15fps is
+      // 66ms -> with JPEG decode (~22ms) and the storage read (~4ms) it reaches
+      // ~74ms, ~8ms over budget, and drifts away from the audio (I2S runs on a
+      // hardware clock and never waits).
+      // 40MHz cuts the push to ~23ms -> ~52ms total, within budget.
+      // Don't go higher: pins 4/5/6 aren't the FSPI IOMUX pins on the ESP32-C3,
+      // so SPI goes through the GPIO matrix, whose practical limit is ~40MHz.
       cfg.freq_write = 40000000;
       cfg.freq_read = 16000000;
       cfg.pin_sclk = PIN_SPI_SCK;
@@ -38,7 +38,7 @@ public:
     }
     {
       auto cfg = _panel_instance.config();
-      cfg.pin_cs = PIN_TFT_CS; // -1 (không CS)
+      cfg.pin_cs = PIN_TFT_CS; // -1 (no CS)
       cfg.pin_rst = PIN_TFT_RST;
       cfg.pin_busy = -1;
       cfg.panel_width = SCREEN_WIDTH;
@@ -72,17 +72,17 @@ public:
   /// Display a centered message on screen
   void showMessage(const char *message);
 
-  /// Word-wrap và vẽ caption ASCII (đã bỏ dấu tiếng Việt từ trước bởi caller)
-  /// trong 1 vùng chữ nhật (x,y,w,h). Tự ngắt dòng theo bề rộng pixel thực tế
-  /// bằng font FreeSansBold9pt7b (có sẵn trong LovyanGFX), giới hạn số dòng vừa chiều cao vùng,
-  /// dòng cuối thêm "..." nếu văn bản dài hơn chỗ hiển thị.
+  /// Word-wrap and draw an ASCII caption (Vietnamese diacritics already stripped by
+  /// the caller) inside a rectangle (x,y,w,h). Lines break on the actual pixel width
+  /// in FreeSansBold9pt7b (built into LovyanGFX); the line count is limited to the
+  /// rectangle's height, and the last line ends in "..." if the text doesn't fit.
   void showWrappedText(const char *asciiText, int32_t x, int32_t y, int32_t w, int32_t h,
                         uint16_t color = 0xFFFF);
 
   /// Set backlight brightness percentage (0-100)
   void setBacklight(uint8_t percent);
 
-  /// Màn hình đang tắt (turnOff, chờ light sleep). Đổi độ sáng lúc này thì KHÔNG bật đèn.
+  /// The screen is off (turnOff, waiting for light sleep). A brightness change now must NOT turn the backlight on.
   bool isSleeping() const { return _isSleeping; }
 
   /// Turn off display and lock backlight GPIO LOW for sleep

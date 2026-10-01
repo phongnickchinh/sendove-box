@@ -38,10 +38,11 @@ public:
     /// Force RF reconnect if Wi-Fi is disconnected (with fallback & timeout)
     bool ensureConnected(uint32_t timeoutMs = 5000);
 
-    /// Báo chip vừa tỉnh khỏi Light Sleep. Lần ensureConnected() kế tiếp sẽ ÉP tái
-    /// lập association thay vì tin WiFi.status() — sau khi ngủ, biến trạng thái này
-    /// thường vẫn là WL_CONNECTED dù association đã chết ở phía AP (CPU ngủ nên
-    /// driver không xử lý được beacon-loss/deauth event). Xem ensureConnected().
+    /// Tell the manager the chip just woke from light sleep. The next
+    /// ensureConnected() will FORCE a re-association instead of trusting
+    /// WiFi.status() — after sleep it usually still says WL_CONNECTED although the
+    /// association died on the AP side (the CPU was asleep, so the driver couldn't
+    /// process beacon-loss/deauth events). See ensureConnected().
     void notifyWakeFromSleep() { _forceReassociate = true; }
 
     /// Get current formatted time string ("14:30")
@@ -92,7 +93,7 @@ public:
     /// Check if any network background sync (NTP, Firebase, Download) is in progress
     bool isSyncing() const { return _isSyncing || _isFirebaseSyncing || _isNtpSyncing || _isDownloadingMedia; }
 
-    /// Trả về tổng số tin nhắn mới (chưa đọc + đang chờ trên mây)
+    /// Total number of new messages (unread + waiting in the cloud)
     uint32_t getNumOfNewMsg() const { return _numOfNewMsg; }
     void setNumOfNewMsg(uint32_t num) { _numOfNewMsg = num; }
     void decrementNewMsgCount() { if (_numOfNewMsg > 0) _numOfNewMsg--; }
@@ -100,30 +101,30 @@ public:
     /// Check if there are pending messages on the server (aborted due to full storage)
     bool hasPendingMessages() const { return _hasPendingMessages; }
 
-    /// Đồng bộ toàn diện ngầm khi thức dậy (Wi-Fi ensure + NTP Time + Firebase Status, Flags, Messages, Alarms)
+    /// Full background sync on wake (Wi-Fi + NTP time + Firebase status, flags, messages, alarms)
     bool syncWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
 
-    /// Kích hoạt Wakeup Sync ngầm trên background task (không làm block UI Task)
+    /// Start the wake-up sync on the background task (doesn't block the UI task)
     void triggerWakeupSync(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr);
 
-    /// Đồng bộ dữ liệu Firebase ngầm (backward compatible wrapper)
+    /// Background Firebase sync (backward compatible wrapper)
     bool syncFirebaseWakeup(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr) {
         return syncWakeup(batteryPercent, isCharging, storage);
     }
 
-    /// Kích hoạt Firebase Sync ngầm (backward compatible wrapper)
+    /// Start a background Firebase sync (backward compatible wrapper)
     void triggerFirebaseSync(uint8_t batteryPercent, bool isCharging, class IStorageProvider* storage = nullptr) {
         triggerWakeupSync(batteryPercent, isCharging, storage);
     }
 
-    /// Set callback khi tải media hoàn tất
+    /// Set the callback fired when a media download completes
     void setOnDownloadComplete(std::function<void()> cb) { _onDownloadComplete = cb; }
 
-    /// Set callback để kiểm tra trạng thái đang phát video (để hoãn sync ngầm tránh nghẽn CPU/SPI)
+    /// Set the callback that reports whether playback is active (to defer background sync and avoid CPU/SPI contention)
     void setPlaybackActiveCallback(std::function<bool()> cb) { _isPlaybackActiveCb = cb; }
     bool isPlaybackActive() const { return _isPlaybackActiveCb ? _isPlaybackActiveCb() : false; }
 
-    /// Ghi nhận nguyên nhân thức dậy ("timer", "touch", "boot") cho telemetry
+    /// Record the wake reason ("timer", "touch", "boot") for telemetry
     void setWakeupCause(const char* cause) {
         if (cause) {
             strncpy(_currentWakeCause, cause, sizeof(_currentWakeCause) - 1);
@@ -140,87 +141,93 @@ private:
     bool checkFirebaseFlags();
     bool syncFirebaseAlarms();
     bool pushFirebaseAlarms();
-    /// true tới khi tải được alarm_list lần đầu sau boot (hoặc lần tải trước hỏng)
+    /// true until alarm_list is first downloaded after boot (or after a failed download)
     bool _alarmsNeedFetch = true;
-    /// Cài đặt người dùng (độ sáng, âm lượng): GET config (khoảng khoá config_rev..playback_volume) khi config_flag
-    /// bật, hoặc lần sync đầu sau boot (web có thể đã đổi lúc hộp tắt). Hỏng thì thử lại.
+    /// User settings (brightness, volume): GET config (key range config_rev..playback_volume)
+    /// when config_flag is set, or on the first sync after boot (the web may have changed
+    /// them while the box was off). Retried on failure.
     bool syncFirebaseSettings();
     bool _settingsNeedFetch = true;
-    /// PATCH hạ các cờ đang bật về false, MỘT request cho mọi cờ (mỗi request = 1 TLS).
+    /// PATCH the set flags back to false, ONE request for all flags (each request = 1 TLS handshake).
     void resetFlags(bool alarm, bool config, bool theme, bool music);
     bool checkAndDownloadNewMessages(class IStorageProvider* storage);
 
-    /// Tải một file Firebase Storage về thẻ (theme, nhạc báo thức). Ghi vào dst.part,
-    /// .part còn từ lần trước thì xin tiếp bằng `Range: bytes=N-` (đề xuất #3), đủ `size`
-    /// byte thì kiểm crc32 rồi mới đổi tên thành dst. Tin nhắn KHÔNG đi đường này (slot
-    /// ghi qua SDStorageProvider, không có .part để tải tiếp).
+    /// Download a Firebase Storage file to the card (theme, alarm music). Writes to
+    /// dst.part; a .part left from a previous attempt is resumed with
+    /// `Range: bytes=N-` (MEMORY.md §29, proposal #3). Once `size` bytes are in,
+    /// crc32 is checked and only then is it renamed to dst. Messages do NOT take
+    /// this path (slots are written through SDStorageProvider, with no .part to resume).
     enum class DlResult : uint8_t { OK, ABORTED, FAILED };
     DlResult downloadFile(const char* storagePath, const char* dstPath, uint32_t size, uint32_t crc);
 
-    /// Đẩy đoạn cuối nhật ký lên status/log_tail khi có lỗi mới (đề xuất #2).
+    /// Push the tail of the log to status/log_tail when there is a new error
+    /// (MEMORY.md §29, proposal #2).
     void pushLogTail();
 
-    /// Nhạc báo thức: tải bài các báo thức đang dùng mà thẻ chưa có (tối đa
-    /// ALARM_MUSIC_PER_SYNC bài mỗi chu kỳ, bài của báo thức sắp kêu trước), xoá bài đã
-    /// bị xoá khỏi thư viện. Chỉ GET danh sách nhạc khi cần: cờ bật, thiếu bài, lần đầu.
-    /// false = bị ngắt vì báo thức/tin bắt đầu phát (thử lại chu kỳ sau).
+    /// Alarm music: download tracks that alarms use and the card lacks (at most
+    /// ALARM_MUSIC_PER_SYNC per cycle, soonest alarm first) and delete tracks removed
+    /// from the library. The music list is fetched only when needed: flag set, a
+    /// track missing, first time. false = interrupted because an alarm/message
+    /// started playing (retried next cycle).
     bool syncAlarmMusic();
-    bool _musicNeedFetch = true;      // lần đầu sau boot / sau khi thẻ mount lại / cờ bật
-    uint32_t _seenMountEpoch = 0;     // SdStore::mountEpoch đã xử lý
+    bool _musicNeedFetch = true;      // first time after boot / after a card remount / flag set
+    uint32_t _seenMountEpoch = 0;     // the SdStore::mountEpoch already handled
 
-    /// Theme: GET config/theme khi cờ bật / lần đầu / thẻ vừa mount lại; rev khác bản trong
-    /// flash thì tải gói về /theme/t_<id>_r<rev>/ rồi nhờ Task_MediaPlayer cài (ThemeStore).
-    /// Chỉ hạ theme_flag khi bản TRONG FLASH đã đúng rev (không phải lúc tải xong).
-    /// false = bị ngắt vì báo thức/tin bắt đầu phát.
+    /// Theme: GET config/theme when the flag is set / first time / the card was just
+    /// remounted; if rev differs from the copy in flash, download the package to
+    /// /theme/t_<id>_r<rev>/ and ask Task_MediaPlayer to install it (ThemeStore).
+    /// theme_flag is cleared only once the copy IN FLASH has the right rev (not when
+    /// the download finishes). false = interrupted because an alarm/message started playing.
     bool syncTheme(bool themeFlag);
     bool _themeNeedFetch = true;
     uint32_t _seenThemeEpoch = 0;
-    bool _themeFlag = false;          // theme_flag đọc ở checkFirebaseFlags(), hạ trong syncTheme()
+    bool _themeFlag = false;          // theme_flag as read in checkFirebaseFlags(); cleared in syncTheme()
     bool downloadVoiceSegment(const String& rawVoiceUrl, class WiFiClientSecure& client,
                                class IStorageProvider* storage, const char* writeSlotId);
 
     static void wakeupSyncTaskWorker(void* param);
 
-    /// Task sync thường trú: tạo một lần, sau đó ngủ chờ notify. Tạo/xoá task
-    /// mỗi chu kỳ (cách cũ) là xin-trả 12KB liền mạch liên tục -> vụn heap (§21).
+    /// The resident sync task: created once, then sleeps waiting for a notify.
+    /// Creating/deleting a task every cycle would keep allocating and freeing 12KB
+    /// of contiguous memory -> heap fragmentation (MEMORY.md §21).
     TaskHandle_t _syncTask = nullptr;
     uint8_t _syncBattery = 0;
     bool _syncCharging = false;
     class IStorageProvider* _syncStorage = nullptr;
 
-    // --- Firebase Auth: idToken riêng của box thay cho Database Secret ---
-    // Giữ JWT THÔ, không kèm tiền tố. Trước đây giữ dạng "Bearer <jwt>" cho
-    // addHeader(), nhưng RTDB KHÔNG nhận header nào cả — chỉ nhận `?auth=`
-    // (đo thật 2026-09-05, xem MEMORY.md §17). Đặt trong #if để chế độ cũ
-    // không phải gánh 1.4KB BSS vô ích.
+    // --- Firebase Auth: the box's own idToken instead of the Database Secret ---
+    // Holds the RAW JWT, no prefix: RTDB accepts NO auth header at all — only
+    // `?auth=` (verified, see MEMORY.md §17). Inside the #if so the legacy mode
+    // doesn't carry 1.4KB of BSS for nothing.
 #if FIREBASE_USE_IDTOKEN
     char   _idToken[FIREBASE_ID_TOKEN_MAX_LEN] = "";
     time_t _idTokenExpiry = 0;
 #endif
 
-    /// Buffer dựng URL, dùng CHUNG cho mọi request Firebase. Là thành viên chứ
-    /// không phải biến cục bộ vì idToken ~945 byte phải nằm trong URL.
-    /// An toàn: mọi lời gọi này chạy tuần tự trong cùng network task, và
-    /// HTTPClient::begin() copy URL vào String riêng nên ghi đè sau đó vô hại.
+    /// URL build buffer SHARED by every Firebase request. A member, not a local,
+    /// because the ~945-byte idToken has to go in the URL. Safe: all these calls
+    /// run sequentially on the one network task, and HTTPClient::begin() copies
+    /// the URL into its own String, so overwriting it afterwards is harmless.
     char _url[FIREBASE_URL_MAX_LEN] = "";
 
-    /// Đảm bảo có idToken còn hạn. Ưu tiên refresh token trong NVS (không phải
-    /// gửi lại mật khẩu); chỉ đăng nhập bằng mật khẩu khi chưa có/refresh hỏng.
+    /// Ensure a valid idToken. Prefers the refresh token in NVS (no password
+    /// resent); signs in with the password only when there is none or the refresh fails.
     bool ensureIdToken(bool force = false);
     bool authWithPassword();
     bool authWithRefreshToken(const char* refreshToken);
 
-    /// Nối tham số auth vào cuối `_url`: `?auth=<secret>` ở chế độ cũ,
-    /// `?auth=<idToken>` ở chế độ mới. `sep` là '?' hoặc '&' tuỳ URL đã có
-    /// query chưa. KHÔNG có bản dùng header cho RTDB — RTDB từ chối cả
-    /// `Bearer` lẫn `Firebase` (MEMORY.md §17).
+    /// Append the auth parameter to `_url`: `?auth=<secret>` in legacy mode,
+    /// `?auth=<idToken>` in the new mode. `sep` is '?' or '&' depending on whether
+    /// the URL already has a query. There is NO header variant for RTDB — it
+    /// rejects both `Bearer` and `Firebase` (MEMORY.md §17).
     void appendAuth(char sep);
 
-    /// Firebase Storage thì NGƯỢC LẠI: nó nhận header `Authorization: Firebase
-    /// <idToken>`. Khác dịch vụ, khác scheme. No-op khi còn dùng Database Secret.
+    /// Firebase Storage is the OPPOSITE: it takes the header `Authorization:
+    /// Firebase <idToken>`. Different service, different scheme. No-op while the
+    /// Database Secret is in use.
     void addStorageAuthHeader(class HTTPClient& http);
 
-    /// Gọi sau mỗi request: 401 nghĩa là token chết -> ép lấy lại ở chu kỳ sau
+    /// Call after every request: a 401 means the token is dead -> force a refresh next cycle
     void noteAuthFailure(int httpCode, const char* where);
 
     volatile bool _forceReassociate = false;
@@ -235,7 +242,7 @@ private:
     bool _isTimeSynced = false;
     uint32_t _lastTimeSync = 0;
 
-    // Telemetry & Diagnostics cho Timer/Touch Wakeup
+    // Telemetry & diagnostics for timer/touch wakeup
     char _currentWakeCause[12] = "boot";
     char _prevWakeCause[12] = "none";
     char _diagStep[24] = "boot";
@@ -258,19 +265,20 @@ private:
 
     void handleCaptiveRoot();
     void handleCaptiveSubmit();
-    /// Tra ve JSON danh sach Wi-Fi xung quanh. Quet bat dong bo nen khong chan
-    /// web server: lan goi dau tra {"status":"scanning"}, client poll lai.
+    /// Returns the nearby Wi-Fi networks as JSON. The scan is asynchronous so it
+    /// doesn't block the web server: the first call returns {"status":"scanning"}
+    /// and the client polls again.
     void handleCaptiveScan();
-    /// Cac URL do he dieu hanh goi de kiem tra "co internet khong". Tra 302 ve
-    /// trang portal de may tu bat cua so dang nhap.
+    /// The URLs operating systems probe to check for internet access. Answer 302
+    /// to the portal page so the device pops up its sign-in window.
     void handleCaptiveProbe();
-    /// Báo thức trên portal (AP mode, không có Internet). Sửa ở đây bật cờ dirty
-    /// trong AlarmClock -> lần sync đầu tiên khi lên mạng đẩy đè lên cloud.
+    /// Alarms on the portal (AP mode, no internet). An edit here sets AlarmClock's
+    /// dirty flag -> the first sync once online pushes over the cloud copy.
     void handleAlarmList();    // GET  /alarms
     void handleAlarmSave();    // POST /alarms/save   id?, time, en, rep
     void handleAlarmDelete();  // POST /alarms/delete id
-    /// POST /time epoch — lấy giờ điện thoại khi hộp chưa từng có NTP (AP mode
-    /// sau khi cắm điện), không có thì báo thức không bao giờ kêu được.
+    /// POST /time epoch — takes the phone's time when the box has never had NTP
+    /// (AP mode right after power-up); without it alarms could never ring.
     void handleSetTime();
     String buildCaptivePortalHTML();
 };

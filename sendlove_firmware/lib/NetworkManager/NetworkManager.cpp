@@ -10,8 +10,8 @@
 #include "esp_sntp.h"
 #include "ScreenLogger.h"
 
-// Moc Unix hop le toi thieu (2020-09-13). Duoi moc nay nghia la RTC chua tung
-// duoc set — mbedTLS se tu choi chung chi voi BADCERT_FUTURE.
+// Minimum valid Unix time (2020-09-13). Below it the RTC has never been set —
+// mbedTLS would reject certificates with BADCERT_FUTURE.
 static constexpr time_t MIN_VALID_EPOCH = 1600000000;
 
 static const byte DNS_PORT = 53;
@@ -27,10 +27,10 @@ void NetworkManager::init() {
     WiFi.setAutoReconnect(true);
     WiFi.persistent(false);
 
-    // Đăng ký callback chính thức nhận thông báo khi SNTP sync thành công
+    // Get notified when SNTP sync succeeds
     sntp_set_time_sync_notification_cb(onNtpSyncCallback);
 
-    // Cấu hình múi giờ + SNTP servers bằng Arduino API đã chứng minh hoạt động
+    // Timezone + SNTP servers via the Arduino API
     configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 }
 
@@ -76,23 +76,23 @@ bool NetworkManager::isConnected() const {
 }
 
 bool NetworkManager::ensureConnected(uint32_t timeoutMs) {
-    // Dang chay captive portal: nhanh "full WiFi restart" ben duoi chuyen sang
-    // WIFI_STA, pha huy SoftAP dang phuc vu nguoi dung -> AP bat len roi tat.
+    // Captive portal running: the "full WiFi restart" branch below switches to
+    // WIFI_STA, tearing down the SoftAP serving the user -> the AP comes up then dies.
     if (isProvisioningActive()) {
         DLOG("[NET] ensureConnected skip: provisioning AP");
         return false;
     }
 
-    // KHONG duoc tin mot minh WiFi.status(). Sau Light Sleep no RAT HAY van bao
-    // WL_CONNECTED du association da chet o phia AP: CPU ngu suot 5 phut nen driver
-    // khong he xu ly duoc beacon-loss/deauth event, bien trang thai giu nguyen gia
-    // tri cu. Tin vao no -> bo qua reconnect -> moi http.GET() sau do tra ve -1
-    // (dung trieu chung user bao 2026-09-03: "wifi da connect nhung get http van
-    // ra -1"). Te hon: sau timer wake box chi thuc 2s, chua du de driver tu phat
-    // hien mat beacon (~6s+) roi auto-reconnect -> ket vinh vien qua hang tram chu ky.
-    // Vi vay: vua ngu day thi LUON tai lap association, khong tin trang thai cu.
-    // Ngoai ra kiem them IP: WL_CONNECTED chi nghia la da associate + auth xong,
-    // chua chac da xin duoc IP tu DHCP; gui HTTP khi chua co IP cung ra -1.
+    // Do NOT trust WiFi.status() alone. After light sleep it VERY OFTEN still says
+    // WL_CONNECTED although the association is dead on the AP side: the CPU slept
+    // for 5 minutes, so the driver never processed beacon-loss/deauth events and
+    // the status keeps its old value. Trusting it -> reconnect skipped -> every
+    // http.GET() afterwards returns -1 ("WiFi connected but HTTP GET gives -1").
+    // Worse: after a timer wake the box is only awake 2s, too short for the driver
+    // to notice the lost beacons (~6s+) and auto-reconnect -> stuck for hundreds of
+    // cycles. So right after waking ALWAYS re-associate instead of trusting old state.
+    // Also check the IP: WL_CONNECTED only means associated + authenticated, not
+    // that DHCP has handed out an IP; HTTP without an IP also returns -1.
     if (!_forceReassociate && WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0) {
         return true;
     }
@@ -107,8 +107,8 @@ bool NetworkManager::ensureConnected(uint32_t timeoutMs) {
 
     uint32_t start = millis();
 
-    // WiFi.reconnect() khong du: no dua tren chinh trang thai driver dang sai.
-    // Phai dut diem association cu roi begin() lai sach se.
+    // WiFi.reconnect() is not enough: it relies on the very driver state that is
+    // wrong. Drop the old association and begin() cleanly.
     WiFi.disconnect(false);
     delay(50);
     WiFi.mode(WIFI_STA);
@@ -151,18 +151,18 @@ bool NetworkManager::syncNtpTime(uint32_t timeoutMs) {
         }
     }
 
-    // Nếu đã sync gần đây (trong 60 giây qua), bỏ qua
+    // Synced within the last 60 seconds: skip
     if (_isTimeSynced && (millis() - _lastTimeSync < 60000)) {
         return true;
     }
 
     _isNtpSyncing = true;
 
-    // Reset cờ callback và kích hoạt lại SNTP qua Arduino API chính thức
+    // Reset the callback flag and restart SNTP
     s_ntpSyncDone = false;
     configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 
-    // Chờ callback onNtpSyncCallback() được gọi bởi LWIP SNTP daemon
+    // Wait for the LWIP SNTP daemon to call onNtpSyncCallback()
     uint32_t start = millis();
     while (!s_ntpSyncDone && (millis() - start < timeoutMs)) {
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -182,10 +182,6 @@ bool NetworkManager::syncNtpTime(uint32_t timeoutMs) {
     _isNtpSyncing = false;
     return s_ntpSyncDone;
 }
-
-// triggerNtpSync() + ntpTaskWorker() đã xoá 2026-09-18: không có lời gọi nào
-// (chỉ khai báo trong header), NTP thật sự chạy bằng syncNtpTime() gọi thẳng
-// trong syncWakeup(). Giữ lại chỉ tạo ảo giác có một đường NTP nền thứ hai.
 
 void NetworkManager::getTimeString(char* buffer, size_t maxLen) const {
     if (buffer == nullptr || maxLen == 0) return;
@@ -209,13 +205,13 @@ int NetworkManager::getWifiRSSI() const {
     return WiFi.RSSI();
 }
 
-// Cac duong dan he dieu hanh goi de do "co internet khong". Tra 302 o day thi
-// may bao "can dang nhap" va tu bung trang portal len.
+// Paths operating systems request to probe for internet access. Answering 302
+// here makes the device report "sign-in required" and open the portal itself.
 //   Android : /generate_204, /gen_204
 //   Apple   : /hotspot-detect.html, /library/test/success.html
 //   Windows : /connecttest.txt, /ncsi.txt, /redirect, /fwlink
-// Luu y: KHONG duoc tra dung noi dung Windows cho (Microsoft NCSI...) o cac
-// duong dan nay, vi lam vay Windows se ket luan la mang co internet that.
+// Do NOT return the content Windows expects (Microsoft NCSI...) on these paths:
+// Windows would conclude the network has real internet.
 static const char* const CAPTIVE_PROBE_PATHS[] = {
     "/generate_204", "/gen_204",
     "/hotspot-detect.html", "/library/test/success.html",
@@ -223,25 +219,25 @@ static const char* const CAPTIVE_PROBE_PATHS[] = {
 };
 
 void NetworkManager::startProvisioningAP(const char* apSsid, const char* apPassword) {
-    // Danh dau dang provisioning NGAY tu dau. isProvisioningActive() dua vao
-    // _captiveServer khac null; neu de viec cap phat xuong duoi thi trong luc
-    // dung AP van con mot khe cua so ma ensureConnected() tuong la khong
-    // provisioning va di keo Wi-Fi ve che do STA.
+    // Mark provisioning as active FIRST. isProvisioningActive() relies on
+    // _captiveServer being non-null; allocating it further down would leave a
+    // window during AP setup where ensureConnected() thinks provisioning is off
+    // and drags Wi-Fi back to STA mode.
     if (_captiveServer == nullptr) _captiveServer = new WebServer(80);
     _provisioningDone = false;
 
-    // Khong tat auto-reconnect thi lop Wi-Fi cua ESP van tu thu ket noi lai bang
-    // credential cu va keo chip ra khoi che do AP chi sau vai giay.
+    // Without disabling auto-reconnect the ESP Wi-Fi layer keeps retrying the old
+    // credentials and pulls the chip out of AP mode within seconds.
     WiFi.setAutoReconnect(false);
     WiFi.disconnect(true, true);
     delay(100);
 
-    // AP_STA chu khong phai AP: quet Wi-Fi can giao dien STA song. Dat mode SAU
-    // disconnect() o tren de STA len o trang thai roi, khong tu di ket noi.
+    // AP_STA rather than AP: Wi-Fi scanning needs a live STA interface. Set the mode
+    // AFTER the disconnect() above so STA comes up idle and doesn't connect by itself.
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(apSsid, apPassword);
 
-    // Moi truy van DNS deu tra ve IP cua box -> go ten mien nao cung ra portal.
+    // Every DNS query resolves to the box's IP -> any domain opens the portal.
     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
@@ -255,13 +251,13 @@ void NetworkManager::startProvisioningAP(const char* apSsid, const char* apPassw
     for (size_t i = 0; i < sizeof(CAPTIVE_PROBE_PATHS) / sizeof(CAPTIVE_PROBE_PATHS[0]); i++) {
         _captiveServer->on(CAPTIVE_PROBE_PATHS[i], [this]() { handleCaptiveProbe(); });
     }
-    // Giu nguyen cach cu: duong dan la tra thang trang portal (200). Doi sang
-    // 302 o day se lam chinh cac request con cua trang portal bi day di lung tung.
+    // Unknown paths get the portal page directly (200). A 302 here would bounce
+    // the portal page's own sub-requests around.
     _captiveServer->onNotFound([this]() { handleCaptiveRoot(); });
 
     _captiveServer->begin();
 
-    // Quet truoc mot lan de den luc nguoi dung mo trang thi danh sach da co san.
+    // Scan once up front so the list is ready when the user opens the page.
     WiFi.scanNetworks(true, false);
 }
 
@@ -273,14 +269,14 @@ void NetworkManager::handleCaptiveProbe() {
     _captiveServer->send(302, "text/plain", "");
 }
 
-// SSID duoc phep chua dau nhay va dau gach nguoc -> phai escape truoc khi nhet
-// vao JSON, khong noi chuoi tho.
+// SSIDs may contain quotes and backslashes -> escape before embedding in JSON
+// instead of concatenating raw.
 static String jsonEscape(const String& s) {
     String out;
     out.reserve(s.length() + 8);
     for (size_t i = 0; i < s.length(); i++) {
-        // unsigned: SSID la UTF-8, byte > 127 khi de char co dau se thanh am
-        // va bi cat nham o nhanh ky tu dieu khien ben duoi.
+        // unsigned: SSIDs are UTF-8; as signed char a byte > 127 goes negative
+        // and gets wrongly stripped by the control-character branch below.
         unsigned char ch = (unsigned char)s[i];
         if (ch == '"' || ch == 0x5C) { out += (char)0x5C; out += (char)ch; }
         else if (ch < 0x20)            { out += ' '; }
@@ -293,12 +289,12 @@ void NetworkManager::handleCaptiveScan() {
     if (!_captiveServer) return;
 
     int n = WiFi.scanComplete();
-    if (n == WIFI_SCAN_FAILED) {          // -2: chua chay lan nao (hoac vua xoa ket qua)
+    if (n == WIFI_SCAN_FAILED) {          // -2: never run (or results just deleted)
         WiFi.scanNetworks(true, false);
         _captiveServer->send(200, "application/json", "{\"status\":\"scanning\"}");
         return;
     }
-    if (n == WIFI_SCAN_RUNNING) {         // -1: dang quet
+    if (n == WIFI_SCAN_RUNNING) {         // -1: scan in progress
         _captiveServer->send(200, "application/json", "{\"status\":\"scanning\"}");
         return;
     }
@@ -307,7 +303,7 @@ void NetworkManager::handleCaptiveScan() {
     bool first = true;
     for (int i = 0; i < n; i++) {
         String ssid = WiFi.SSID(i);
-        if (ssid.length() == 0) continue;  // mang an, khong bam chon duoc
+        if (ssid.length() == 0) continue;  // hidden network, can't be picked
         if (!first) json += ',';
         first = false;
         json += "{\"ssid\":\"" + jsonEscape(ssid) + "\",\"rssi\":" + String(WiFi.RSSI(i))
@@ -315,8 +311,8 @@ void NetworkManager::handleCaptiveScan() {
     }
     json += "]}";
 
-    // Xoa ket qua -> scanComplete() ve lai -2, nen lan poll sau se quet moi.
-    // Do la hanh vi mong muon cho nut "Quet lai".
+    // Deleting the results resets scanComplete() to -2, so the next poll starts a
+    // fresh scan — the intended behaviour for the "rescan" button.
     WiFi.scanDelete();
     _captiveServer->send(200, "application/json", json);
 }
@@ -366,8 +362,8 @@ void NetworkManager::handleCaptiveSubmit() {
 }
 
 // ---------------------------------------------------------------------------
-// Báo thức trên portal. Chạy trong task NetworkController (handleClient), nên
-// chỉ đụng AlarmClock (có mutex riêng), không đụng SPI/màn hình.
+// Alarms on the portal. Runs in the NetworkController task (handleClient), so it
+// only touches AlarmClock (which has its own mutex), never SPI/the display.
 // ---------------------------------------------------------------------------
 
 static void sendJsonResult(WebServer* srv, int code, bool ok, const char* err = nullptr) {
@@ -434,8 +430,8 @@ void NetworkManager::handleAlarmDelete() {
 void NetworkManager::handleSetTime() {
     if (!_captiveServer) return;
     long long epoch = atoll(_captiveServer->arg("epoch").c_str());
-    // Chỉ nhận giờ điện thoại khi hộp chưa có giờ NTP. Đã có NTP thì NTP đáng tin
-    // hơn — và không cho một trang web bất kỳ trên AP kéo lùi đồng hồ.
+    // Accept the phone's time only while the box has no NTP time. NTP is more
+    // trustworthy — and no arbitrary web page on the AP gets to move the clock back.
     if (_isTimeSynced || time(nullptr) >= MIN_VALID_EPOCH) {
         sendJsonResult(_captiveServer, 200, true);
         return;
@@ -446,8 +442,8 @@ void NetworkManager::handleSetTime() {
     }
     struct timeval tv = { .tv_sec = (time_t)epoch, .tv_usec = 0 };
     settimeofday(&tv, nullptr);
-    // Cho màn hình chờ hiện giờ thật thay vì 00:00 (getTimeString đọc cờ này).
-    // syncNtpTime() khi lên mạng vẫn chạy và chỉnh lại cho chính xác.
+    // Lets the standby screen show real time instead of 00:00 (getTimeString reads
+    // this flag). syncNtpTime() still runs once online and corrects it.
     _isTimeSynced = true;
     DLOG("[NET] gio lay tu portal: %lld", epoch);
     sendJsonResult(_captiveServer, 200, true);
@@ -502,29 +498,27 @@ bool NetworkManager::isWebServerRunning() const {
 #include "MusicStore.h"
 #include "ThemeStore.h"
 
-// Bao ve buoc gianh quyen co _isSyncing giua cac task khac do uu tien.
+// Guards the claim of the _isSyncing flag between tasks of different priority.
 static portMUX_TYPE s_syncMux = portMUX_INITIALIZER_UNLOCKED;
 
-// MIN_VALID_EPOCH: da chuyen len dau file (cac handler bao thuc cua portal dung truoc).
-
-// Moi WiFiClientSecure toi Firebase deu phai di qua day. Truoc kia moi cho tu
-// goi setInsecure() -> tat hoan toan viec kiem tra chung chi, ai dung giua mang
-// cung doc/sua duoc noi dung va lay duoc FIREBASE_AUTH_SECRET.
+// Every WiFiClientSecure to Firebase must go through here. Calling setInsecure()
+// at each call site would disable certificate checks entirely: anyone on the
+// network path could read/alter traffic and grab FIREBASE_AUTH_SECRET.
 //
-// Dung setCACert() chu KHONG phai setCACertBundle(): da doc source Arduino core
-// 2.0.17, arduino_esp_crt_bundle_attach() return som voi log_e("Failed to attach
-// bundle") neu chua goi arduino_esp_crt_bundle_set() truoc — wrapper Arduino
-// KHONG nhung san bundle mac dinh, muon dung phai tu sinh blob bang
-// gen_crt_bundle.py. setCACert voi PEM tuong minh la duong chac chan.
+// setCACert(), NOT setCACertBundle(): in Arduino core 2.0.17,
+// arduino_esp_crt_bundle_attach() returns early with log_e("Failed to attach
+// bundle") unless arduino_esp_crt_bundle_set() was called first — the Arduino
+// wrapper does NOT embed a default bundle; you'd have to generate the blob with
+// gen_crt_bundle.py. setCACert with an explicit PEM is the reliable path.
 //
-// KHONG dat setHandshakeTimeout() o day (mac dinh 120s). Siet ngan lai khong
-// giup gi cho bao mat, ma link Wi-Fi yeu (associate + DHCP da ton 3-8s, xem
-// MEMORY.md Fix vong 4) se de ra mot kieu fail trong giong loi cert nhung
-// khong phai.
+// Do NOT set setHandshakeTimeout() here (default 120s). Tightening it adds no
+// security, and on a weak Wi-Fi link (associate + DHCP already take 3-8s, see
+// MEMORY.md "Fix vong 4") it creates a failure that looks like a certificate
+// error but isn't.
 #ifndef FIREBASE_TLS_VERIFY
-// Fail-closed: neu co bi mat (doi ten, thieu include config.h) thi `#if` cua mot
-// macro chua dinh nghia am tham thanh 0 -> tu dong quay ve setInsecure() ma
-// khong ai biet. Bat loi luc bien dich thay vi im lang ho MITM.
+// Fail closed: if the flag goes missing (renamed, config.h not included), `#if`
+// on an undefined macro silently evaluates to 0 -> falls back to setInsecure()
+// unnoticed. Fail at compile time instead of silently allowing MITM.
 #error "FIREBASE_TLS_VERIFY chua duoc dinh nghia (xem include/config.h)"
 #endif
 
@@ -536,8 +530,8 @@ static void configureTlsClient(WiFiClientSecure& client) {
 #endif
 }
 
-// Loi mbedTLS that su, doc tu client sau khi HTTPClient chi tra ve -1 chung
-// chung. Phan biet duoc "chung chi khong hop le" voi "khong noi duoc toi server".
+// The real mbedTLS error, read from the client after HTTPClient returned only a
+// generic -1. Tells "invalid certificate" apart from "can't reach the server".
 static void logTlsError(WiFiClientSecure& client, const char* where) {
     char buf[100] = "";
     int err = client.lastError(buf, sizeof(buf));
@@ -546,24 +540,17 @@ static void logTlsError(WiFiClientSecure& client, const char* where) {
     }
 }
 
-// Chuoi xac thuc noi vao cuoi URL.
-// - Che do idToken: RONG. Token di qua header Authorization: Bearer. Bat buoc
-//   phai lam vay vi idToken JWT dai ~900-1100 byte, nhet vao `?auth=` se tran
-//   cac buffer url[256]/url[384] dang dung.  (Da kiem chung 2026-09-03: RTDB
-//   REST co parse header nay — token rac tra ve 401 "Unauthorized request.",
-//   khac han 200 khi khong gui header.)
-// - Che do cu: `?auth=<Database Secret>` nhu truoc.
-// `sep` la ky tu ngan cach dung cho URL do: '?' neu chua co query nao, '&' neu
-// da co san tham so khac.
-// Noi tham so auth vao CUOI _url.
+// Appends the auth parameter to the END of _url: `?auth=<idToken>` in idToken
+// mode, `?auth=<Database Secret>` in legacy mode. `sep` is the separator that
+// fits the URL: '?' when it has no query yet, '&' when it already has parameters.
 //
-// Vi sao khong dung header: da do that 2026-09-05 bang idToken hop le cua chinh
-// box (945 byte, localId khop BOX_ID) tren /boxes/<BOX_ID>/status.json:
+// Why not a header: measured with the box's own valid idToken (945 bytes,
+// localId matching BOX_ID) on /boxes/<BOX_ID>/status.json:
 //     Authorization: Bearer <idToken>    -> 401 "Unauthorized request."
 //     Authorization: Firebase <idToken>  -> 401
 //     ?auth=<idToken>                    -> 200
-// RTDB chi nhan `Bearer` cho OAuth2 access token cua service account, khong phai
-// Firebase idToken. Xem MEMORY.md muc 17. Dung sua nguoc lai.
+// RTDB accepts `Bearer` only for a service account's OAuth2 access token, not a
+// Firebase idToken. See MEMORY.md §17. Don't change this back.
 void NetworkManager::appendAuth(char sep) {
     size_t len = strlen(_url);
     if (len >= sizeof(_url)) return;
@@ -573,32 +560,32 @@ void NetworkManager::appendAuth(char sep) {
 #else
     int n = snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, FIREBASE_AUTH_SECRET);
 #endif
-    // Cat cut token cho ra 401 TRONG Y HET voi 401 do rule tu choi. Chinh su
-    // nhap nhang kieu nay da lam muc 11 ket luan sai mot vong. Phai keu len.
+    // A truncated token yields a 401 that looks EXACTLY like a rule rejection.
+    // That ambiguity already caused one wrong conclusion (MEMORY.md §11). Be loud.
     if (n < 0 || (size_t)n >= sizeof(_url) - len) {
         DLOG("[NET] auth query BI CAT CUT (url %u)", (unsigned)strlen(_url));
     }
 }
 
-// Bao lau khong nhan them byte nao thi coi la stream chet. http.setTimeout(30000)
-// chi ap cho mot lan doc, khong chot duoc ca vong lap.
+// How long without a new byte before the stream counts as dead.
+// http.setTimeout(30000) only covers a single read, not the whole loop.
 static const uint32_t DOWNLOAD_STALL_TIMEOUT_MS = 30000;
 
-// Task WakeSync THƯỜNG TRÚ, tạo một lần rồi ngủ chờ notify.
+// The WakeSync task is PERMANENT: created once, then sleeps waiting for a notify.
 //
-// Trước 2026-09-18 mỗi chu kỳ sync tạo một task mới stack 12KB rồi xoá. Xin và
-// trả một khối 12KB liền mạch cứ vài chục giây, ngay sát lúc mbedTLS cần khối
-// ~16KB liền mạch, là cách chắc chắn nhất để làm vụn heap — đúng triệu chứng
-// `SSL - Memory allocation` ở MEMORY.md §21. Stack giờ cấp đúng một lần.
+// Creating and deleting a 12KB-stack task per sync cycle means allocating and
+// freeing a contiguous 12KB block every few dozen seconds, right when mbedTLS
+// needs a contiguous ~16KB block — the surest way to fragment the heap, i.e. the
+// `SSL - Memory allocation` symptom in MEMORY.md §21. The stack is allocated once.
 void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
     if (isPlaybackActive()) {
         DLOG("[NET] sync skip: video playing");
         return;
     }
 
-    // Hai task khac do uu tien (UIController=5, MediaPlayer=3) cung goi ham nay.
-    // Doc roi ghi _isSyncing thanh hai lenh rieng thi ca hai deu co the lot qua
-    // va tao 2 lan sync ghi de len cung mot slot flash.
+    // Two tasks of different priority (UIController=5, MediaPlayer=3) both call
+    // this. With the read and write of _isSyncing as separate steps both could
+    // slip through and start 2 syncs overwriting the same flash slot.
     bool claimed = false;
     portENTER_CRITICAL(&s_syncMux);
     if (!_isSyncing) {
@@ -608,8 +595,8 @@ void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, 
     portEXIT_CRITICAL(&s_syncMux);
     if (!claimed) return;
 
-    // Tham số đi qua biến thành viên, không qua con trỏ cấp phát: chỉ có một lượt
-    // sync chạy tại một thời điểm (cờ _isSyncing ở trên đã chốt điều đó).
+    // Parameters travel via member variables, not an allocated pointer: only one
+    // sync runs at a time (the _isSyncing flag above guarantees it).
     _syncBattery  = batteryPercent;
     _syncCharging = isCharging;
     _syncStorage  = storage;
@@ -621,7 +608,7 @@ void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, 
             _isSyncing = false;
             DLOG("[NET] WakeSync task RAM!");
         }
-        return;  // task vừa tạo chạy ngay lượt đầu, không cần notify
+        return;  // a freshly created task runs its first pass immediately, no notify needed
     }
 
     xTaskNotifyGive(_syncTask);
@@ -633,8 +620,8 @@ void NetworkManager::wakeupSyncTaskWorker(void* param) {
         if (self != nullptr) {
             self->syncWakeup(self->_syncBattery, self->_syncCharging, self->_syncStorage);
         }
-        // Chờ lượt sau. Notify tới trước khi vào đây thì ulTaskNotifyTake trả về
-        // ngay (đếm được giữ lại), nên không mất lượt nào.
+        // Wait for the next round. A notify arriving before this point makes
+        // ulTaskNotifyTake return immediately (the count is kept), so none is lost.
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
 }
@@ -642,7 +629,7 @@ void NetworkManager::wakeupSyncTaskWorker(void* param) {
 bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
     _isSyncing = true;
 
-    // Lưu chẩn đoán của chu kỳ trước đó (đặc biệt hữu ích khi chu kỳ trước fail hoặc ngủ vội)
+    // Keep the previous cycle's diagnostics (most useful when it failed or went to sleep early)
     strncpy(_prevWakeCause, _currentWakeCause, sizeof(_prevWakeCause) - 1);
     _prevWakeCause[sizeof(_prevWakeCause) - 1] = '\0';
     strncpy(_prevDiagStep, _diagStep, sizeof(_prevDiagStep) - 1);
@@ -659,17 +646,18 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 0. Thẻ vắng (chưa mount được lúc boot, hoặc probe vừa báo mất): thử mount lại.
-    // An toàn ở đây vì không phát tin (vừa kiểm ở trên) và task này là bên duy nhất
-    // mở file tải về. Mount lại được thì các bước sau (theme, nhạc, tin) tự đồng bộ.
+    // 0. Card absent (not mounted at boot, or the probe just reported it gone): try
+    // to remount. Safe here because nothing is playing (checked above) and this
+    // task is the only one opening download files. Once remounted, the later
+    // steps (theme, music, messages) sync by themselves.
     if (SdStore::state() == SdStore::State::ABSENT) {
         SdStore::tryRemount();
     }
 
-    // 1. Tái kết nối Wi-Fi. 12s chứ không phải 5s: sau Light Sleep đây là một lần
-    // associate + 4-way handshake + xin IP DHCP hoàn toàn mới (xem ensureConnected),
-    // thực tế tốn 3-8s. Cắt ở 5s là bỏ dở giữa chừng đúng lúc sắp xong.
-    // Không sợ tốn pin oan: Task_UIController bị khoá không cho ngủ khi isSyncing().
+    // 1. Reconnect Wi-Fi. 12s rather than 5s: after light sleep this is a brand-new
+    // associate + 4-way handshake + DHCP (see ensureConnected), 3-8s in practice.
+    // Cutting at 5s aborts right before it completes.
+    // No battery wasted: Task_UIController can't sleep while isSyncing().
     uint32_t wifiStart = millis();
     if (!ensureConnected(12000)) {
         _lastWifiMs = millis() - wifiStart;
@@ -688,32 +676,32 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // Mỗi phiên TLS tới Firebase cần ~35-45KB heap cho mbedTLS handshake (in/out
-    // content buffer mặc định 16KB mỗi chiều — KHÔNG chỉnh được: setBufferSizes()
-    // là API của ESP8266, WiFiClientSecure trên ESP32 không có, đã kiểm chứng
-    // 2026-09-03). Nếu về sau còn gặp http.GET() = -1 mà Wi-Fi rõ ràng vẫn sống,
-    // đây là con số cần nhìn đầu tiên để phân biệt OOM với lỗi đường truyền.
-    // maxblk = khoi lien lon nhat: phan biet phan manh voi het RAM (MEMORY.md §21).
+    // Each TLS session to Firebase needs ~35-45KB of heap for the mbedTLS handshake
+    // (in/out content buffers default to 16KB each way — NOT adjustable:
+    // setBufferSizes() is an ESP8266 API that WiFiClientSecure on ESP32 lacks).
+    // If http.GET() = -1 shows up while Wi-Fi is clearly alive, this is the first
+    // number to look at to tell OOM from a link error.
+    // maxblk = largest contiguous block: tells fragmentation from out-of-RAM (MEMORY.md §21).
     DLOG("[NET] sync start heap=%u maxblk=%u", (unsigned)ESP.getFreeHeap(),
          (unsigned)ESP.getMaxAllocHeap());
 
-    // 2. Đồng bộ thời gian NTP trước để các mốc timestamp phía sau luôn chính xác
+    // 2. Sync NTP time first so later timestamps are accurate
     syncNtpTime(5000);
 
-    // Chốt chặn thời gian — BẮT BUỘC đi kèm setCACert(), không phải tuỳ chọn.
-    // Với setInsecure() thì NTP hỏng vẫn chạy được. Với VERIFY_REQUIRED thì
-    // time(nullptr) ≈ 0 lúc boot nguội -> mbedTLS trả BADCERT_FUTURE -> MỌI
-    // handshake fail. Bỏ bước này là biến "NTP chập chờn" thành "mất hẳn cloud".
+    // Time gate — REQUIRED alongside setCACert(), not optional. With setInsecure()
+    // a broken NTP still works. With VERIFY_REQUIRED, time(nullptr) ≈ 0 on a cold
+    // boot -> mbedTLS returns BADCERT_FUTURE -> EVERY handshake fails. Dropping
+    // this step turns "flaky NTP" into "cloud gone entirely".
     if (time(nullptr) < MIN_VALID_EPOCH) {
-        // Phải hạ cờ: syncNtpTime() short-circuit 60s nếu _isTimeSynced đang bật,
-        // gọi lại suông sẽ return true ngay mà không hề xin lại gói NTP nào.
+        // Clear the flag: syncNtpTime() short-circuits for 60s while _isTimeSynced
+        // is set, so a plain retry would return true without requesting NTP again.
         _isTimeSynced = false;
         DLOG("[NET] time invalid -> NTP retry 15s");
         syncNtpTime(15000);
     }
     if (time(nullptr) < MIN_VALID_EPOCH) {
-        // Marker RIÊNG, không lẫn với http.GET() = -1: ở đây chưa hề mở kết nối
-        // nào cả. Thấy dòng này nghĩa là lỗi NTP, không phải lỗi TLS/mạng.
+        // A DISTINCT marker, not to be confused with http.GET() = -1: no connection
+        // has been opened yet. This line means an NTP failure, not TLS/network.
         DLOG("[NET] sync abort: time invalid");
         strncpy(_diagStep, "ntp_fail", sizeof(_diagStep) - 1);
         strncpy(_diagErr, "time_invalid", sizeof(_diagErr) - 1);
@@ -728,10 +716,10 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 2b. Lấy/gia hạn idToken TRƯỚC mọi lời gọi Firebase. Đặt sau chốt chặn thời
-    // gian vì hạn token so bằng time(nullptr) — RTC sai thì token vừa lấy về đã
-    // bị coi là hết hạn ngay. Token sống 1 giờ nên hầu hết chu kỳ sync chỉ đọc
-    // lại biến trong RAM, không tốn request nào.
+    // 2b. Get/renew the idToken BEFORE any Firebase call. After the time gate
+    // because expiry is compared against time(nullptr) — with a wrong RTC a fresh
+    // token would count as expired at once. Tokens live 1 hour, so most sync
+    // cycles just reuse the one in RAM at no request cost.
     if (!ensureIdToken()) {
         DLOG("[NET] sync abort: khong lay duoc idToken");
         strncpy(_diagStep, "token_fail", sizeof(_diagStep) - 1);
@@ -741,7 +729,7 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     }
     strncpy(_diagStep, "token_ok", sizeof(_diagStep) - 1);
 
-    // 3. Check Flags (Alarms, OTA, Pairing) TRƯỚC để status có dữ liệu alarm mới nhất
+    // 3. Check flags (alarms, OTA, pairing) FIRST so status carries the latest alarm data
     checkFirebaseFlags();
     vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -751,9 +739,9 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 4. Update Status (Heartbeat + Diag Telemetry đẩy lên cloud)
+    // 4. Update status (heartbeat + diagnostic telemetry pushed to the cloud)
     updateFirebaseStatus(batteryPercent, isCharging);
-    // Đoạn cuối nhật ký, CHỈ khi có lỗi mới (hoặc lần đầu sau boot) -> thường không tốn gì.
+    // Log tail, ONLY on a new error (or first time after boot) -> usually costs nothing.
     pushLogTail();
     vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -763,14 +751,14 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 4a. Theme (gói nhỏ ~150KB, chỉ tải khi cờ bật / rev khác bản trong flash).
+    // 4a. Theme (small ~150KB bundle, downloaded only when the flag is set / rev differs from the one in flash).
     if (!syncTheme(_themeFlag) || isPlaybackActive()) {
         strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
     }
 
-    // 4b. Nhạc báo thức — TRƯỚC tin nhắn: báo thức là việc có giờ hẹn, tin thì không.
+    // 4b. Alarm music — BEFORE messages: alarms have a deadline, messages don't.
     if (!syncAlarmMusic() || isPlaybackActive()) {
         strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
         _isSyncing = false;
@@ -779,26 +767,24 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
 
     // 5. Check and download new messages.
     //
-    // Cong "het slot" nam O DAY chu khong o ngoai cung. Truoc 2026-09-05 no nam
-    // tren ca chu ky (main.cpp: `&& !isStorageFull` cho sync 10s, va nhanh
-    // "post-wakeup sync skip: FULL"), nen khi day slot thi box im hoan toan:
-    // mat heartbeat, mat doc co, mat dong bo bao thuc, mat OTA va pairing flag.
-    // Y dinh ban dau chi la "day roi thi khoi tai tin cho phi" — dung, nhung chi
-    // ap cho RIENG buoc nay.
+    // The "slots full" gate belongs HERE, not around the whole cycle. Gating the
+    // whole cycle makes a full box go completely silent: no heartbeat, no flag
+    // reads, no alarm sync, no OTA or pairing flag. The intent is only "don't
+    // waste a download when full" — which applies to THIS step alone.
     if (storage != nullptr) {
         if (storage->isFull()) {
-            // _numOfNewMsg CHI duoc gan trong checkAndDownloadNewMessages(), tuc
-            // la NAM SAU cong nay. Sau mot lan reset trong lúc dang day slot, no
-            // ve 0 va khong duong nao dat lai duoc -> hop vua bao "No new
-            // messages" luc cham, vua bao "het slot" luc sync, ket vinh vien vi
-            // slot chi duoc tra lai bang cach doc. Nang san moi chu ky sync.
+            // _numOfNewMsg is ONLY assigned in checkAndDownloadNewMessages(), i.e.
+            // BEHIND this gate. After a reset while full it is 0 with no way to
+            // restore it -> the box says "No new messages" on touch and "slots
+            // full" on sync, stuck forever because slots are only freed by reading.
+            // Raise the floor every sync cycle.
             uint8_t unread = storage->getUnreadCount();
             if (_numOfNewMsg < unread) _numOfNewMsg = unread;
-            // In kèm số slot chưa đọc: phân biệt "đầy thật" (unread > 0) với
-            // "thẻ SD không mount được" (unread == 0 mà vẫn báo đầy: khi
-            // !_mounted, SDStorageProvider::isFull() trả true còn
-            // getUnreadCount() trả 0). Con trỏ ghi đã bị kẹp bởi
-            // writeIndexSafe() nên không thể là nguyên nhân (MEMORY.md §26).
+            // Log the unread count too: it tells "really full" (unread > 0) from
+            // "SD card not mounted" (full with unread == 0: when !_mounted,
+            // SDStorageProvider::isFull() returns true and getUnreadCount()
+            // returns 0). The write cursor is clamped by writeIndexSafe(), so it
+            // can't be the cause (see MEMORY.md §26).
             DLOG("[NET] msg skip: het slot, unread=%u", (unsigned)unread);
         } else {
             checkAndDownloadNewMessages(storage);
@@ -811,23 +797,22 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
 }
 
 // ============================================================================
-// Firebase Auth — idToken riêng của box thay cho Database Secret quyền admin
+// Firebase Auth — the box's own idToken instead of the admin Database Secret
 // ============================================================================
-// Cả hai endpoint dưới đây đã đo chain thật (2026-09-03): identitytoolkit và
-// securetoken đều về GTS Root R4 — đã có sẵn trong firebase_root_ca.h, không
-// phải nhúng thêm chứng chỉ nào.
+// Both endpoints below chain to GTS Root R4 (measured on identitytoolkit and
+// securetoken) — already in firebase_root_ca.h, no extra certificate to embed.
 
-// Firebase Storage NGUOC voi RTDB: no CO nhan header, va scheme la
-// "Firebase <idToken>" (khong phai "Bearer"). Khac dich vu, khac quy uoc.
+// Firebase Storage is the OPPOSITE of RTDB: it DOES accept a header, with scheme
+// "Firebase <idToken>" (not "Bearer"). Different service, different convention.
 //
-// CHUA VERIFY DUOC tren may that: Storage hien dang mo nen gui token rac cung
-// tra 200, khong phan biet duoc "duoc chap nhan" voi "khong can thiet". Chi do
-// duoc sau khi deploy storage.rules. Day chinh la cai bay da lam muc 11 ket luan
-// sai ve header cua RTDB — dung lap lai kieu suy luan do.
+// NOT VERIFIED on a real device: Storage is currently open, so a garbage token
+// also returns 200 and "accepted" can't be told from "not needed". Measurable
+// only once storage.rules is deployed. This is the same trap that led to the
+// wrong conclusion about RTDB headers (MEMORY.md §11) — don't repeat that reasoning.
 //
-// Dung String thay vi buffer stack ~1.4KB: TASK_STACK_NETWORK chi 6144 va cho nay
-// da nam sau trong call-chain. addHeader() nhan const String& nen dang nao cung
-// sinh String tam — khai bao tuong minh khong ton them gi.
+// A String instead of a ~1.4KB stack buffer: TASK_STACK_NETWORK is only 6144 and
+// this sits deep in the call chain. addHeader() takes const String&, so a
+// temporary String exists anyway — declaring it explicitly costs nothing.
 void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
 #if FIREBASE_USE_IDTOKEN
     if (_idToken[0] != '\0') {
@@ -843,10 +828,10 @@ void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
 void NetworkManager::noteAuthFailure(int httpCode, const char* where) {
 #if FIREBASE_USE_IDTOKEN
     if (httpCode == 401 || httpCode == 403) {
-        // Token chết hoặc rule từ chối. Hạ hạn để chu kỳ sync sau lấy token mới.
-        // Không tự retry ngay tại đây: token sống 1 giờ còn 1 chu kỳ sync chỉ vài
-        // giây, nên 401 gần như luôn nghĩa là RULE từ chối chứ không phải hết hạn
-        // — retry ngay chỉ tốn thêm một handshake TLS mà vẫn 401.
+        // Dead token or rule rejection. Zero the expiry so the next sync cycle gets a
+        // new token. No retry here: a token lives 1 hour and a sync cycle a few
+        // seconds, so 401 almost always means a RULE rejection, not expiry —
+        // retrying right away just costs another TLS handshake for the same 401.
         DLOG("[NET] auth %d @ %s -> se lay token moi", httpCode, where);
         _idTokenExpiry = 0;
     }
@@ -858,16 +843,16 @@ void NetworkManager::noteAuthFailure(int httpCode, const char* where) {
 bool NetworkManager::ensureIdToken(bool force) {
 #if !FIREBASE_USE_IDTOKEN
     (void)force;
-    return true;   // vẫn dùng Database Secret, không cần token
+    return true;   // still on the Database Secret, no token needed
 #else
-    // Trừ hao 60s: token còn hạn dưới 1 phút thì coi như hết, tránh trường hợp
-    // hết hạn ngay giữa chu trình sync.
+    // 60s margin: a token with under a minute left counts as expired, so it can't
+    // expire in the middle of a sync cycle.
     if (!force && _idToken[0] != '\0' && time(nullptr) < _idTokenExpiry - 60) {
         return true;
     }
 
-    // Refresh token không hết hạn theo thời gian -> ưu tiên dùng, đỡ phải gửi
-    // lại mật khẩu qua đường truyền mỗi lần.
+    // A refresh token doesn't expire with time -> prefer it, so the password
+    // isn't sent over the wire every time.
     char refresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
     bool haveRefresh = false;
     {
@@ -881,7 +866,7 @@ bool NetworkManager::ensureIdToken(bool force) {
     if (haveRefresh && authWithRefreshToken(refresh)) return true;
 
     if (haveRefresh) {
-        // Refresh hỏng (bị thu hồi / đổi mật khẩu) -> vứt đi, đăng nhập lại từ đầu.
+        // Refresh token broken (revoked / password changed) -> discard it and sign in from scratch.
         DLOG("[NET] refresh token hong -> dang nhap lai");
         ConfigManager cfg;
         if (cfg.init(NVS_NAMESPACE)) {
@@ -895,16 +880,16 @@ bool NetworkManager::ensureIdToken(bool force) {
 }
 
 #if FIREBASE_USE_IDTOKEN
-// Đọc idToken/refreshToken/expiresIn từ response rồi cất vào RAM + NVS.
-// Dùng filter của ArduinoJson để CHỈ cấp phát 3 trường cần thiết — response
-// signInWithPassword còn kèm email/localId/kind..., cấp phát trọn gói là phí
-// heap đúng lúc sắp cần ~45KB cho handshake TLS kế tiếp.
-// Nhan String chu KHONG phai Stream. Ly do (do that 2026-09-05, MEMORY.md muc 18):
-// ca identitytoolkit lan securetoken tra "Transfer-Encoding: chunked", khong co
-// Content-Length. http.getStreamPtr() cho ra stream THO con nguyen dong kich thuoc
-// chunk dang hex, vi du "4a1\r\n{...}". ArduinoJson doc phai "4a1" -> parse "4"
-// thanh mot SO, ket thuc THANH CONG, roi doc["idToken"] = null -> bao
-// "thieu idToken" ma khong he co loi JSON. Chi http.getString() moi giai ma chunked.
+// Reads idToken/refreshToken/expiresIn from the response into the caller's buffers.
+// An ArduinoJson filter allocates ONLY the 3 fields needed — the
+// signInWithPassword response also carries email/localId/kind..., and allocating
+// it all wastes heap right before the next TLS handshake needs ~45KB.
+// Takes a String, NOT a Stream (measured, see MEMORY.md §18): both identitytoolkit
+// and securetoken answer "Transfer-Encoding: chunked" with no Content-Length.
+// http.getStreamPtr() yields the RAW stream still carrying the hex chunk-size
+// lines, e.g. "4a1\r\n{...}". ArduinoJson reads "4a1" -> parses "4" as a NUMBER,
+// finishes SUCCESSFULLY, then doc["idToken"] = null -> "missing idToken" with no
+// JSON error at all. Only http.getString() decodes chunked encoding.
 static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLen,
                               time_t& outExpiry, char* outRefresh, size_t refreshLen,
                               bool snakeCase) {
@@ -926,21 +911,20 @@ static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLe
     const char* expires = doc[snakeCase ? "expires_in"    : "expiresIn"];
 
     if (idTok == nullptr || idTok[0] == '\0') {
-        // In dau response: khong co dong nay thi "thieu idToken" khong noi len
-        // duoc gi ca — da tung ton mot vong flash vi vay. 60 ky tu dau chi chua
-        // phan "kind"/"error", chua toi cho co token.
+        // Log the head of the response: without it "missing idToken" says nothing.
+        // The first 60 chars only hold the "kind"/"error" part, never a token.
         DLOG("[NET] auth: thieu idToken; body=%s", body.substring(0, 60).c_str());
         return false;
     }
-    // Firebase trả expiresIn dạng CHUỖI giây ("3600"), không phải số.
+    // Firebase returns expiresIn as a STRING of seconds ("3600"), not a number.
     long ttl = (expires != nullptr) ? atol(expires) : 3600;
     if (ttl <= 0) ttl = 3600;
 
-    // Luu JWT THO. Truoc day luu "Bearer <jwt>" cho addHeader(), nhung RTDB
-    // khong nhan header — token phai di vao query `?auth=` (MEMORY.md muc 17).
+    // Store the RAW JWT (no "Bearer " prefix): RTDB doesn't accept the header —
+    // the token goes into the `?auth=` query (see MEMORY.md §17).
     int n = snprintf(outToken, tokenLen, "%s", idTok);
     if (n < 0 || (size_t)n >= tokenLen) {
-        // Cắt cụt token = mọi request sau đó 401 mà không rõ lý do. Thà báo hỏng.
+        // A truncated token = every later request 401s for no visible reason. Fail instead.
         DLOG("[NET] auth: idToken qua dai (%d)", n);
         outToken[0] = '\0';
         return false;
@@ -956,8 +940,8 @@ static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLe
     return true;
 }
 
-// Gửi request auth và xử lý response. Gom chung vì 2 endpoint chỉ khác URL,
-// content-type và cách đặt tên trường (camelCase vs snake_case).
+// The two auth endpoints differ only in URL, content type and field naming
+// (camelCase vs snake_case); parseAuthResponse() handles both.
 bool NetworkManager::authWithRefreshToken(const char* refreshToken) {
     WiFiClientSecure client;
     configureTlsClient(client);
@@ -983,12 +967,12 @@ bool NetworkManager::authWithRefreshToken(const char* refreshToken) {
     }
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
-    // getString() (KHONG phai getStreamPtr) vi response la chunked — xem ghi chu
-    // o parseAuthResponse. Doc xong roi end() ngay de tra connection som.
+    // getString() (NOT getStreamPtr): the response is chunked — see
+    // parseAuthResponse. end() right after reading to release the connection early.
     String resp = http.getString();
     http.end();
 
-    // snakeCase = true: endpoint securetoken dùng id_token/refresh_token/expires_in
+    // snakeCase = true: the securetoken endpoint uses id_token/refresh_token/expires_in
     bool ok = parseAuthResponse(resp, _idToken,
                                 sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), true);
@@ -1025,9 +1009,9 @@ bool NetworkManager::authWithPassword() {
 
     int code = http.POST((uint8_t*)body, strlen(body));
     if (code != HTTP_CODE_OK) {
-        // 400 kèm PASSWORD_LOGIN_DISABLED = chưa bật Email/Password trong Console.
-        // 400 kèm EMAIL_NOT_FOUND / INVALID_PASSWORD = chưa chạy provision script
-        // hoặc điền sai config_secrets.h.
+        // 400 with PASSWORD_LOGIN_DISABLED = Email/Password not enabled in the Console.
+        // 400 with EMAIL_NOT_FOUND / INVALID_PASSWORD = provision script not run, or
+        // config_secrets.h filled in wrong.
         DLOG("[NET] signIn fail: %d", code);
         if (code < 0) logTlsError(client, "signin");
         else DLOG("[NET] signIn: %s", http.getString().substring(0, 80).c_str());
@@ -1036,12 +1020,12 @@ bool NetworkManager::authWithPassword() {
     }
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
-    // getString() (KHONG phai getStreamPtr) vi response la chunked — xem ghi chu
-    // o parseAuthResponse. Doc xong roi end() ngay de tra connection som.
+    // getString() (NOT getStreamPtr): the response is chunked — see
+    // parseAuthResponse. end() right after reading to release the connection early.
     String resp = http.getString();
     http.end();
 
-    // snakeCase = false: endpoint identitytoolkit dùng idToken/refreshToken/expiresIn
+    // snakeCase = false: the identitytoolkit endpoint uses idToken/refreshToken/expiresIn
     bool ok = parseAuthResponse(resp, _idToken,
                                 sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), false);
@@ -1075,10 +1059,9 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     http.setTimeout(FIREBASE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
-    // 448 chứ không phải 384: thêm trường "fw" (2026-09-21) đã đẩy chuỗi sát trần,
-    // mà tràn thì snprintf cắt cụt ÂM THẦM -> cả gói JSON hỏng, PATCH bị từ chối.
-    // 640: thêm config_rev/sd_state/sd_free_mb/music_n/theme_rev (2026-09-24). Đủ diag đầy ~480
-    // byte; tràn thì snprintf cắt cụt -> JSON hỏng -> heartbeat chết (kiểm ngay bên dưới).
+    // 640: a payload with full diag is ~480 bytes. On overflow snprintf truncates
+    // SILENTLY -> broken JSON -> the PATCH is rejected and the heartbeat dies
+    // (checked right below).
     char payload[640];
     uint32_t now = (uint32_t)time(nullptr);
     int plen = snprintf(payload, sizeof(payload),
@@ -1122,13 +1105,13 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     int httpCode = http.PATCH((uint8_t*)payload, strlen(payload));
     noteAuthFailure(httpCode, "status");
     if (httpCode < 0) {
-        // Day la phien TLS DAU TIEN cua moi chu trinh sync -> cung la cho re
-        // nhat de biet handshake co qua duoc khong sau khi bat setCACert().
+        // This is the FIRST TLS session of every sync cycle -> the cheapest place
+        // to learn whether the handshake passes with setCACert() on.
         DLOG("[NET] status PATCH %d, heap=%u", httpCode, (unsigned)ESP.getFreeHeap());
         logTlsError(client, "status");
     } else {
-        // DEBUG_SCREEN: dong nay chi de xac minh Phase A (handshake qua duoc,
-        // heap con lai bao nhieu sau khi parse 2 root). Go bo sau khi da chot.
+        // DEBUG_SCREEN: only verifies Phase A (handshake passes, heap left after
+        // parsing the 2 roots). Remove once settled.
         DLOG("[NET] status OK heap=%u", (unsigned)ESP.getFreeHeap());
     }
     http.end();
@@ -1168,14 +1151,12 @@ bool NetworkManager::checkFirebaseFlags() {
     String payload = http.getString();
     http.end();
 
-    // Cờ báo thức tên là `a_flag` — đúng tên backend ghi (firebase-alarm.repository.ts).
-    // Trước 2026-09-18 firmware đọc `sync_alarms_flag`, một cờ không ai ghi, nên
-    // báo thức đặt trên web không bao giờ về tới hộp (nợ đã ghi ở MEMORY.md §20).
-    // Hai cờ OTA `emergency_ota`/`normal_ota` đã GỠ ngày 2026-09-21: không bên nào
-    // ghi chúng (không backend, không web, không rules — chỉ sửa tay được trong
-    // Firebase console), và kích hoạt OTA từ xa buộc hộp thức 10 phút chờ một việc
-    // có thể không bao giờ tới. OTA giờ là chế độ riêng do người dùng vào bằng
-    // chuỗi chạm giữ 3s, 3s rồi 6s (STATE_OTA trong main.cpp).
+    // The alarm flag is `a_flag` — the name the backend writes
+    // (firebase-alarm.repository.ts); see MEMORY.md §20.
+    // There are no OTA flags: nothing writes them (no backend, web or rules), and
+    // remote-triggered OTA would keep the box awake 10 minutes for something that
+    // may never come. OTA is its own mode, entered by the user with the touch-hold
+    // sequence 3s, 3s, 6s (STATE_OTA in main.cpp).
     bool alarmFlag = false;
     bool configFlag = false;
     bool musicFlag = false;
@@ -1192,23 +1173,24 @@ bool NetworkManager::checkFirebaseFlags() {
         _themeFlag = doc["theme_flag"] | false;
     }
     _lastAFlag = alarmFlag;
-    // Báo thức đổi (có thể đổi bài) hoặc thư viện nhạc đổi -> lấy lại danh sách nhạc.
+    // Alarms changed (maybe a different track) or the music library changed -> refetch the music list.
     if (alarmFlag || musicFlag) _musicNeedFetch = true;
 
-    // Reset cờ TRƯỚC khi tải: web sửa tiếp trong lúc đang tải sẽ bật lại cờ và được
-    // bắt ở chu kỳ sau. Reset sau khi tải thì lần sửa đó bị xoá mất cờ. Chỉ PATCH khi
-    // có cờ bật — trước đây PATCH mỗi chu kỳ 10s, tốn một lần bắt tay TLS vô ích.
-    // config_flag hạ ở đây cũng an toàn dù tải hỏng: _settingsNeedFetch giữ lượt thử lại.
+    // Reset flags BEFORE downloading: an edit from the web during the download
+    // re-raises the flag and is caught next cycle. Resetting afterwards would wipe
+    // that edit's flag. PATCH only when a flag is set — one per sync cycle would be
+    // a wasted TLS handshake. Lowering config_flag here is safe even if the fetch
+    // fails: _settingsNeedFetch keeps the retry.
     resetFlags(alarmFlag, configFlag, false, musicFlag);
 
     if (configFlag || _settingsNeedFetch) {
         _settingsNeedFetch = !syncFirebaseSettings();
     }
 
-    // Đồng bộ báo thức hai chiều (luật đầy đủ ở AlarmClock.h):
-    //  - hộp có sửa đổi chưa đẩy -> PUT cả danh sách lên, bỏ qua a_flag (hộp thắng)
-    //  - không thì tải về khi a_flag bật, hoặc lần sync đầu tiên sau khi boot
-    //    (NVS có thể rỗng/cũ, vd. vừa nạp firmware đổi kích thước AlarmItem)
+    // Two-way alarm sync (full rules in AlarmClock.h):
+    //  - the box has unpushed edits -> PUT the whole list, ignore a_flag (box wins)
+    //  - otherwise download when a_flag is set, or on the first sync after boot
+    //    (NVS may be empty/stale, e.g. after flashing firmware that resized AlarmItem)
     uint32_t alarmRev = 0;
     bool isDirty = AlarmClock::instance().isDirty(&alarmRev);
     _lastAlarmsDirty = isDirty;
@@ -1223,7 +1205,7 @@ bool NetworkManager::checkFirebaseFlags() {
         }
     } else if (alarmFlag || _alarmsNeedFetch) {
         DLOG("[NET] flags: sync alarms");
-        // Tải hỏng thì giữ _alarmsNeedFetch để chu kỳ sau thử lại dù cờ đã reset.
+        // On a failed fetch keep _alarmsNeedFetch so the next cycle retries although the flag was reset.
         bool fetchOk = syncFirebaseAlarms();
         _alarmsNeedFetch = !fetchOk;
         if (fetchOk) {
@@ -1242,9 +1224,10 @@ bool NetworkManager::checkFirebaseFlags() {
     return true;
 }
 
-// Hộp -> cloud: PUT thay TOÀN BỘ boxes/<id>/config/alarm_list. Rule cho phép box
-// ghi đúng nhánh này (database.rules.json). Không bật a_flag: chính hộp là bên
-// vừa ghi, bật lên chỉ khiến chu kỳ sau tải lại đúng thứ vừa đẩy.
+// Box -> cloud: PUT replaces ALL of boxes/<id>/config/alarm_list. The rules let
+// the box write exactly this branch (database.rules.json). a_flag is not raised:
+// the box itself just wrote, so raising it would only make the next cycle
+// download what was just pushed.
 bool NetworkManager::pushFirebaseAlarms() {
     AlarmItem alarms[MAX_ALARMS];
     size_t count = AlarmClock::instance().list(alarms, MAX_ALARMS);
@@ -1258,17 +1241,18 @@ bool NetworkManager::pushFirebaseAlarms() {
         a["time"] = alarms[i].time;
         a["is_enable"] = alarms[i].isEnable;
         a["repeatable"] = alarms[i].repeatable;
-        // Hộp đẩy CẢ danh sách (hộp thắng) nên phải gửi đủ trường nhạc, không thì PUT xoá
-        // mất lựa chọn nhạc/âm lượng người nhận đã đặt trên web (case bắt buộc #2).
+        // The box pushes the WHOLE list (box wins), so the music fields must be sent too,
+        // or the PUT wipes the music/volume choice the recipient made on the web
+        // (mandatory case, MEMORY.md §28).
         if (alarms[i].musicId[0]) a["music_id"] = alarms[i].musicId;
         a["volume"] = alarms[i].volume;
         a["ramp"] = alarms[i].ramp;
-        // Web không đọc created_at; ghi cho khớp schema backend (BaseModel).
+        // The web doesn't read created_at; written to match the backend schema (BaseModel).
         a["created_at"] = nowMs;
         a["updated_at"] = nowMs;
     }
     String body;
-    serializeJson(doc, body);  // {} khi rỗng -> RTDB xoá nút, đúng ý "xoá hết"
+    serializeJson(doc, body);  // {} when empty -> RTDB deletes the node, i.e. "delete all"
 
     WiFiClientSecure client;
     configureTlsClient(client);
@@ -1318,14 +1302,14 @@ void NetworkManager::resetFlags(bool alarm, bool config, bool theme, bool music)
     http.end();
 }
 
-// Cài đặt người dùng. Truy vấn khoảng khoá orderBy="$key" từ "config_rev" tới
-// "playback_volume": theo thứ tự chữ cái đúng 4 khoá config_rev, display_brightness,
-// led_state, playback_volume. Một request, và không kéo mật khẩu Wi-Fi (wifi_config), cả
-// danh sách báo thức (alarm_list) hay theme về hộp. orderBy="$key" không cần .indexOn.
+// User settings. A key-range query orderBy="$key" from "config_rev" to
+// "playback_volume": alphabetically exactly the 4 keys config_rev, display_brightness,
+// led_state, playback_volume. One request, without pulling the Wi-Fi password
+// (wifi_config), the alarm list (alarm_list) or the theme. orderBy="$key" needs no .indexOn.
 //
-// KHÔNG dùng `?shallow=true`: bản đầu (2026-09-24) tưởng shallow trả nguyên giá trị khoá
-// con kiểu số, thật ra nó trả `true` cho MỌI khoá con -> is<int>() sai -> hộp lặng lẽ bỏ
-// qua, không bao giờ nhận độ sáng / âm lượng (user test 25/09: cloud rev 5, hộp rev 0).
+// Do NOT use `?shallow=true`: it returns `true` for EVERY child key instead of numeric
+// values -> is<int>() fails -> the box silently skips them and never receives
+// brightness / volume.
 bool NetworkManager::syncFirebaseSettings() {
     WiFiClientSecure client;
     configureTlsClient(client);
@@ -1355,12 +1339,12 @@ bool NetworkManager::syncFirebaseSettings() {
     if (payload != "null" && payload.length() > 2) {
         JsonDocument doc;
         if (deserializeJson(doc, payload)) return false;
-        // is<int>() chặn giá trị lạ (chuỗi, null) -> -1 = giữ giá trị cũ.
+        // is<int>() rejects odd values (string, null) -> -1 = keep the old value.
         if (doc["display_brightness"].is<int>()) bl = doc["display_brightness"].as<int>();
         if (doc["playback_volume"].is<int>()) vol = doc["playback_volume"].as<int>();
         rev = doc["config_rev"] | 0u;
     }
-    // Không có gì để đổi thì khỏi ghi NVS (mỗi lần boot đều đi qua đây).
+    // Nothing to change -> no NVS write (every boot passes through here).
     if (bl < 0 && vol < 0) return true;
     if (rev == Settings::appliedRev.load() && rev != 0 &&
         (bl < 0 || bl == (int)Settings::brightness.load()) &&
@@ -1398,8 +1382,8 @@ bool NetworkManager::syncFirebaseAlarms() {
     AlarmItem alarms[MAX_ALARMS];
     size_t count = 0;
 
-    // "null" = web đã xoá hết báo thức. Trước đây return sớm ở đây nên hộp giữ
-    // nguyên danh sách cũ trong NVS và vẫn kêu các báo thức đã xoá.
+    // "null" = the web deleted every alarm. Don't return early: the box would keep
+    // the old list in NVS and still ring deleted alarms.
     if (payload != "null" && payload.length() > 2) {
         JsonDocument doc;
         DeserializationError err = deserializeJson(doc, payload);
@@ -1410,8 +1394,9 @@ bool NetworkManager::syncFirebaseAlarms() {
             if (count >= MAX_ALARMS) break;
             JsonObject alarmObj = kv.value().as<JsonObject>();
             const char* tStr = alarmObj["time"] | "";
-            // id dài hơn buffer sẽ bị cắt -> lần đẩy ngược lên tạo key khác. Bỏ qua
-            // và kêu lên thay vì âm thầm nhân đôi báo thức trên cloud.
+            // An id longer than the buffer would be truncated -> pushing it back
+            // creates a different key. Skip and log instead of silently duplicating
+            // the alarm in the cloud.
             if (strlen(kv.key().c_str()) >= sizeof(alarms[count].id) ||
                 !AlarmClock::isValidTime(tStr)) {
                 DLOG("[NET] alarm bo qua: %s", kv.key().c_str());
@@ -1441,8 +1426,8 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
     SDCardManager* card = SdStore::card();
     if (!card || !storagePath || !dstPath || size == 0) return DlResult::FAILED;
 
-    // Đã có đủ từ lần trước (crc đã kiểm lúc đổi tên) -> khỏi tải. Gặp khi gói theme bị
-    // cài lại, hoặc chọn lại một bài nhạc đang nằm sẵn trên thẻ.
+    // Already complete from an earlier run (crc was checked at rename) -> skip. Happens when
+    // a theme bundle is reinstalled, or a track already on the card is picked again.
     if (card->getFileSize(dstPath) == (int32_t)size) return DlResult::OK;
 
     char part[96];
@@ -1450,13 +1435,13 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
 
     int32_t have = card->getFileSize(part);
     if (have < 0) have = 0;
-    if ((uint32_t)have > size) {  // .part của một bản khác dài hơn -> bỏ
+    if ((uint32_t)have > size) {  // .part of a different, longer version -> discard
         card->deleteFile(part);
         have = 0;
     }
 
     if ((uint32_t)have < size) {
-        // Đường dẫn Storage -> URL tải: mọi '/' phải mã hoá thành %2F (giống voice_url).
+        // Storage path -> download URL: every '/' must be encoded as %2F (like voice_url).
         String url = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/";
         for (const char* p = storagePath; *p; p++) {
             if (*p == '/') url += "%2F";
@@ -1483,12 +1468,12 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
         if (code == 206 && have > 0) {
             append = true;
         } else if (code == HTTP_CODE_OK) {
-            append = false;  // server bỏ qua Range -> tải lại từ đầu
+            append = false;  // server ignored Range -> download from the start
             have = 0;
         } else {
             DLOG("[NET] file GET %d: %s", code, dstPath);
             http.end();
-            // 416 = .part đã đủ/lệch -> bỏ, lần sau tải lại từ đầu.
+            // 416 = .part already complete/mismatched -> discard, restart next time.
             if (code == 416) card->deleteFile(part);
             return DlResult::FAILED;
         }
@@ -1506,7 +1491,7 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
         uint32_t lastData = millis();
         bool writeErr = false, aborted = false;
         while (got < size && http.connected()) {
-            // Báo thức (có nhạc) bắt đầu kêu giữa chừng: dừng, giữ .part để lần sau tải tiếp.
+            // An alarm (with music) started ringing midway: stop, keep .part to resume later.
             if (isPlaybackActive()) {
                 aborted = true;
                 break;
@@ -1519,8 +1504,8 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
             }
             size_t want = avail < sizeof(buffer) ? avail : sizeof(buffer);
             if (want > size - got) want = size - got;
-            // read() chứ KHÔNG readBytes(): WiFiClientSecure không override readBytes() nên
-            // rơi về Stream::readBytes() đọc TỪNG BYTE (xem vòng tải tin nhắn bên dưới).
+            // read(), NOT readBytes(): WiFiClientSecure doesn't override readBytes(), so it
+            // falls back to Stream::readBytes() reading BYTE BY BYTE (see the message download loop below).
             int n = stream->read(buffer, want);
             if (n <= 0) continue;
             if (card->genWrite(buffer, (size_t)n) != (size_t)n) {
@@ -1566,7 +1551,7 @@ bool NetworkManager::syncTheme(bool themeFlag) {
         _seenThemeEpoch = epoch;
         _themeNeedFetch = true;
     }
-    // Đang chờ Task_MediaPlayer cài gói vừa tải: đừng tải lại, chờ lần sau.
+    // Task_MediaPlayer still has to install the bundle just downloaded: don't download again, wait.
     if (ThemeStore::installPending()) return true;
     if (!themeFlag && !_themeNeedFetch) return true;
 
@@ -1587,7 +1572,7 @@ bool NetworkManager::syncTheme(bool themeFlag) {
     String payload = http.getString();
     http.end();
 
-    if (payload == "null" || payload.length() <= 2) {  // chưa từng lưu theme
+    if (payload == "null" || payload.length() <= 2) {  // no theme ever saved
         _themeNeedFetch = false;
         if (themeFlag) resetFlags(false, false, true, false);
         return true;
@@ -1596,8 +1581,8 @@ bool NetworkManager::syncTheme(bool themeFlag) {
     if (deserializeJson(doc, payload)) return true;
     const char* id = doc["theme_id"] | "";
     uint32_t rev = doc["rev"] | 0u;
-    // Theme lưu bằng web bản cũ (trước 2026-09-24) không có theme_id/rev/assets: hộp
-    // không biết tải gì. Người nhận lưu lại theme một lần trên web là xong.
+    // A theme saved by an old web build has no theme_id/rev/assets: the box can't tell
+    // what to download. The recipient saving the theme once more on the web fixes it.
     if (!id[0] || rev == 0 || strlen(id) > 20) {
         DLOG("[NET] theme cu, can luu lai tren web");
         _themeNeedFetch = false;
@@ -1609,7 +1594,7 @@ bool NetworkManager::syncTheme(bool themeFlag) {
     snprintf(dir, sizeof(dir), "/theme/%s_r%lu", id, (unsigned long)rev);
 
     if (ThemeStore::valid() && ThemeStore::rev() == rev && strcmp(ThemeStore::themeId(), id) == 0) {
-        // Bản trong flash đã đúng: giờ mới hạ cờ, và dọn gói cũ trên thẻ.
+        // The copy in flash is current: only now lower the flag, and clean old bundles off the card.
         _themeNeedFetch = false;
         if (themeFlag) resetFlags(false, false, true, false);
         SDCardManager* card = SdStore::card();
@@ -1624,7 +1609,7 @@ bool NetworkManager::syncTheme(bool themeFlag) {
         return true;
     }
 
-    // Tải từng asset vào thư mục gói. Kiểm size + crc32 trong downloadFile().
+    // Download each asset into the bundle directory. Size + crc32 are checked in downloadFile().
     static const struct { const char* key; const char* file; } ASSETS[] = {
         {"bg", "bg.bin"}, {"f_time", "f_time.vlw"}, {"f_date", "f_date.vlw"}};
     JsonObject assets = doc["assets"].as<JsonObject>();
@@ -1641,11 +1626,11 @@ bool NetworkManager::syncTheme(bool themeFlag) {
         if (r == DlResult::ABORTED) return false;
         if (r != DlResult::OK) {
             DLOG("[NET] theme asset %s FAIL", a.key);
-            return true;  // _themeNeedFetch giữ nguyên -> chu kỳ sau thử tiếp
+            return true;  // _themeNeedFetch stays set -> retried next cycle
         }
     }
-    // layout.json = nguyên bản theme từ cloud (widgets + tên asset). Ghi SAU asset: gói
-    // chỉ "đầy đủ" khi có layout.json (asset bắt buộc của ThemeStore).
+    // layout.json = the theme verbatim from the cloud (widgets + asset names). Written AFTER
+    // the assets: a bundle is only "complete" once it has layout.json (required by ThemeStore).
     char path[80];
     snprintf(path, sizeof(path), "%s/layout.json", dir);
     if (!SdStore::writeAtomic(path, (const uint8_t*)payload.c_str(), payload.length())) return true;
@@ -1656,9 +1641,9 @@ bool NetworkManager::syncTheme(bool themeFlag) {
 }
 
 bool NetworkManager::syncAlarmMusic() {
-    if (!SdStore::card()) return true;  // không có thẻ: báo thức kêu bíp, không có gì để làm
+    if (!SdStore::card()) return true;  // no card: alarms just beep, nothing to do
 
-    // Thẻ vừa mount lại: index trên thẻ mới có thể khác hẳn -> nạp lại, lấy lại danh sách.
+    // Card just remounted: the index on a new card may differ entirely -> reload it, refetch the list.
     uint32_t epoch = SdStore::mountEpoch.load();
     if (epoch != _seenMountEpoch) {
         _seenMountEpoch = epoch;
@@ -1672,7 +1657,7 @@ bool NetworkManager::syncAlarmMusic() {
     for (size_t i = 0; i < nNeed; i++) {
         if (!MusicStore::has(need[i])) missing = true;
     }
-    // Chu kỳ bình thường (không cờ, đủ bài) KHÔNG tốn request nào.
+    // A normal cycle (no flag, all tracks present) costs NO request.
     if (!_musicNeedFetch && !missing) return true;
 
     WiFiClientSecure client;
@@ -1696,7 +1681,7 @@ bool NetworkManager::syncAlarmMusic() {
     if (payload != "null" && payload.length() > 2 && deserializeJson(doc, payload)) return true;
     JsonObject lib = doc.as<JsonObject>();
 
-    // Bài đã bị xoá khỏi thư viện -> xoá khỏi thẻ. Chỉ làm khi GET danh sách thành công.
+    // Tracks removed from the library -> delete them from the card. Only after a successful list GET.
     char keep[ALARM_MUSIC_MAX_TRACKS][24];
     size_t nKeep = 0;
     for (JsonPair kv : lib) {
@@ -1712,7 +1697,7 @@ bool NetworkManager::syncAlarmMusic() {
     uint8_t done = 0;
     for (size_t i = 0; i < nNeed; i++) {
         JsonObject m = lib[need[i]];
-        if (m.isNull()) continue;  // báo thức trỏ tới bài đã xoá: kêu bíp
+        if (m.isNull()) continue;  // alarm points at a deleted track: it beeps
         uint32_t rev = m["rev"] | 0u;
         uint32_t size = m["size"] | 0u;
         uint32_t crc = m["crc32"] | 0u;
@@ -1720,7 +1705,7 @@ bool NetworkManager::syncAlarmMusic() {
         if (MusicStore::has(need[i], rev)) continue;
         if (size == 0 || size > ALARM_MUSIC_MAX_BYTES || !sp[0]) continue;
         if (done >= ALARM_MUSIC_PER_SYNC) {
-            _musicNeedFetch = true;  // còn bài chưa tải -> chu kỳ sau lấy tiếp
+            _musicNeedFetch = true;  // tracks left to download -> continue next cycle
             break;
         }
         char path[48];
@@ -1753,7 +1738,7 @@ void NetworkManager::pushLogTail() {
     doc["log_tail"] = (const char*)tail;
     doc["log_at"] = (uint32_t)time(nullptr);
     String body;
-    serializeJson(doc, body);  // ArduinoJson tự escape ", \ và xuống dòng
+    serializeJson(doc, body);  // ArduinoJson escapes ", \ and newlines itself
     free(tail);
 
     WiFiClientSecure client;
@@ -1769,12 +1754,13 @@ void NetworkManager::pushLogTail() {
     http.end();
 }
 
-// Tải voice_url/bg_music_url và append vào slot vừa ghi (offset ngay sau phần
-// ảnh/video, hoặc offset 4 nếu slot rỗng — xem checkAndDownloadNewMessages()).
-// Dùng chung cho cả đường ảnh/video (audio là phụ, tải lỗi không huỷ message)
-// và đường "tin nhắn tĩnh không ảnh" (audio có thể là nội dung chính).
-// Trả về true nếu KHÔNG có voice URL (không có gì để tải, không phải lỗi) hoặc
-// tải thành công trọn vẹn; false nếu có URL nhưng tải thất bại/thiếu/stall.
+// Downloads voice_url/bg_music_url and appends it to the slot just written (right
+// after the image/video, or at offset 4 for an empty slot — see
+// checkAndDownloadNewMessages()). Shared by the image/video path (audio is
+// secondary, a failed download doesn't cancel the message) and the image-less
+// "still message" path (audio may be the main content).
+// Returns true when there is NO voice URL (nothing to download, not an error) or
+// the download completed; false when a URL exists but it failed/fell short/stalled.
 bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientSecure& client,
                                            IStorageProvider* storage, const char* writeSlotId) {
     if (rawVoiceUrl.length() == 0) return true;
@@ -1795,7 +1781,7 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
     bool ok = false;
     if (httpAudio.begin(client, voiceUrl.c_str())) {
         httpAudio.setTimeout(30000);
-        // Bat buoc khi storage.rules da siet: khong co header nay thi Storage tra 403.
+        // Required once storage.rules is locked down: without this header Storage returns 403.
         addStorageAuthHeader(httpAudio);
         int aCode = httpAudio.GET();
         noteAuthFailure(aCode, "voice");
@@ -1803,28 +1789,28 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
             int aLen = httpAudio.getSize();
             WiFiClient* aStream = httpAudio.getStreamPtr();
 
-            // Dùng openForAppend (virtual method trên IStorageProvider)
-            // để ghi nối tiếp mà không xóa sector đã có video
+            // openForAppend continues writing without erasing the sectors
+            // that already hold the video
             if (storage->openForAppend(writeSlotId)) {
-                // Ghi AUDC header (10 bytes)
+                // Write the AUDC header (10 bytes)
                 uint8_t audcHeader[10];
                 memcpy(audcHeader, "AUDC", 4);
                 uint16_t sr      = (uint16_t)AUDIO_SAMPLE_RATE;
                 uint32_t pcmSize = (aLen > 0) ? (uint32_t)aLen : 0;
                 memcpy(audcHeader + 4, &sr,      2);
                 memcpy(audcHeader + 6, &pcmSize, 4);
-                // Ghi hut header thi AudioPlayer khong khop magic
-                // "AUDC" -> phat video im lang. Van phai bao ra log,
-                // neu khong loi NAND o nhanh audio hoan toan vo hinh.
+                // With a short header write AudioPlayer won't match the
+                // "AUDC" magic -> the video plays silently. Log it anyway,
+                // or storage errors on the audio branch are invisible.
                 bool aWriteError =
                     storage->writeChunk(audcHeader, sizeof(audcHeader)) < sizeof(audcHeader);
                 if (aWriteError) {
                     DLOG("[NET] Audio hdr write SHORT");
                 }
 
-                // Stream PCM data vào slot (không gọi closeWrite vì không đổi metadata)
-                // 2048B thay vi 256B — cung ly do nhu vong lap video: buffer nho +
-                // delay(1) vo dieu kien tung ep tran toc do tai, de dinh STALL.
+                // Stream PCM data into the slot (no closeWrite: metadata is unchanged).
+                // 2048B rather than 256B — same reason as the video loop: a small
+                // buffer + unconditional delay(1) caps the download speed and stalls easily.
                 uint8_t abuf[2048];
                 int     aTotalRead = 0;
                 uint32_t aLastProgressMs = millis();
@@ -1832,8 +1818,8 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                     size_t av = aStream->available();
                     if (av) {
                         size_t tr = (av < sizeof(abuf)) ? av : sizeof(abuf);
-                        // read() chu khong readBytes() — xem giai thich day du o vong
-                        // lap tai video trong checkAndDownloadNewMessages().
+                        // read(), not readBytes() — full explanation at the video
+                        // download loop in checkAndDownloadNewMessages().
                         int c = aStream->read(abuf, tr);
                         if (c > 0) {
                             size_t aw = storage->writeChunk(abuf, c);
@@ -1846,8 +1832,8 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                             aTotalRead += c;
                             if (aLen > 0) aLen -= c;
                             aLastProgressMs = millis();
-                            // Tran cung — dat aWriteError (khong phai writeError) de
-                            // slot dang do bi loai o buoc kiem tra cua chinh vong nay.
+                            // Hard cap — sets aWriteError (not writeError) so the
+                            // half-written slot is rejected by this loop's own check.
                             if (aTotalRead > (int)MAX_MEDIA_BYTES) {
                                 DLOG("[NET] audio dl ABORT: over cap %d", aTotalRead);
                                 aWriteError = true;
@@ -1855,25 +1841,25 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                             }
                         }
                     }
-                    // Cung dang treo vo han nhu vong lap video.
+                    // Same infinite-hang risk as the video loop.
                     if (millis() - aLastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
                         DLOG("[NET] audio dl STALL %d bytes", aTotalRead);
-                        // Fix: truoc day KHONG set aWriteError=true o day -> log bao
-                        // nham "OK" du tai cut. Voi tin nhan tinh khong anh, audio co
-                        // the la noi dung DUY NHAT nen phai bao chinh xac tai day.
+                        // Must set aWriteError here, or the log says "OK" for a short
+                        // download. For an image-less still message the audio may be
+                        // the ONLY content, so it has to be reported accurately.
                         aWriteError = true;
                         break;
                     }
-                    // Chi nhuong CPU khi THUC SU khong co data (xem giai thich o
-                    // vong lap video phia tren).
+                    // Yield the CPU only when there is REALLY no data (see the video
+                    // download loop in checkAndDownloadNewMessages()).
                     if (av == 0) {
                         delay(1);
                     }
                 }
-                // Chốt phiên append: ghi audioSize vào bảng
-                // slot. Không có bước này thì phần audio nằm
-                // trên flash nhưng AudioPlayer không biết nó
-                // ở đâu và dài bao nhiêu -> hộp câm.
+                // Commit the append session: writes audioSize to the slot
+                // table. Without it the audio sits in storage but
+                // AudioPlayer doesn't know where it is or how long ->
+                // the box is silent.
                 storage->closeAppend();
                 DLOG("[NET] Audio DL %s: %d bytes",
                      aWriteError ? "SHORT" : "OK", aTotalRead);
@@ -1906,8 +1892,8 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
 
     uint64_t nextTs = (lastTs > 0) ? (lastTs + 1) : 0;
     if (nextTs > 0) {
-        // auth nam CUOI: orderBy/startAt da chiem '?' nen tham so auth phai noi
-        // bang '&'. Dung o ca 2 che do — Database Secret lan idToken.
+        // auth goes LAST: orderBy/startAt already took the '?', so the auth parameter
+        // is joined with '&'. True in both modes — Database Secret and idToken.
         snprintf(_url, sizeof(_url),
                  "https://%s/messages/%s.json?orderBy=%%22timestamp%%22&startAt=%llu",
                  FIREBASE_HOST, BOX_ID, (unsigned long long)nextTs);
@@ -1928,13 +1914,13 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     int httpCode = http.GET();
     noteAuthFailure(httpCode, "msg");
     if (httpCode < 0) {
-        // -1 = HTTPC_ERROR_CONNECTION_REFUSED: TCP/TLS connect thất bại. Thử lại
-        // suông trên cùng client (cách cũ) gần như vô ích khi nguyên nhân là link
-        // Wi-Fi đã chết hoặc DNS cũ — phải ÉP tái lập association trước, việc này
-        // cũng xin lại DNS server mới từ DHCP.
+        // -1 = HTTPC_ERROR_CONNECTION_REFUSED: TCP/TLS connect failed. A plain retry
+        // on the same client is nearly useless when the cause is a dead Wi-Fi link
+        // or stale DNS — FORCE a re-association first, which also fetches a fresh
+        // DNS server from DHCP.
         DLOG("[NET] msg GET %d, heap=%u -> re-assoc", httpCode, (unsigned)ESP.getFreeHeap());
-        // Phan biet "chung chi khong hop le" voi "khong noi duoc toi server":
-        // ca hai deu ra -1 o tang HTTPClient, doc lastError moi biet duoc.
+        // "Invalid certificate" vs "can't reach the server": both are -1 at the
+        // HTTPClient layer; only lastError tells them apart.
         logTlsError(client, "msg");
         _forceReassociate = true;
         if (ensureConnected(12000)) {
@@ -1956,7 +1942,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         return false;
     }
 
-    // Zero-copy JSON stream parsing (tránh cấp phát chuỗi String tạm lớn gây phân mảnh RAM)
+    // Parse JSON straight from the stream (no large temporary String fragmenting the heap)
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, *stream);
     http.end();
@@ -1970,7 +1956,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         return true;
     }
 
-    // Tạo danh sách các tin nhắn từ JsonObject hoặc JsonArray (Firebase tự động biến đổi tùy theo dạng key)
+    // Collect messages from a JsonObject or JsonArray (Firebase returns either, depending on the keys)
     std::vector<JsonObject> msgList;
     if (doc.is<JsonObject>()) {
         JsonObject obj = doc.as<JsonObject>();
@@ -1988,7 +1974,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         }
     }
 
-    // Đảm bảo msgList luôn được sắp xếp theo timestamp tăng dần (cũ nhất -> mới nhất)
+    // Keep msgList sorted by ascending timestamp (oldest -> newest)
     std::sort(msgList.begin(), msgList.end(), [](const JsonObject& a, const JsonObject& b) {
         uint64_t tsA = 0, tsB = 0;
         JsonVariantConst vA = a["timestamp"];
@@ -2043,11 +2029,11 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     bool downloadedAnyMedia = false;
     _hasPendingMessages = false;
 
-    // Giữ RF luôn bật hết công suất trong suốt quá trình tải — Modem Sleep mặc
-    // định (WIFI_PS_MIN_MODEM) tăng độ trễ/rớt gói TCP Window Update, góp phần
-    // gây download bị ngắt giữa chừng ở tốc độ cao. Bật lại tiết kiệm điện ngay
-    // sau vòng lặp (mọi lối thoát khỏi vòng lặp bên dưới đều là `break`, không
-    // có `return`, nên luôn chạy tới đây).
+    // Keep the radio fully on for the whole download — the default modem sleep
+    // (WIFI_PS_MIN_MODEM) adds latency/drops TCP window updates, contributing to
+    // downloads breaking off at high speed. Power saving is re-enabled right after
+    // the loop (every exit from the loop below is a `break`, never a `return`, so
+    // that line is always reached).
     WiFi.setSleep(false);
 
     for (JsonObject msg : msgList) {
@@ -2065,7 +2051,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
-        // Nếu Firebase không có timestamp (ts == 0), tự động dùng mốc giờ NTP hoặc bộ đếm millis()
+        // No timestamp from Firebase (ts == 0): fall back to NTP time, or the millis() counter
         if (ts == 0) {
             time_t nowSec = time(nullptr);
             ts = (nowSec > 1600000000) ? ((uint64_t)nowSec * 1000ULL) : (uint64_t)millis();
@@ -2083,7 +2069,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             if (maxDisplayTime == 0) maxDisplayTime = 60;
         }
 
-        // Tìm kiếm linh hoạt tất cả các biến thể đặt tên key (snake_case, camelCase...)
+        // Accept every key naming variant (snake_case, camelCase...)
         String rawMediaUrl = "";
         const char* candidateKeys[] = {
             "bin_url", "binUrl", 
@@ -2104,8 +2090,8 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
-        // Tìm voice URL (audio đính kèm) — bg_music_url dùng chung 1 cơ chế tải/append
-        // với voice_url (cùng là PCM/WAV, chỉ khác vai trò UX: lời thoại vs nhạc nền).
+        // Voice URL (attached audio) — bg_music_url shares voice_url's download/append
+        // path (both PCM/WAV, differing only in UX role: speech vs background music).
         String rawVoiceUrl = "";
         const char* voiceKeys[] = { "voice_url", "voiceUrl", "audio_url", "audioUrl", "bg_music_url", "bgMusicUrl" };
         for (const char* k : voiceKeys) {
@@ -2120,9 +2106,10 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
-        // Tìm caption text — kiểm tra SỰ TỒN TẠI của field, không dựa vào "type"
-        // (web có bug nhỏ đã biết: field text không bị xoá khi đổi chế độ, nên
-        // 1 message type khác vẫn có thể mang text cũ; đọc field thật là đúng nhất).
+        // Caption text — check that the field EXISTS rather than rely on "type"
+        // (known minor web bug: the text field isn't cleared when switching modes,
+        // so a message of another type may still carry old text; reading the
+        // actual field is the most accurate).
         String rawText = "";
         {
             JsonVariantConst v = msg["text"];
@@ -2138,14 +2125,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         if (rawMediaUrl.length() > 0) {
             String fullUrl = rawMediaUrl;
             
-            // Xử lý tự động convert relative path hoặc gs:// thành HTTP Download URL của Firebase Storage API
+            // Convert a relative path or gs:// URL to a Firebase Storage HTTP download URL
             if (!fullUrl.startsWith("http")) {
                 if (fullUrl.startsWith("gs://")) {
                     int slashIdx = fullUrl.indexOf('/', 5);
                     if (slashIdx > 0) fullUrl = fullUrl.substring(slashIdx + 1);
                 }
                 if (fullUrl.startsWith("/")) fullUrl.remove(0, 1);
-                fullUrl.replace("/", "%2F"); // Đổi / thành %2F
+                fullUrl.replace("/", "%2F"); // encode / as %2F
                 fullUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + fullUrl + "?alt=media";
             }
 
@@ -2154,7 +2141,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             
             if (http.begin(client, fullUrl.c_str())) {
                 http.setTimeout(30000);
-                // Bat buoc khi storage.rules da siet: khong co header nay thi Storage tra 403.
+                // Required once storage.rules is locked down: without this header Storage returns 403.
                 addStorageAuthHeader(http);
                 int code = http.GET();
                 if (code < 0) logTlsError(client, "media");
@@ -2163,9 +2150,9 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                     int len = http.getSize();
                     int initialLen = len;
                     int totalRead = 0;
-                    // Heap o day la con so dang nhin nhat sau khi bat setCACert():
-                    // phien TLS nay song lau nhat (giu qua ca doan tai audio long
-                    // ben trong) va la cho tung co tien su OOM.
+                    // The heap figure most worth watching with setCACert() on: this
+                    // TLS session lives longest (it spans the nested audio download)
+                    // and has a history of OOM.
                     DLOG("[NET] GET OK len=%d heap=%u", len, (unsigned)ESP.getFreeHeap());
                     char writeSlotId[16] = "";
                     if (!storage->getNextWriteSlotIdentifier(writeSlotId, sizeof(writeSlotId))) {
@@ -2173,28 +2160,29 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         http.end();
                         _isDownloadingMedia = false;
                         _hasPendingMessages = true;
-                        break; // Dừng tiến trình khi bộ nhớ đầy
+                        break; // stop when storage is full
                     }
 
                     WiFiClient* stream = http.getStreamPtr();
                     if (storage->openForWrite(writeSlotId)) {
                         DLOG("[NET] writing slot %s", writeSlotId);
-                        // 2048B thay vi 256B: buffer nho + delay(1) vo dieu kien moi
-                        // vong lap tung ep tran toc do tai xuong con ~20-25KB/s (256B
-                        // rut can tren 1 tick 10ms). Van la streaming cuon chieu, RAM
-                        // tieu thu khong doi bat ke file lon nho.
+                        // 2048B rather than 256B: a small buffer + unconditional delay(1)
+                        // per iteration caps the download at ~20-25KB/s (256B drained
+                        // per 10ms tick). Still rolling streaming: RAM use is constant
+                        // whatever the file size.
                         uint8_t buffer[2048];
                         bool writeError = false;
-                        // Voi len == -1 (chunked, khong co Content-Length) dieu kien
-                        // vong lap khong bao gio tu sai: chi thoat khi server dong
-                        // ket noi. Mot stream nua-mo khong gui byte nao se treo o day
-                        // vinh vien. Chot lai bang moc thoi gian co tien do that su.
+                        // With len == -1 (chunked, no Content-Length) the loop condition
+                        // never turns false by itself: it exits only when the server
+                        // closes the connection. A half-open stream sending nothing
+                        // would hang here forever. Bound it by time since real progress.
                         uint32_t lastProgressMs = millis();
                         int lastLoggedRead = 0;
                         while (http.connected() && (len > 0 || len == -1)) {
-                            // Báo thức (có nhạc) bắt đầu kêu: nhường thẻ cho luồng nhạc
-                            // (case bắt buộc #5). Coi như tải hỏng -> discardWrite(), tin
-                            // không được đánh dấu đã tải nên chu kỳ sau tải lại.
+                            // An alarm (with music) started ringing: yield the card to the
+                            // music stream (mandatory case, MEMORY.md §28). Treated as a
+                            // failed download -> discardWrite();
+                            // the message isn't marked downloaded, so the next cycle retries.
                             if (isPlaybackActive()) {
                                 DLOG("[NET] dl dung: bao thuc dang keu");
                                 writeError = true;
@@ -2203,14 +2191,15 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             size_t sizeAvail = stream->available();
                             if (sizeAvail) {
                                 size_t toRead = (sizeAvail < sizeof(buffer)) ? sizeAvail : sizeof(buffer);
-                                // read() chu KHONG readBytes(): WiFiClientSecure khong override
-                                // readBytes() nen no roi ve Stream::readBytes() doc TUNG BYTE MOT
-                                // (Stream.cpp:41), moi byte lai goi available() -> mbedtls_ssl_read()
-                                // 2 lan. Chunk 2048B = ~4096 loi goi mbedTLS; ca file 2.2MB = hon 4
-                                // TRIEU loi goi -> tran toc do ~20-25KB/s. Te hon nua: khi buffer
-                                // mbedTLS can giua chung chunk, timedRead() busy-spin toi 30 GIAY
-                                // (Stream.cpp:31, _timeout = 30s) khong nhuong CPU, khong rut socket.
-                                // read(buf,len) chi ton 1 available() + 1 mbedtls_ssl_read cho ca khoi.
+                                // read(), NOT readBytes(): WiFiClientSecure doesn't override
+                                // readBytes(), so it falls back to Stream::readBytes() reading ONE
+                                // BYTE AT A TIME (Stream.cpp:41), each byte calling available() ->
+                                // mbedtls_ssl_read() twice. A 2048B chunk = ~4096 mbedTLS calls; a
+                                // 2.2MB file = over 4 MILLION calls -> a ~20-25KB/s ceiling. Worse:
+                                // when the mbedTLS buffer runs dry mid-chunk, timedRead() busy-spins
+                                // for up to 30 SECONDS (Stream.cpp:31, _timeout = 30s) without
+                                // yielding the CPU or draining the socket. read(buf,len) costs one
+                                // available() + one mbedtls_ssl_read for the whole block.
                                 int c = stream->read(buffer, toRead);
                                 if (c > 0) {
                                     size_t written = storage->writeChunk(buffer, c);
@@ -2221,13 +2210,13 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                     totalRead += c;
                                     if (len > 0) len -= c;
                                     lastProgressMs = millis();
-                                    // Tran cung: dung ngay thay vi tai vai phut roi chet cho khac.
+                                    // Hard cap: stop now instead of downloading for minutes and failing elsewhere.
                                     if (totalRead > (int)MAX_MEDIA_BYTES) {
                                         DLOG("[NET] dl ABORT: over cap %d", totalRead);
                                         writeError = true;
                                         break;
                                     }
-                                    // Log thua tay (moi 16KB) de khong doi nhip vong lap.
+                                    // Log sparsely (every 16KB) so the loop's pace isn't affected.
                                     if (totalRead - lastLoggedRead >= 16384) {
                                         lastLoggedRead = totalRead;
                                         DLOG("[NET] dl %d/%d", totalRead, initialLen);
@@ -2236,35 +2225,34 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             }
                             if (millis() - lastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
                                 DLOG("[NET] dl STALL %d/%d", totalRead, initialLen);
-                                // writeError = true de slot dang do bi loai o buoc kiem
-                                // tra ben duoi. Khong co dong nay thi mot file tai dang
-                                // do voi initialLen <= 0 van lot qua -> slot rac.
+                                // writeError = true so the half-written slot is rejected by
+                                // the check below. Without it a partial download with
+                                // initialLen <= 0 would slip through -> a garbage slot.
                                 writeError = true;
                                 break;
                             }
-                            // Chi nhuong CPU khi THUC SU khong co data — nhuong vo dieu
-                            // kien moi vong lap la nguyen nhan chinh khien tai xuong bi
-                            // tran toc do va de dinh STALL khi mang chap chon.
+                            // Yield the CPU only when there is REALLY no data — yielding
+                            // unconditionally every iteration is the main cause of capped
+                            // download speed and of stalls on a flaky network.
                             if (sizeAvail == 0) {
                                 delay(1);
                             }
                         }
-                        // Thoat vong lap do !http.connected() (khong phai STALL, khong
-                        // phai du byte) = ket noi bi dut giua chung. Truoc day khong in
-                        // gi ca nen phai suy ra tu dong "DL err" -> khong phan biet duoc
-                        // "dut ket noi" voi "tai thieu byte". Log rieng de chan doan.
+                        // Leaving the loop on !http.connected() (not a stall, not all bytes)
+                        // = the connection dropped midway. Logged separately: the "DL err"
+                        // line alone can't tell "connection dropped" from "short download".
                         if (!writeError && !http.connected() &&
                             (initialLen > 0 && totalRead < initialLen)) {
                             DLOG("[NET] conn DROPPED @ %d/%d", totalRead, initialLen);
                         }
-                        // Chốt kết quả TRƯỚC khi quyết định commit hay huỷ. closeWrite() ghi
-                        // slot table + set unread bit; gọi vô điều kiện như code cũ khiến 1 lần
-                        // stall/timeout giữa chừng cũng biến slot dở (dữ liệu cụt) thành "tin
-                        // hợp lệ chưa đọc" -> phát được vài giây đầu (đủ 20-byte header) rồi lỗi
-                        // Bad jpegSize khi chạm vùng chưa ghi (bug xác nhận 2026-09-02, video
-                        // 15s/2.2MB bị NAND/mạng stall ~20%). Lỗi thật -> discardWrite(): không
-                        // đụng slot table/unread bitmask, giữ nguyên _writeSlotIndex để lần sync
-                        // sau retry đúng slot này thay vì đốt thêm 1 slot mới cho mỗi lần fail.
+                        // Settle the outcome BEFORE deciding to commit or discard. closeWrite()
+                        // writes the slot table + sets the unread bit; calling it unconditionally
+                        // would turn a mid-download stall/timeout into a "valid unread message"
+                        // with truncated data -> it plays the first seconds (the 20-byte header
+                        // is there) then fails with Bad jpegSize on reaching the unwritten area.
+                        // On a real error -> discardWrite(): the slot table/unread bitmask stay
+                        // untouched and _writeSlotIndex is kept, so the next sync retries this
+                        // slot instead of burning a new one per failure.
                         bool downloadComplete = !writeError && (initialLen <= 0 || totalRead >= initialLen);
                         if (downloadComplete) {
                             storage->closeWrite(maxDisplayTime);
@@ -2272,18 +2260,18 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             storage->discardWrite();
                         }
 
-                        // Kiểm tra dữ liệu đã tải trọn vẹn 100% chưa
                         if (downloadComplete) {
                             DLOG("[NET] DL OK slot %s", writeSlotId);
 
-                            // Đóng phiên HTTP video TRƯỚC khi mở phiên audio mới —
-                            // downloadVoiceSegment() dùng chung 1 WiFiClientSecure client,
-                            // để phiên cũ chưa .end() có thể làm phiên mới bắt tay sai trạng
-                            // thái. http.end() gọi lại lần nữa ở cuối khối vẫn an toàn (no-op).
+                            // Close the video HTTP session BEFORE opening the audio one —
+                            // downloadVoiceSegment() shares the same WiFiClientSecure, and a
+                            // session not yet .end()ed can make the new one handshake in the
+                            // wrong state. The second http.end() at the end of the block is a
+                            // safe no-op.
                             http.end();
 
-                            // Voice/bg_music là phụ với ảnh/video: tải lỗi chỉ log, không
-                            // huỷ cả message (hành vi giữ nguyên như code cũ).
+                            // Voice/bg_music is secondary to the image/video: a failed
+                            // download is only logged, the message is not cancelled.
                             downloadVoiceSegment(rawVoiceUrl, client, storage, writeSlotId);
                             if (rawVoiceUrl.length() == 0) {
                                 DLOG("[NET] No voice_url in msg");
@@ -2310,12 +2298,12 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
             _isDownloadingMedia = false;
         } else if (rawVoiceUrl.length() > 0 || rawText.length() > 0) {
-            // Tin nhắn tĩnh KHÔNG có ảnh/video: chỉ audio (voice/nhạc nền) và/hoặc text.
-            // Vẫn phải openForWrite()/closeWrite() để tạo slot "rỗng" hợp lệ
-            // (dataSize=4 sentinel — đã trace/kiểm chứng khớp với cách
-            // NandStorageProvider::openForAppend() tính offset audio kế tiếp).
-            // MediaPlayer nhận sentinel này để hiện màn đen thay vì cố decode
-            // JPEG không tồn tại.
+            // A still message with NO image/video: audio (voice/background music)
+            // and/or text only. openForWrite()/closeWrite() are still needed to
+            // create a valid "empty" slot (the dataSize=4 sentinel — matches how
+            // NandStorageProvider::openForAppend() computes the next audio offset).
+            // MediaPlayer recognises the sentinel and shows a black screen instead
+            // of trying to decode a JPEG that doesn't exist.
             char writeSlotId[16] = "";
             if (!storage->getNextWriteSlotIdentifier(writeSlotId, sizeof(writeSlotId))) {
                 DLOG("[NET] skip dl: FULL");
@@ -2338,8 +2326,8 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         _onDownloadComplete();
                     }
                 } else {
-                    // Ở đây audio là NỘI DUNG CHÍNH (không có ảnh) — tải lỗi phải huỷ
-                    // cả message, khác với nhánh ảnh/video ở trên (audio chỉ là phụ).
+                    // Here audio is the MAIN CONTENT (no image) — a failed download must
+                    // cancel the whole message, unlike the image/video branch above.
                     DLOG("[NET] DL err: voice/bg_music failed (discarded)");
                     storage->discardWrite();
                 }
@@ -2352,14 +2340,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         }
 
 
-        // CHỈ CẬP NHẬT TIMESTAMP KHI VÀ CHỈ KHI TASK CỦA TIN NHẮN NÀY ĐÃ HOÀN THÀNH 100%
+        // Advance the timestamp ONLY when this message was fully processed
         if (messageSuccess) {
             if (ts > successfullyProcessedMaxTs) {
                 successfullyProcessedMaxTs = ts;
             }
         } else {
             DLOG("[NET] ts fail");
-            break; // Ngắt vòng lặp để đảm bảo thứ tự tin nhắn không bị nhảy vọt
+            break; // stop here so message order is never skipped
         }
     }
 

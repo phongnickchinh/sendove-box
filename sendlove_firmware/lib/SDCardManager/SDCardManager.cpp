@@ -6,16 +6,17 @@
 // ============================================================================
 // SDCardManager Implementation
 // ============================================================================
-// QUY TAC BAT BUOC trong file nay:
-//  R1: DLOG() PHAI nam NGOAI vung dang giu mutex. ScreenLogger::render() lay
-//      chinh _spiMutex (khong de quy, timeout 50ms) -> mot DLOG dat nham trong
-//      appendChunk() ton 50ms moi chunk 2KB va trong y het loi mang.
-//  R2: Moi loi goi SD.* / File.* deu phai nam trong acquireSPI()/releaseSPI().
-//      ST7789 khong co chan CS -> traffic SD khong duoc bao ve se pha frame
-//      dang push len man hinh.
-//  R3: Khong File nao duoc destruct ngoai mutex. Luon close() tuong minh trong
-//      vung khoa; close() set _f = null nen destructor sau do vo hai.
-//  R4: Khong acquireSPI() long nhau (mutex khong de quy).
+// MANDATORY RULES in this file:
+//  R1: DLOG() MUST stay OUTSIDE any region holding the mutex. ScreenLogger::render()
+//      takes this same _spiMutex (non-recursive, 50ms timeout) -> a stray DLOG in
+//      appendChunk() costs 50ms per 2KB chunk and looks exactly like a network fault.
+//  R2: Every SD.* / File.* call must sit inside acquireSPI()/releaseSPI(). The
+//      ST7789 has no CS pin -> unguarded SD traffic corrupts the frame being
+//      pushed to the screen.
+//  R3: No File may be destructed outside the mutex. Always close() explicitly
+//      inside the locked region; close() sets _f = null, so the later destructor
+//      is harmless.
+//  R4: Never nest acquireSPI() (the mutex is non-recursive).
 // ============================================================================
 
 bool SDCardManager::init(uint8_t csPin, SemaphoreHandle_t spiMutex) {
@@ -23,22 +24,23 @@ bool SDCardManager::init(uint8_t csPin, SemaphoreHandle_t spiMutex) {
     _spiMutex = spiMutex;
     _mounted = false;
 
-    // Reset mem (nut RST, OTA, WDT) KHONG ngat dien the: the co the dang do mot
-    // lenh doc thi chip reset, nen lan SD.begin() dau sau reset hay fail du the
-    // van tot. Fail la hop chay rong toi luc rut dien: isFull() = true va
-    // unread = 0 -> log "msg skip: het slot, unread=0" moi chu ky sync.
-    // SD.begin() fail tu don dep (_pdrv = 0xFF) nen goi lai duoc ngay.
+    // A soft reset (RST button, OTA, WDT) does NOT power-cycle the card: the card
+    // may have been mid-read when the chip reset, so the first SD.begin() after a
+    // reset often fails although the card is fine. A failure leaves the box running
+    // empty until it is unplugged: isFull() = true and unread = 0 -> the log line
+    // "msg skip: het slot, unread=0" on every sync. A failed SD.begin() cleans up
+    // after itself (_pdrv = 0xFF), so it can be retried right away.
     bool ok = false;
     uint32_t cardMB = 0;
     uint8_t attempt = 0;
     for (; attempt < 3 && !ok; attempt++) {
-        if (attempt > 0) delay(200); // Khong giu mutex luc cho.
+        if (attempt > 0) delay(200); // the mutex isn't held while waiting
         if (!acquireSPI()) return false;
 
-        // SD.begin() mac dinh 4MHz -> qua cham cho video 15fps. Thu vien tu ha ve
-        // 400kHz trong lúc init roi moi dung con so nay. max_files = 7: 4 handle
-        // thuong tru (write tin + read tuan tu + read ngau nhien + ghi file tong quat)
-        // cong handle tam cua readFile/readFileAt/listDir.
+        // SD.begin() defaults to 4MHz -> too slow for 15fps video. The library drops
+        // to 400kHz during init and then uses this value. max_files = 7: 4 resident
+        // handles (message write + sequential read + random read + general file
+        // write) plus the temporary handle of readFile/readFileAt/listDir.
         ok = SD.begin(_csPin, SPI, SD_SPI_FREQ_HZ, "/sd", 7, false);
         if (ok) cardMB = (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL));
 
@@ -119,10 +121,10 @@ bool SDCardManager::openFileForWrite(const char* path) {
     _writeFile = SD.open(path, FILE_WRITE);
     bool ok = (bool)_writeFile;
     if (ok) {
-        // Buffer nho va biet truoc: loi the day / rut the lo ra tu fwrite trong
-        // vong 512B thay vi o mot lan flush khong doan truoc -> hop dong "tra
-        // short count" cua writeChunk moi thuc su dang tin.
-        // BO 1 DONG NAY neu toc do tai tut.
+        // A small, known buffer: a full or removed card surfaces from fwrite within
+        // 512B instead of at some unpredictable flush -> writeChunk's "returns a
+        // short count" contract becomes trustworthy.
+        // REMOVE THIS ONE LINE if download speed drops.
         _writeFile.setBufferSize(512);
     }
 
@@ -138,7 +140,7 @@ bool SDCardManager::openFileForAppend(const char* path, uint32_t atOffset) {
 
     if (_writeFile) _writeFile.close();
 
-    // "r+" mo de doc-ghi, KHONG cat file (khac FILE_WRITE = "w" = O_TRUNC).
+    // "r+" opens read-write WITHOUT truncating (unlike FILE_WRITE = "w" = O_TRUNC).
     _writeFile = SD.open(path, "r+");
     bool ok = (bool)_writeFile;
     if (ok) {
@@ -160,7 +162,7 @@ size_t SDCardManager::appendChunk(const uint8_t* data, size_t len) {
     size_t written = _writeFile.write(data, len);
 
     releaseSPI();
-    // KHONG DLOG o day (R1): ham nay chay moi 2KB trong suot qua trinh tai.
+    // NO DLOG here (R1): this runs every 2KB throughout a download.
     return written;
 }
 
@@ -228,7 +230,7 @@ void SDCardManager::closeReadFile() {
     }
 }
 
-// --- Random Read (handle rieng cho AudioPlayer) ---
+// --- Random Read (separate handle for AudioPlayer) ---
 
 bool SDCardManager::openAtFile(const char* path) {
     if (!_mounted) return false;
@@ -250,16 +252,16 @@ bool SDCardManager::openAtFile(const char* path) {
 int SDCardManager::readAtFile(uint32_t offset, uint8_t* buffer, uint32_t len) {
     if (!_atFile || !buffer || len == 0) return 0;
 
-    // Tran cung la kich thuoc file VAT LY, khong phai dataSize — vung audio nam
-    // sau dataSize, do chinh la ly do readAt() ton tai.
+    // The hard limit is the PHYSICAL file size, not dataSize — the audio region
+    // sits after dataSize, which is the very reason readAt() exists.
     if (offset >= _atSize) return 0;
     if ((uint64_t)offset + len > _atSize) len = _atSize - offset;
 
     if (!acquireSPI()) return 0;
 
     bool ok = true;
-    // Bo qua seek khi da dung vi tri: AudioPlayer doc don dieu tang dan tung
-    // AUDIO_READ_CHUNK_SIZE byte, seek moi lan se pha readahead cua stdio.
+    // Skip the seek when already in position: AudioPlayer reads monotonically in
+    // AUDIO_READ_CHUNK_SIZE steps, and seeking every time would defeat stdio's readahead.
     if (!_atPosKnown || offset != _atPos) {
         ok = _atFile.seek(offset);
         _atPosKnown = ok;
@@ -270,7 +272,7 @@ int SDCardManager::readAtFile(uint32_t offset, uint8_t* buffer, uint32_t len) {
         _atPos = offset + (uint32_t)n;
         _atPosKnown = true;
     } else {
-        _atPosKnown = false; // Vi tri khong con chac chan -> lan sau seek lai
+        _atPosKnown = false; // position no longer certain -> seek again next time
     }
 
     releaseSPI();
@@ -336,10 +338,10 @@ int32_t SDCardManager::readFile(const char* path, uint8_t* buf, size_t maxLen) c
     return (int32_t)n;
 }
 
-// --- File tong quat (theme, nhac bao thuc, log) ---
+// --- General files (theme, alarm music, log) ---
 
 bool SDCardManager::remount() {
-    // Ben goi dam bao khong con ai dung handle nao (chi goi luc STANDBY, khong phat).
+    // The caller guarantees no handle is in use (only called in STANDBY, not playing).
     if (acquireSPI()) {
         if (_writeFile) _writeFile.close();
         if (_readFile) _readFile.close();
@@ -358,8 +360,8 @@ bool SDCardManager::remount() {
 bool SDCardManager::probe() {
     if (!_mounted) return false;
     if (!acquireSPI()) return false;
-    // Mo + doc that mot byte: SD.cardType()/totalBytes() chi tra gia tri cache luc mount,
-    // rut the roi van bao binh thuong.
+    // Open + actually read one byte: SD.cardType()/totalBytes() only return values
+    // cached at mount and still look normal after the card is removed.
     bool ok = false;
     File f = SD.open("/sys/layout.json", FILE_READ);
     if (f) {
@@ -421,9 +423,9 @@ bool SDCardManager::removeDir(const char* path) {
 
 size_t SDCardManager::listDir(const char* dir, void (*cb)(const char*, bool, void*), void* ctx) {
     if (!_mounted || !cb) return 0;
-    // Chep ten ra truoc roi moi goi cb NGOAI mutex (R4: cb co the xoa/doi ten file).
+    // Copy the names out first, then call cb OUTSIDE the mutex (R4: cb may delete/rename files).
     static constexpr size_t MAX_ENTRIES = 24;
-    static constexpr size_t NAME_LEN = 40;  // KHÔNG đặt NAME_MAX: trùng macro của limits.h
+    static constexpr size_t NAME_LEN = 40;  // NOT named NAME_MAX: that clashes with a limits.h macro
     char names[MAX_ENTRIES][NAME_LEN];
     bool dirs[MAX_ENTRIES];
     size_t n = 0;
@@ -455,8 +457,8 @@ size_t SDCardManager::listDir(const char* dir, void (*cb)(const char*, bool, voi
 uint32_t SDCardManager::freeMB() const {
     if (!_mounted) return 0;
     if (!acquireSPI()) return 0;
-    // usedBytes() quet bang FAT khi FSINFO khong hop le -> co the ton vai giay tren the
-    // lon. Ben goi (SdStore) chi goi luc mount va sau moi lan tai xong, roi cache lai.
+    // usedBytes() scans the FAT when FSINFO is invalid -> it can take seconds on a
+    // large card. The caller (SdStore) only calls it at mount and after each download, then caches it.
     uint64_t total = SD.totalBytes();
     uint64_t used = SD.usedBytes();
     releaseSPI();
@@ -470,7 +472,7 @@ bool SDCardManager::openGenWrite(const char* path, bool append) {
     mkParentDirLocked(path);
     _genFile = SD.open(path, append ? FILE_APPEND : FILE_WRITE);
     bool ok = (bool)_genFile;
-    if (ok) _genFile.setBufferSize(512);  // cung ly do voi openFileForWrite
+    if (ok) _genFile.setBufferSize(512);  // same reason as in openFileForWrite
     releaseSPI();
     if (!ok) DLOG("[SD] open G fail");
     return ok;
@@ -495,18 +497,18 @@ void SDCardManager::closeGenWrite() {
 // --- SPI Mutex + NOP Hack ---
 
 bool SDCardManager::acquireSPI() const {
-    if (_spiMutex == nullptr) return true; // Không có mutex → bỏ qua
+    if (_spiMutex == nullptr) return true; // no mutex → nothing to take
 
     if (xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        // NOP Hack cho ST7789 (khong co chan CS nen an moi byte tren bus):
-        // gui 2 lenh NOP (0x00) voi TFT_DC = LOW roi keo TFT_DC = HIGH. Man hinh
-        // chuyen sang Data Mode va nuot toan bo traffic SD nhu du lieu pixel cua
-        // lenh NOP thay vi hieu nham thanh lenh dieu khien. Doi xung voi
+        // NOP hack for the ST7789 (it has no CS pin, so it sees every byte on the
+        // bus): send 2 NOP commands (0x00) with TFT_DC = LOW, then pull TFT_DC HIGH.
+        // The display enters data mode and swallows all SD traffic as the NOP's
+        // pixel data instead of mistaking it for commands. Mirrors
         // NandStorage::acquireSPI().
         //
-        // SPI_BUS_MODE chu KHONG phai literal SPI_MODE3: transaction nay ma dung
-        // mode khac voi LovyanGFX se TAI TAO dung cu lat CPOL ma ca thay doi nay
-        // ton tai de khu (SCK nhay muc idle -> 1 suon len gia -> lech khung byte).
+        // SPI_BUS_MODE, NOT a literal SPI_MODE3: a transaction in a mode different
+        // from LovyanGFX's would RECREATE the very CPOL flip this is here to avoid
+        // (SCK's idle level jumps -> one spurious rising edge -> byte framing lost).
         SPI.beginTransaction(SPISettings(SD_SPI_FREQ_HZ, MSBFIRST, SPI_BUS_MODE));
         digitalWrite(PIN_TFT_DC, LOW);
         delayMicroseconds(2);
@@ -518,7 +520,7 @@ bool SDCardManager::acquireSPI() const {
 
         return true;
     }
-    // An toan: khong giu mutex o nhanh nay nen DLOG khong tu-khoa (R1).
+    // Safe: the mutex isn't held on this branch, so DLOG can't self-deadlock (R1).
     DLOG("[SD] ERR: SPI mutex timeout");
     return false;
 }

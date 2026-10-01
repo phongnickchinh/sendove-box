@@ -4,24 +4,28 @@
 #include <Arduino.h>
 
 // ============================================================================
-// SdLog — nhật ký bền trên thẻ + đẩy đoạn cuối lên cloud khi có lỗi (đề xuất #2)
+// SdLog — a persistent log on the card + pushing its tail to the cloud on errors
+// (MEMORY.md §29, proposal #2)
 // ============================================================================
-// ScreenLogger::log() gọi add() cho MỌI dòng DLOG. add() chỉ chép vào vòng RAM (không
-// đụng thẻ): DLOG được gọi từ mọi task, có chỗ đang giữ spiMutex, ghi thẻ ở đó là
-// deadlock (quy tắc R1 của SDCardManager).
+// ScreenLogger::log() calls add() for EVERY DLOG line. add() only copies into a RAM
+// ring (it never touches the card): DLOG is called from every task, sometimes while
+// holding spiMutex, and writing the card there would deadlock (rule R1 in
+// SDCardManager.cpp).
 //
-// flush() ghi các dòng chưa ghi xuống /sys/log/log0.txt, quá 64KB thì đổi sang log1.txt.
-// Gọi từ nơi KHÔNG giữ spiMutex: vòng STANDBY của Task_MediaPlayer và trước khi ngủ.
+// flush() writes the unwritten lines to /sys/log/log0.txt and rotates to log1.txt
+// past 64KB. Call it from places that do NOT hold spiMutex: Task_MediaPlayer's
+// STANDBY loop and right before sleep.
 //
-// takeTail(): đoạn cuối log để đẩy lên status/log_tail. Chỉ trả khi có dòng lỗi mới từ
-// lần lấy trước, hoặc lần đầu sau boot (để thấy `[BOOT] reset=` của lần reboot vừa rồi).
+// takeTail(): the tail of the log, to push to status/log_tail. It returns data only
+// when there is a new error line since the last take, or the first time after boot
+// (so the `[BOOT] reset=` line of the last reboot is visible).
 // ============================================================================
 
 namespace SdLog {
 
 void add(const char* line);
 void flush();
-/// true + chép đoạn cuối (các dòng cách nhau '\n') vào out nếu có gì mới đáng đẩy.
+/// true + copies the tail ('\n'-separated lines) into out when there is something new worth pushing.
 bool takeTail(char* out, size_t maxLen);
 
 }  // namespace SdLog

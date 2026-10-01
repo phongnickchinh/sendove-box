@@ -6,30 +6,31 @@
 #include "config.h"
 
 // ============================================================================
-// Bố cục dữ liệu trên thẻ
+// On-card data layout
 // ============================================================================
-//   /media/index.bin      manifest: hàng chờ + metadata từng slot
-//   /media/slot_00.bin    media — layout GIỐNG HỆT một slot NAND:
-//   ...                     [4B kích thước][header container 16B][payload][AUDC + audio]
+//   /media/index.bin      manifest: the queue + per-slot metadata
+//   /media/slot_00.bin    media — laid out EXACTLY like a NAND slot:
+//   ...                     [4B size][16B container header][payload][AUDC + audio]
 //   /media/slot_19.bin
-//   /media/slot_00.txt    caption (chỉ tạo khi tin có text)
+//   /media/slot_00.txt    caption (created only when the message has text)
 //
-// Caption để file sidecar chứ KHÔNG nhét vào manifest: 256B × 20 slot = 5KB RAM
-// thường trú, quá đắt trên ESP32-C3 nơi TLS handshake đang giành từng KB.
+// Captions go in a sidecar file, NOT in the manifest: 256B × 20 slots = 5KB of
+// resident RAM, too expensive on an ESP32-C3 where the TLS handshake fights for
+// every KB.
 //
-// Cờ `unread` 1 byte mỗi slot thay cho bitmask uint8_t của NandStorageProvider —
-// đây là lý do 20 slot chạy được mà không đụng gì tới IStorageProvider.
+// One `unread` byte per slot instead of NandStorageProvider's uint8_t bitmask —
+// that is what lets 20 slots work without touching IStorageProvider.
 // ============================================================================
 
 static constexpr uint32_t SD_MANIFEST_MAGIC = 0x324D4453; // "SDM2"
 static constexpr uint16_t SD_MANIFEST_VERSION = 1;
 
-/// Metadata một slot. 24 byte, mọi field tự căn lề đúng nên không có padding ẩn.
+/// One slot's metadata. 24 bytes; every field is naturally aligned, so no hidden padding.
 struct SdSlotEntry {
-    char magic[4];           // "VJPG" | "VIMG" | {0,0,0,0} = rỗng
-    uint32_t dataSize;       // GỒM cả 4 byte tiền tố — đúng như SlotEntry.dataSize của NAND
-    uint32_t audioSize;      // GỒM 10 byte header AUDC; 0 = không có audio
-    uint32_t maxDisplayTime; // giây
+    char magic[4];           // "VJPG" | "VIMG" | {0,0,0,0} = empty
+    uint32_t dataSize;       // INCLUDES the 4-byte prefix — same as NAND's SlotEntry.dataSize
+    uint32_t audioSize;      // INCLUDES the 10-byte AUDC header; 0 = no audio
+    uint32_t maxDisplayTime; // seconds
     uint16_t fps;
     uint16_t totalFrames;
     uint8_t unread;          // 0/1
@@ -39,15 +40,15 @@ struct SdSlotEntry {
 struct SdManifest {
     uint32_t magic;
     uint16_t version;
-    uint8_t slotCount;      // Phải khớp SD_SLOT_COUNT, chặn thẻ của bản build cũ
-    int8_t writeSlotIndex;  // Slot kế tiếp nhận tin mới (= _writeSlotIndex của NAND)
+    uint8_t slotCount;      // must match SD_SLOT_COUNT; rejects cards from an older build
+    int8_t writeSlotIndex;  // next slot to receive a message (= NAND's _writeSlotIndex)
     SdSlotEntry slots[SD_SLOT_COUNT];
 };
 
 static_assert(sizeof(SdSlotEntry) == 24, "layout manifest doi -> the cu doc sai");
 static_assert(sizeof(SdManifest) == 8 + 24 * SD_SLOT_COUNT, "layout manifest doi -> the cu doc sai");
 
-/// Implementation của IStorageProvider dành cho Thẻ nhớ MicroSD (FAT32)
+/// IStorageProvider implementation for a MicroSD card (FAT32)
 class SDStorageProvider : public IStorageProvider {
 public:
     SDStorageProvider() = default;
@@ -55,7 +56,7 @@ public:
 
     bool init(SemaphoreHandle_t spiMutex = nullptr) override;
 
-    // --- Thao tác ĐỌC ---
+    // --- READ operations ---
     bool openForRead(const char* identifier) override;
     int readData(uint8_t* buffer, uint32_t len) override;
     void seek(uint32_t offset) override;
@@ -63,7 +64,7 @@ public:
     void closeRead() override;
     StorageItemInfo getItemInfo(const char* identifier = nullptr) const override;
 
-    // --- Thao tác GHI ---
+    // --- WRITE operations ---
     bool openForWrite(const char* identifier) override;
     size_t writeChunk(const uint8_t* data, size_t len) override;
     void closeWrite(uint32_t maxDisplayTime = 60) override;
@@ -73,7 +74,7 @@ public:
     bool openForAppend(const char* identifier = nullptr) override;
     void closeAppend() override;
 
-    // --- Quản lý Hàng chờ & Slot ---
+    // --- Queue & slot management ---
     bool isFull() const override;
     bool getNextWriteSlotIdentifier(char* outId, size_t maxLen) override;
     bool hasUnreadMessage() const override;
@@ -93,26 +94,26 @@ private:
     SdManifest _m{};
     bool _mounted = false;
 
-    // --- Trạng thái đường GHI ---
-    int8_t _activeIndex = -1;       // Slot đang mở để ghi/append
-    int8_t _lastWrittenIndex = -1;  // Slot mà closeWrite() vừa chốt (gốc cho append)
-    uint32_t _lastWrittenSize = 0;  // dataSize của slot đó = offset header AUDC
-    uint32_t _writeSize = 0;        // Số byte đã ghi trong phiên hiện tại
+    // --- WRITE path state ---
+    int8_t _activeIndex = -1;       // slot open for write/append
+    int8_t _lastWrittenIndex = -1;  // slot closeWrite() just committed (base for append)
+    uint32_t _lastWrittenSize = 0;  // that slot's dataSize = offset of the AUDC header
+    uint32_t _writeSize = 0;        // bytes written in the current session
     bool _writeOpen = false;
     bool _capturingHeader = false;
-    uint8_t _hdrPeek[16] = {};      // 16 byte header container chụp lúc đi qua
+    uint8_t _hdrPeek[16] = {};      // the 16-byte container header, captured as it passes
 
-    // --- Trạng thái đường ĐỌC tuần tự ---
+    // --- Sequential READ path state ---
     int8_t _readIndex = -1;
     uint32_t _readCursor = 0;
-    uint32_t _readCeil = 0;         // = dataSize; readAt() KHÔNG bị trần này
+    uint32_t _readCeil = 0;         // = dataSize; readAt() is NOT bound by it
 
-    /// Chấp nhận cả "7" lẫn "slot_7" (giống NandStorageProvider::parseSlotId).
-    /// Trả -1 nếu không hợp lệ / ngoài dải.
+    /// Accepts both "7" and "slot_7" (like NandStorageProvider::parseSlotId).
+    /// Returns -1 if invalid / out of range.
     int8_t parseIndex(const char* identifier) const;
 
-    /// Mọi đường dẫn dựng từ index ĐÃ PARSE, không bao giờ từ chuỗi thô —
-    /// diệt tận gốc lỗi lệch identifier ("0" và "slot_0" từng ra 2 file khác nhau).
+    /// Every path is built from the PARSED index, never from the raw string —
+    /// which rules out identifier mismatches ("0" and "slot_0" naming two files).
     void buildPath(int8_t idx, char* out, size_t maxLen) const;
     void buildTextPath(int8_t idx, char* out, size_t maxLen) const;
 

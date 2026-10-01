@@ -5,35 +5,37 @@
 #include <atomic>
 
 // ============================================================================
-// Settings — cài đặt người dùng ĐANG CÓ HIỆU LỰC (độ sáng, âm lượng phát tin)
+// Settings — the user settings CURRENTLY IN EFFECT (brightness, message volume)
 // ============================================================================
-// Nguồn: NVS lúc boot (begin), cloud khi `config_flag` bật (apply, gọi từ task WakeSync).
-// Người đọc: Task_MediaPlayer, Task_UIController, DisplayDriver, MediaPlayer -> atomic.
-// Cài đặt nằm ở NVS chứ không ở thẻ SD: thẻ hỏng thì hộp vẫn đúng độ sáng/âm lượng.
+// Sources: NVS at boot (begin), the cloud when `config_flag` is set (apply, called
+// from the WakeSync task). Readers: Task_MediaPlayer, Task_UIController,
+// DisplayDriver, MediaPlayer -> hence atomics. Settings live in NVS, not on the SD
+// card: with a faulty card the box keeps the right brightness/volume.
 // ============================================================================
 
 namespace Settings {
 
 extern std::atomic<uint8_t> brightness;   // SETTINGS_MIN_BRIGHTNESS..100
-extern std::atomic<uint8_t> volume;       // 0..100, 0 = tắt tiếng
-extern std::atomic<uint32_t> appliedRev;  // config_rev lần áp dụng gần nhất
-/// Tăng mỗi lần độ sáng đổi -> vòng lặp màn hình biết để ghi lại PWM.
+extern std::atomic<uint8_t> volume;       // 0..100, 0 = mute
+extern std::atomic<uint32_t> appliedRev;  // the config_rev last applied
+/// Bumped on every brightness change -> the display loop knows to rewrite the PWM.
 extern std::atomic<uint32_t> brightnessEpoch;
 
-/// Đọc NVS. Gọi một lần trong setup(), SAU ConfigManager có NVS.
+/// Read NVS. Call once in setup(), AFTER ConfigManager has opened NVS.
 void begin();
 
-/// Kẹp giá trị, lưu NVS, cập nhật RAM. Giá trị < 0 = cloud không gửi trường đó -> giữ cũ.
-/// Trả true nếu ghi NVS thành công (kể cả khi không có gì đổi).
+/// Clamp the values, save to NVS, update RAM. A value < 0 = the cloud didn't send
+/// that field -> keep the old one. Returns true if the NVS write succeeded (even
+/// when nothing changed).
 bool apply(int newBrightness, int newVolume, uint32_t rev);
 
-/// % PWM thật cho màn thường. Gamma 2 để thanh trượt trên web tăng đều theo cảm nhận mắt.
+/// Actual PWM % for normal screens. Gamma 2, so the web slider feels perceptually even.
 uint8_t currentBacklight();
-/// % PWM cho màn báo thức: không tối hơn ALARM_MIN_BRIGHTNESS.
+/// PWM % for the alarm screen: never darker than ALARM_MIN_BRIGHTNESS.
 uint8_t alarmBacklight();
 
-/// Hệ số Q15 cho âm lượng 0..100 theo dB (100 = 0dB = 32768, 1 = -40dB, 0 = câm).
-/// 32768 là mốc "đúng bằng đường cũ": AudioPlayer bỏ hẳn phép nhân khi gặp giá trị này.
+/// Q15 gain for volume 0..100 on a dB scale (100 = 0dB = 32768, 1 = -40dB, 0 = silent).
+/// 32768 marks the unscaled path: AudioPlayer skips the multiply entirely for it.
 int32_t volumeGainQ15(uint8_t vol);
 
 static constexpr int32_t GAIN_UNITY = 32768;

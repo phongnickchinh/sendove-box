@@ -6,34 +6,32 @@
 #include "config.h"
 
 // ============================================================================
-// NandStorage — Driver cho W25Q128 NAND Flash trên Hardware SPI2
+// NandStorage — driver for the W25Q128 flash chip on hardware SPI2
 // ============================================================================
-// Quản lý NAND_SLOT_COUNT slot video/ảnh lưu trên flash NAND W25Q128 (16MB).
-// Sử dụng Hardware SPI2 (chia sẻ bus với DisplayDriver ST7789).
+// Manages NAND_SLOT_COUNT video/image slots on the 16MB W25Q128, on hardware
+// SPI2 (bus shared with the ST7789 DisplayDriver).
 //
-// Slot Table nằm ở sector đầu tiên (0x000000):
-//   Magic "NSL3" + NAND_SLOT_COUNT × SlotEntry (278 bytes mỗi entry)
-//   Magic đổi NSL2 -> NSL3 vì SlotEntry dài thêm textLen+text[256] (caption tin
-//   nhắn tĩnh): bảng cũ phải bị từ chối chứ không được đọc lệch trường. Giống
-//   tiền lệ NSLT -> NSL2 khi thêm audioSize — nâng cấp firmware này xoá sạch
-//   tin nhắn unread cũ trên máy 1 lần duy nhất, không phải bug.
-//
-// Phase 1: Chế độ READ-ONLY — không erase/write để bảo toàn dữ liệu.
+// The slot table sits in the first sector (0x000000):
+//   magic "NSL3" + NAND_SLOT_COUNT × SlotEntry (278 bytes each)
+//   The magic changes whenever SlotEntry grows (NSLT -> NSL2 for audioSize,
+//   NSL2 -> NSL3 for textLen+text[256]): an old table must be rejected rather
+//   than read with shifted fields. Such a firmware upgrade wipes the unread
+//   messages on the device once — by design, not a bug.
 // ============================================================================
 
-/// Giới hạn caption text lưu trong bảng slot (đủ ~7-8 dòng trên màn 240x240).
+/// Caption text cap stored in the slot table (about 7-8 lines on the 240x240 screen).
 static constexpr uint16_t SLOT_TEXT_MAX_LEN = 256;
 
-/// Thông tin 1 slot (278 bytes)
+/// One slot's metadata (278 bytes)
 struct SlotEntry {
     char     magic[4];       // "VJPG" for video, "VIMG" for static image, "\0" for empty
-    uint32_t dataSize;       // Video data size in bytes (KHÔNG gồm audio nối phía sau)
+    uint32_t dataSize;       // Video data size in bytes (EXCLUDING the audio appended after it)
     uint16_t fps;            // Frame rate (video)
     uint16_t totalFrames;    // Total frame count
     uint32_t maxDisplayTime; // Max display time in seconds
-    uint32_t audioSize;      // Byte audio nối sau video (gồm header AUDC 10 byte); 0 = không có
-    uint16_t textLen;        // Độ dài caption thực tế trong text[] (0 = không có text)
-    char     text[SLOT_TEXT_MAX_LEN]; // Caption UTF-8 thô (chưa bỏ dấu) — bỏ dấu lúc render
+    uint32_t audioSize;      // Audio bytes appended after the video (incl. the 10-byte AUDC header); 0 = none
+    uint16_t textLen;        // Actual caption length in text[] (0 = no text)
+    char     text[SLOT_TEXT_MAX_LEN]; // Raw UTF-8 caption (diacritics intact) — folded to ASCII at render time
 };
 
 /// Hardware SPI driver for W25Q128 NAND Flash storage
@@ -45,38 +43,39 @@ public:
     /// Read raw data bytes from specified Flash address
     void readRaw(uint32_t addr, uint8_t* data, uint32_t len);
 
-    /// Erase a 4KB Flash sector at specified address. Trả về false nếu KHÔNG lấy
-    /// được SPI mutex (không erase được) — caller PHẢI kiểm, vì ghi đè lên vùng
-    /// chưa erase cho ra dữ liệu rác mà chip không hề báo lỗi.
+    /// Erase a 4KB Flash sector at specified address. Returns false if the SPI
+    /// mutex could NOT be taken (nothing erased) — the caller MUST check, because
+    /// writing over an unerased area yields garbage with no error from the chip.
     bool eraseSector(uint32_t addr);
 
     /// Erase a continuous flash range using the largest supported erase granularity.
-    /// false = có ít nhất một block/sector không erase được.
+    /// false = at least one block/sector could not be erased.
     bool eraseRange(uint32_t addr, uint32_t len);
 
     /// Write raw data bytes to Flash address (handles page programming).
-    /// false = không lấy được SPI mutex, KHÔNG có byte nào được ghi.
+    /// false = the SPI mutex could not be taken; NO byte was written.
     bool writeRaw(uint32_t addr, const uint8_t* data, uint32_t len);
 
     /// Erase all slots & header table (Format Flash)
     void formatAll();
 
-    /// Write / sync current slot table to Sector 0 with "NSLT" magic header
+    /// Write / sync current slot table to Sector 0 with its magic header
     void writeSlotTable();
 
-    /// Ghi kích thước phần audio nối sau video vào bảng slot (không đụng trường khác)
+    /// Store the size of the audio appended after the video in the slot table (touches no other field)
     void setSlotAudioSize(uint8_t slot, uint32_t audioSize);
 
-    /// Ghi caption text vào bảng slot (không memset() cả struct, chỉ set field
-    /// text/textLen — theo đúng pattern setSlotAudioSize(), không được xoá mất
-    /// magic/dataSize/audioSize đã ghi trước đó). Cắt bớt an toàn nếu len > SLOT_TEXT_MAX_LEN.
+    /// Store caption text in the slot table. Sets only text/textLen — like
+    /// setSlotAudioSize(), it must not memset() the struct and lose the
+    /// magic/dataSize/audioSize written earlier. Truncates safely if
+    /// len > SLOT_TEXT_MAX_LEN.
     void setSlotText(uint8_t slot, const char* text, uint16_t len);
 
-    /// Đọc caption text từ RAM (không cần SPI). Trả về độ dài đã copy (0 nếu không có).
+    /// Read caption text from RAM (no SPI). Returns the length copied (0 if none).
     uint16_t getSlotText(uint8_t slot, char* outBuf, size_t maxLen) const;
 
-    /// Đọc tại offset tuyệt đối trong slot đang mở, KHÔNG bị chặn bởi dataSize và
-    /// KHÔNG đụng con trỏ đọc tuần tự của readData(). Dùng cho vùng audio.
+    /// Read at an absolute offset in the open slot, NOT limited by dataSize and
+    /// WITHOUT touching readData()'s sequential cursor. Used for the audio region.
     int readAtSlot(uint32_t offset, uint8_t* buf, uint32_t len);
 
     /// Set slot metadata in RAM table (used after writing slot data)
@@ -115,8 +114,8 @@ public:
     /// Get currently opened slot index (-1 if none)
     int8_t getCurrentSlot() const;
 
-    /// false = init() vua tao bang slot moi (magic khong khop / chip trong).
-    /// Moi metadata cu da bi xoa, phia tren phai reset hang cho theo.
+    /// false = init() just created a fresh slot table (magic mismatch / blank chip).
+    /// All old metadata is gone, so the layer above must reset its queue too.
     bool isTableValid() const { return _tableValid; }
 
 private:

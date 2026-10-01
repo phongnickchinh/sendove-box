@@ -35,7 +35,7 @@ float PowerManager::getBatteryVoltage() {
 
 uint8_t PowerManager::getBatteryPercentage() {
     // return voltageToPercent(getBatteryVoltage());
-    return 60; // Giả lập mức pin 60%
+    return 60; // placeholder: battery sensing isn't wired, report 60%
 }
 
 bool PowerManager::isLowBattery(uint8_t threshold) {
@@ -64,7 +64,7 @@ void PowerManager::enterLightSleep(uint64_t sleepDurationUs, DisplayDriver* disp
     configureTouchWakeup(_touchPin);
 
     // Serial.flush();
-    // Serial.setTxTimeoutMs(0); // Đặt USB CDC TX timeout = 0ms (chống treo/khựng Task khi ngắt USB Serial)
+    // Serial.setTxTimeoutMs(0); // USB CDC TX timeout = 0ms (keeps tasks from stalling when USB serial is unplugged)
 
     esp_light_sleep_start();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);

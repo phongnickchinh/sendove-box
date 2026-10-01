@@ -1,7 +1,7 @@
 #include "Settings.h"
 
 #include <math.h>
-// Include thẳng: LDF của PlatformIO không lần theo <Preferences.h> nằm trong ConfigManager.h.
+// Included directly: PlatformIO's LDF doesn't follow the <Preferences.h> inside ConfigManager.h.
 #include <Preferences.h>
 
 #include "ConfigManager.h"
@@ -17,7 +17,7 @@ std::atomic<uint32_t> brightnessEpoch{0};
 
 namespace {
 
-// 101 hệ số tính một lần: powf() cho từng mẫu âm thanh là quá đắt.
+// 101 gains computed once: powf() per audio sample would be far too expensive.
 int32_t s_gainLut[101];
 bool s_lutReady = false;
 
@@ -43,7 +43,7 @@ uint8_t clampVolume(int v) {
     return (uint8_t)v;
 }
 
-// Gamma 2: 100 -> 100, 50 -> 25, 5 -> 0 -> kẹp lên 1. Sàn thật nằm ở clampBrightness.
+// Gamma 2: 100 -> 100, 50 -> 25, 5 -> 0 -> clamped up to 1. The real floor is in clampBrightness.
 uint8_t toPwm(uint8_t userPercent) {
     uint32_t p = ((uint32_t)userPercent * userPercent + 50) / 100;
     return (uint8_t)(p < 1 ? 1 : p);

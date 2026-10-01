@@ -19,7 +19,7 @@ constexpr const char* LAYOUT_JSON = "{\"schema\":1}";
 
 bool ready() { return s_card != nullptr && s_card->isMounted(); }
 
-// --- Dọn file .tmp còn sót (mất điện giữa writeAtomic) ---
+// --- Clean up leftover .tmp files (power lost during writeAtomic) ---
 
 struct CleanCtx {
     const char* dir;
@@ -30,7 +30,7 @@ void cleanEntry(const char* name, bool isDir, void* ctx) {
     char path[96];
     snprintf(path, sizeof(path), "%s/%s", dir, name);
     if (isDir) {
-        // Một cấp con (gói theme /theme/t_<id>/) là đủ, cây thư mục không sâu hơn.
+        // One level down (theme packages /theme/t_<id>/) is enough; the tree goes no deeper.
         CleanCtx sub{path};
         s_card->listDir(path, [](const char* n, bool d, void* c) {
             if (!d) cleanEntry(n, false, c);
@@ -42,9 +42,9 @@ void cleanEntry(const char* name, bool isDir, void* ctx) {
     char base[96];
     snprintf(base, sizeof(base), "%s/%.*s", dir, (int)(len - 4), name);
     if (s_card->fileExists(base)) {
-        s_card->deleteFile(path);  // bước ghi .tmp chưa xong -> bản cũ vẫn đúng
+        s_card->deleteFile(path);  // the .tmp write didn't finish -> the old file is still correct
     } else {
-        s_card->renameFile(path, base);  // chết sau khi xoá bản cũ -> .tmp là bản đúng
+        s_card->renameFile(path, base);  // died after deleting the old file -> the .tmp is the correct one
     }
 }
 
@@ -61,7 +61,7 @@ void ensureLayout() {
     s_card->makeDir("/sys/log");
     s_card->makeDir("/theme");
     s_card->makeDir("/alarm");
-    // Thẻ mới / thẻ trống: tạo layout, KHÔNG format, giữ nguyên mọi file lạ có sẵn.
+    // New / empty card: create the layout, do NOT format, leave any unknown files alone.
     if (!s_card->fileExists(LAYOUT_PATH)) {
         writeAtomic(LAYOUT_PATH, (const uint8_t*)LAYOUT_JSON, strlen(LAYOUT_JSON));
     }
@@ -154,7 +154,7 @@ bool removeTree(const char* dir) {
 int32_t fileSize(const char* path) { return ready() ? s_card->getFileSize(path) : -1; }
 
 uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
-    // Không bảng tra (tiết kiệm 1KB RAM thường trú). 2MB nhạc ~0,5s, chỉ chạy lúc tải xong.
+    // No lookup table (saves 1KB of resident RAM). 2MB of music takes ~0.5s and only runs after a download.
     uint32_t c = crc ^ 0xFFFFFFFFu;
     for (size_t i = 0; i < len; i++) {
         c ^= data[i];
@@ -166,9 +166,9 @@ uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
 uint32_t crc32File(const char* path, uint32_t size, bool* ok) {
     if (ok) *ok = false;
     if (!ready()) return 0;
-    // KHÔNG dùng handle đọc ngẫu nhiên (_atFile): nhạc báo thức giữ đúng handle đó khi
-    // kêu, và báo thức có thể bắt đầu kêu giữa lúc đang kiểm crc. Mở-đọc-đóng từng khối
-    // 4KB (~500 lần cho 2MB) chậm hơn chút nhưng không đụng ai.
+    // Do NOT use the random-read handle (_atFile): alarm music holds that very handle
+    // while ringing, and an alarm can start during a crc check. Open-read-close per
+    // 4KB block (~500 times for 2MB) is a bit slower but disturbs nobody.
     static constexpr size_t BUF = 4096;
     uint8_t* buf = (uint8_t*)malloc(BUF);
     if (!buf) return 0;

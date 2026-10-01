@@ -459,13 +459,13 @@ unsigned long sdGetSectorsCount(uint8_t pdrv)
 namespace
 {
 
-// SENDLOVE BOX: ban sao cua thu vien SD trong framework-arduinoespressif32
-// (2.0.x), chi doi SPI_MODE0 -> SPI_MODE3 o 2 dong ben duoi. Moi luu luong
-// SPI cua thu vien deu di qua struct nay.
-// Ly do: ST7789 khong co chan CS, da thu thuc te 2026-09-17 - chay MODE0 thi
-// man hinh den hoan toan, nen ca bus bat buoc MODE3. Ban goc hardcode MODE0,
-// dung chung bus se lat CPOL moi lan truy cap the -> lech khung byte man hinh.
-// The SD van lay mau o suon len trong MODE3 (giong MODE0).
+// SENDLOVE BOX: this is a copy of the SD library from framework-arduinoespressif32
+// (2.0.x) with only SPI_MODE0 -> SPI_MODE3 changed on the 2 lines below. All of
+// the library's SPI traffic goes through this struct.
+// Why: the ST7789 has no CS pin; tested on hardware — in MODE0 the screen stays
+// completely black, so the whole bus must run MODE3. The original hardcodes MODE0,
+// which on a shared bus flips CPOL on every card access -> the display's byte
+// framing slips. The SD card still samples on the rising edge in MODE3 (as in MODE0).
 struct AcquireSPI
 {
     ardu_sdcard_t *card;

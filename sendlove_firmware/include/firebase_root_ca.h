@@ -3,39 +3,39 @@
 
 #include <pgmspace.h>
 // ============================================================================
-// Root CA cho cac ket noi HTTPS toi Firebase
+// Root CAs for HTTPS connections to Firebase
 // ============================================================================
-// KHONG phai secret -> file nay commit binh thuong, dung nham vao
-// config_secrets.h (file do bi gitignore).
+// NOT a secret -> this file is committed normally; don't confuse it with
+// config_secrets.h (which is gitignored).
 //
-// Chuoi chung chi da DO THAT bang openssl s_client (2026-09-03), khong suy doan:
+// Certificate chains MEASURED with openssl s_client (2026-09-03), not guessed:
 //   iot-app-839a2.asia-southeast1.firebasedatabase.app
 //       leaf -> GTS WR1 -> GTS Root R1   (RSA)
 //   firebasestorage.googleapis.com
 //       leaf -> GTS WE2 -> GTS Root R4   (ECC)
-// HAI host dung HAI root KHAC NHAU -> phai co ca hai. Chi nhung R1 se lam hong
-// duong tai media (Storage), va nguoc lai.
+// The TWO hosts use TWO DIFFERENT roots -> both are required. Embedding only R1
+// breaks media downloads (Storage), and vice versa.
 //
-// Ban nhung o day la ban SELF-SIGNED chinh chu tai tu https://pki.goog/repo/certs/
-// (het han 2036-06-22), KHONG phai ban cross-sign boi GlobalSign ma server gui
-// kem trong chain (ban do het han 2028-01-28).
+// The copies embedded here are the genuine SELF-SIGNED roots from
+// https://pki.goog/repo/certs/ (expiring 2036-06-22), NOT the GlobalSign
+// cross-signed ones the server sends in its chain (those expire 2028-01-28).
 //
-// Fingerprint SHA-256 da doi chieu luc nhung:
+// SHA-256 fingerprints checked when embedding:
 //   GTS Root R1: D9:47:43:2A:BD:E7:B7:FA:90:FC:2E:6B:59:10:1B:12:
 //                80:E0:E1:C7:E4:E4:0F:A3:C6:88:7F:FF:57:A7:F4:CF
 //   GTS Root R4: 34:9D:FA:40:58:C5:E2:63:12:3B:39:8A:E7:95:57:3C:
 //                4E:13:13:C8:3F:E6:8F:93:55:6C:D5:E8:03:1B:3C:7D
 //
-// Kiem tra lai bat cu luc nao:
+// Re-check at any time:
 //   curl -o gtsr1.pem https://pki.goog/repo/certs/gtsr1.pem
 //   openssl x509 -in gtsr1.pem -noout -subject -enddate -fingerprint -sha256
 //
-// Neu mot ngay Google doi root, box se mat cloud (handshake fail) va phai nap
-// lai firmware. Dau hieu nhan biet tren log: dong "[NET] tls: ..." bao loi
-// verify chu khong phai loi ket noi.
+// If Google ever changes roots, the box loses the cloud (handshake fails) and
+// needs new firmware. How to recognise it in the log: the "[NET] tls: ..." line
+// reports a verify error rather than a connection error.
 //
-// mbedTLS x509_crt_parse() nhan nhieu PEM noi tiep trong 1 chuoi -> khong can
-// tach 2 client rieng cho 2 host.
+// mbedTLS x509_crt_parse() accepts several concatenated PEMs in one string -> no
+// need for 2 separate clients for the 2 hosts.
 // ============================================================================
 
 static const char FIREBASE_ROOT_CA[] PROGMEM =

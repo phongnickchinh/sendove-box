@@ -242,9 +242,17 @@ def disc(name, cx, cz, rx, rz, y=-0.05, mat=None):
     if mat: o.data.materials.append(mat)
     return o
 
-MOD_Z0 = 3.0                    # day module man hinh
-WIN = 25.6
-WIN_Z0 = MOD_Z0 + 39.1 - 10.0 - WIN     # GIA DINH: cua so cach mep tren module 10 mm
+# ---- MODULE MAN HINH: 3 phan (mach PCB, khoi LCD, vung hien thi) + 4 lo vit. Don vi mm. SO DO THAT cua user (2026-10-01)
+SCR = dict(
+    pcb_w=27.6, pcb_h=39.0, pcb_t=1.2,       # tam mach: rong x cao x day
+    lcd_w=26.0, lcd_h=29.2, lcd_t=2.0,       # khoi LCD (khung kim loai + cap): dat chinh giua mach, cach 2 dau mach (39-29.2)/2 = 4.9 (do ~4.8)
+    hole_d=1.8,                              # duong kinh lo vit (do ~1.8)
+    hole_edge=1.0,                           # khoang cach tu MEP LO den 2 mep PCB gan nhat (4 goc). Neu do tu TAM lo: dat = 1.0 - hole_d/2
+)
+MOD_Z0 = 3.0                    # mep duoi tam mach (do cao so voi mat tam day)
+LCD_Z0 = MOD_Z0 + (SCR['pcb_h'] - SCR['lcd_h']) / 2      # mep duoi khoi LCD
+WIN = 25.6                      # vung hien thi 25.6 x 25.6, SAT MEP TREN khoi LCD (dai FPC ~3.6 mm o phia duoi)
+WIN_Z0 = LCD_Z0 + SCR['lcd_h'] - WIN                    # mep duoi vung hien thi
 
 def face_decals():
     """mo phong hinh hien tren man hinh: nen kem + mat + ma hong"""
@@ -296,9 +304,10 @@ def shot(cam, eye, target, path):
 T = 2.0                      # vo day
 EAR_SKIN = 1.0               # lop da quanh chan tai thuoc ve tai (tao hoc dinh vi tren than)
 EAR_SEAM_Z = 43.0            # duong ghep tai-than (tren dinh module 42.1)
-MOD = dict(w=27.7, h=39.1, t=4.4, cluster=2.2, hole_inset=2.0)       # hole_inset: GIA DINH
-WIN_CLR = 0.3
-PCB_Z = 12.0                 # mat duoi PCB = dinh tru vit
+WIN_CLR = 0.1                # o lo man hinh = WIN + 2*WIN_CLR (25.8 mm): khe hao cho in 3D / lech module
+# Tam mica che man hinh nam trong ranh o mat ngoai (phang voi vo), do tren bac do bang nhua (day T - LENS['t'])
+LENS = dict(w=28.6, h=28.6, t=1.0, clr=0.15)   # mica 28.6 x 28.6 x 1.0; clr = khe moi ben giua mica va ranh
+PCB_Z = 12.0                # mat duoi PCB = dinh tru vit
 PCB_Y = (9.5, L - T - 0.5)   # mep sau PCB cach thanh sau 0.5 (USB-C sat thanh)
 BOSSES = [(sx * 18.5, yb) for sx in (-1, 1) for yb in (12.0, 56.0)]
 BOSS_D, PILOT_D = 5.0, 1.7   # vit tu ren M2
@@ -459,21 +468,19 @@ def build_parts():
         rib = box("rib", min(bx, bx + sx * 8), max(bx, bx + sx * 8), by - 1.5, by + 1.5, T - 0.01, PCB_Z)
         boolean(bs, rib, 'UNION'); boolean(bs, dup(outer, "n"), 'INTERSECT')
         boolean(body, bs, 'UNION')
-    # ---- module man hinh: 2 tru vit M1.6 o dai tren (lo GIA DINH cach mep 2 mm) + go do mep duoi
-    mz0 = MOD_Z0
-    hz = mz0 + MOD['h'] - MOD['hole_inset']
+    # ---- module man hinh: 4 tru vit M1.6 o 4 goc PCB, cao bang do day LCD (PCB tua len dau tru)
+    c = screw_c()
     for hx in (-1, 1):
-        x = hx * (MOD['w'] / 2 - MOD['hole_inset'])
-        boolean(body, cyl("post", (x, T - 0.2, hz), (x, T + MOD['cluster'], hz), 1.75, 24), 'UNION')
-        boolean(body, cyl("pilot", (x, T - 1.0, hz), (x, T + MOD['cluster'] + 0.5, hz), 0.65, 16), 'DIFFERENCE')
-    boolean(body, box("ledge", -10, 10, T - 0.2, T + MOD['t'], T - 0.01, mz0), 'UNION')
-    # ---- cua so man hinh vat mep ra ngoai
-    a, b0 = WIN / 2 + WIN_CLR, WIN_Z0 - WIN_CLR
-    b1 = WIN_Z0 + WIN + WIN_CLR
-    ch = 0.8
-    boolean(body, hull("win", [(sx * (a + ch), -0.5, z) for sx in (-1, 1) for z in (b0 - ch, b1 + ch)] +
-                              [(sx * a, ch, z) for sx in (-1, 1) for z in (b0, b1)] +
-                              [(sx * a, T + 1, z) for sx in (-1, 1) for z in (b0, b1)]))
+        for hz in (MOD_Z0 + c, MOD_Z0 + SCR['pcb_h'] - c):
+            x = hx * (SCR['pcb_w'] / 2 - c)
+            boolean(body, cyl("post", (x, T - 0.2, hz), (x, T + SCR['lcd_t'], hz), 1.75, 24), 'UNION')
+            boolean(body, cyl("pilot", (x, T - 1.0, hz), (x, T + SCR['lcd_t'] + 0.5, hz), 0.65, 16), 'DIFFERENCE')
+    # ---- cua so man hinh: ranh dat mica (mat ngoai, sau LENS['t']) + o lo man hinh xuyen qua bac do
+    zc_win = WIN_Z0 + WIN / 2                     # tam cua so theo z
+    a, b0, b1 = WIN / 2 + WIN_CLR, WIN_Z0 - WIN_CLR, WIN_Z0 + WIN + WIN_CLR
+    boolean(body, box("win", -a, a, -1.0, T + 1, b0, b1))                       # o lo xuyen thanh
+    rw, rh = LENS['w'] / 2 + LENS['clr'], LENS['h'] / 2 + LENS['clr']
+    boolean(body, box("lens_seat", -rw, rw, -1.0, LENS['t'], zc_win - rh, zc_win + rh))   # ranh mica
     # ---- hoc cam ung duoi mai (con 1 mm)
     tz = min(ray_hit(outer, (dx, TOUCH['yc'] + dy, 100), (0, 0, -1)).z
              for dx in (-TOUCH['w'] / 2, 0, TOUCH['w'] / 2) for dy in (-TOUCH['l'] / 2, 0, TOUCH['l'] / 2))
@@ -519,12 +526,16 @@ def bbox(ob):
     vs = [v.co for v in ob.data.vertices]
     return (min(v.x for v in vs), max(v.x for v in vs), min(v.y for v in vs), max(v.y for v in vs), min(v.z for v in vs), max(v.z for v in vs))
 
+def screw_c():
+    """tam lo vit cach mep PCB (mm)"""
+    return SCR['hole_edge'] + SCR['hole_d'] / 2
+
 def components():
     mz0 = MOD_Z0
     return dict(
-        # cum kinh 26x29.1 ap vao mat trong thanh truoc (vi tri theo cua so GIA DINH); bo mach module phia sau
-        man_hinh_kinh=(-13.0, 13.0, T + 0.05, T + MOD['cluster'], WIN_Z0 - 1.75, WIN_Z0 - 1.75 + 29.1),
-        man_hinh_mach=(-MOD['w'] / 2, MOD['w'] / 2, T + MOD['cluster'] + 0.05, T + MOD['t'], mz0 + 0.05, mz0 + MOD['h']),
+        # khoi LCD ap vao mat trong thanh truoc; tam mach PCB nam sau LCD
+        man_hinh_lcd=(-SCR['lcd_w'] / 2, SCR['lcd_w'] / 2, T + 0.05, T + SCR['lcd_t'], LCD_Z0, LCD_Z0 + SCR['lcd_h']),
+        man_hinh_pcb=(-SCR['pcb_w'] / 2, SCR['pcb_w'] / 2, T + SCR['lcd_t'] + 0.05, T + SCR['lcd_t'] + SCR['pcb_t'], mz0 + 0.05, mz0 + SCR['pcb_h']),
         pin=BAT,
         pcb=(-13.0, 13.0, PCB_Y[0], PCB_Y[1], PCB_Z, PCB_Z + 1.6),      # vung loi PCB (vien that lay theo duong bao xuat ra)
         loa=(SPK['x0'], SPK['x1'], SPK['y0'], SPK['y0'] + SPK['l'], SPK['z0'], SPK['z0'] + SPK['h']),
@@ -637,6 +648,11 @@ if STAGE == "mech":
     rep.append(f"DO_THAT: than rong day {max(width_at(z) for z in (3, 5, 8)):.1f} / dinh thanh (z=38) {width_at(38):.1f} mm,"
                f" dinh vom {zt:.1f} mm, dai than {L:.1f} mm")
     rep.append(f"LOA x={SPK['x0']:.1f}..{SPK['x1']:.1f}  CAM_UNG dinh z={TOUCH['ztop']:.1f}")
+    rep.append(f"MAN_HINH: PCB {SCR['pcb_w']} x {SCR['pcb_h']} x {SCR['pcb_t']}, LCD {SCR['lcd_w']} x {SCR['lcd_h']} x {SCR['lcd_t']} z {LCD_Z0:.1f}..{LCD_Z0 + SCR['lcd_h']:.1f},"
+               f" hien thi {WIN} z {WIN_Z0:.1f}..{WIN_Z0 + WIN:.1f}, 4 lo vit tam cach mep PCB {screw_c():.2f} (x +-{SCR['pcb_w'] / 2 - screw_c():.2f})")
+    rep.append(f"MICA: tam {LENS['w']:.1f} x {LENS['h']:.1f} x {LENS['t']:.1f} mm, ranh {LENS['w'] + 2 * LENS['clr']:.2f} x {LENS['h'] + 2 * LENS['clr']:.2f},"
+               f" bac do {(LENS['w'] + 2 * LENS['clr'] - WIN - 2 * WIN_CLR) / 2:.2f} mm/ben day {T - LENS['t']:.1f} mm, o lo man hinh {WIN + 2 * WIN_CLR:.2f} mm,"
+               f" z {WIN_Z0 - WIN_CLR:.1f}..{WIN_Z0 + WIN + WIN_CLR:.1f}")
     # ---- duong bao PCB -> DXF cho KiCad
     poly = pcb_outline(body)
     xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
@@ -659,11 +675,23 @@ if STAGE == "mech":
     bpy.data.objects.remove(P['outer'])
     P['cage'].hide_render = True
     P['cage'].hide_set(True)             # khung trung voi mat ngoai than -> an de khoi nhap nhay
-    colors = dict(man_hinh_kinh=(0.1, 0.15, 0.3, 1), man_hinh_mach=(0.2, 0.45, 0.85, 1), pin=(0.95, 0.6, 0.2, 1),
+    colors = dict(man_hinh_lcd=(0.1, 0.15, 0.3, 1), man_hinh_pcb=(0.2, 0.45, 0.85, 1), pin=(0.95, 0.6, 0.2, 1),
                   pcb=(0.15, 0.6, 0.3, 1), loa=(0.6, 0.3, 0.75, 1), cam_ung=(0.9, 0.2, 0.2, 1))
     comps = []
     for k, b in C.items():
         o = box(k, *b); o.color = colors[k]; link(o, cols["Linh kien (tham khao)"]); comps.append(o)
+    # vung hien thi 25.6 x 25.6 (lo ra truoc mat LCD ~0.1 mm) + 4 lo vit tren PCB
+    disp = box("man_hinh_hien_thi", -WIN / 2, WIN / 2, T - 0.1, T, WIN_Z0, WIN_Z0 + WIN)
+    disp.color = (0.02, 0.05, 0.1, 1); link(disp, cols["Linh kien (tham khao)"]); comps.append(disp)
+    c = screw_c()
+    for hx in (-1, 1):
+        for hz in (MOD_Z0 + c, MOD_Z0 + SCR['pcb_h'] - c):
+            hole = cyl("man_hinh_lo_vit", (hx * (SCR['pcb_w'] / 2 - c), T + SCR['lcd_t'] - 0.02, hz),
+                       (hx * (SCR['pcb_w'] / 2 - c), T + SCR['lcd_t'] + SCR['pcb_t'] + 0.02, hz), SCR['hole_d'] / 2, 16)
+            hole.color = (1, 1, 1, 1); link(hole, cols["Linh kien (tham khao)"]); comps.append(hole)
+    zcw = WIN_Z0 + WIN / 2
+    mica = box("mica", -LENS['w'] / 2, LENS['w'] / 2, 0.0, LENS['t'], zcw - LENS['h'] / 2, zcw + LENS['h'] / 2)
+    mica.color = (0.6, 0.85, 1.0, 1); link(mica, cols["Linh kien (tham khao)"]); comps.append(mica)
     # PCB that theo duong bao
     bm = bmesh.new(); vs = [bm.verts.new((x, y, PCB_Z)) for x, y in poly]; f = bm.faces.new(vs)
     ex = bmesh.ops.extrude_face_region(bm, geom=[f]); bmesh.ops.translate(bm, vec=(0, 0, 1.6), verts=[v for v in ex['geom'] if isinstance(v, bmesh.types.BMVert)])

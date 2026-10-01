@@ -6,6 +6,7 @@
  * có chuyện kẹt bản cũ. Việc duy nhất nó làm: khi MỞ TRANG mà mất mạng thì trả
  * trang offline.html (đã lưu lúc cài) thay cho màn lỗi của trình duyệt.
  */
+// Sửa offline.html thì PHẢI tăng số phiên bản ở đây, không thì máy đã cài giữ bản cũ mãi.
 const CACHE = 'sendlove-offline-v1';
 const OFFLINE_URL = '/offline.html';
 

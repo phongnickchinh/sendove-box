@@ -644,6 +644,14 @@
   color: var(--caramel-900);
 }
 .sl-install__close:hover { background: var(--caramel-50); }
+/* Biến thể thẻ (Dashboard): đứng một mình nên cần bề mặt riêng, cùng nền và viền với thẻ hộp. */
+.sl-install--card {
+  padding: var(--sp-3) var(--sp-4);
+  border: 0.5px solid var(--line-card);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+}
+.sl-install--card .sl-install__close:hover { background: var(--bg-sunken); }
 /* Biến thể cảnh báo trình duyệt nhúng (Zalo/Facebook): khối nền vàng như .sl-reason. */
 .sl-install--warn {
   padding: var(--sp-3) var(--sp-4);

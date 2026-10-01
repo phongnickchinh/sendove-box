@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { logOut } from '../api/auth';
 import { getBoxDetails } from '../api/box';
 import Icon from '../components/ui/Icon';
+import InstallHint from '../components/InstallHint';
 import { Screen, AppBar, Body, Button, CircleIcon } from '../components/ui/Screen';
 import { lastSeenMs, syncTone } from '../utils/boxStatus';
 import { timeAgo } from '../utils/messageFormat';
@@ -171,6 +172,8 @@ export default function Dashboard() {
           <span className="sl-addbox__dot"><Icon name="plus" size={24} /></span>
           <span className="sl-addbox__label">Hộp mới</span>
         </button>
+
+        <InstallHint card />
       </Body>
 
       {accountOpen && (

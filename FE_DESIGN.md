@@ -186,3 +186,20 @@ số `bare` đã bỏ.
 - **Portal chưa nạp lên hộp thật.** `pio run` SUCCESS, flash 74.0%, khối
   `<script>` giữ nguyên từng ký tự — nhưng luồng quét → chọn → lưu → lên mạng
   phải thử trên thiết bị trước khi merge.
+
+---
+
+## 8. Cập nhật 2026-10-02 (nhánh `fe-ui-phase-2`)
+
+Mục 7 đã lạc hậu ở các điểm sau (đối chiếu `sendlove_web/src/App.jsx`):
+
+- **Theme đã có backend** từ 2026-09-23: `GET/PUT /boxes/:boxId/theme`,
+  `POST /theme/background`. Ba dòng "chưa có backend" ở 7.2 và dòng "Theme:
+  không route" ở 7.3 không còn đúng. Phần còn nợ là **firmware chưa đọc**
+  `theme_flag`.
+- **Route mới:** `/box/:boxId/receiver/alarm/music` → `ReceiverMusic` (nhạc báo thức).
+- **Màn 3.7 "Xác nhận đã gửi"** không tách thành route riêng nữa: `SendContext`
+  giữ lượt gửi sống qua các trang (pha `done` / `error`, thanh trạng thái nổi
+  khi rời màn gửi), nên `/box/:boxId/sender/confirm` không cần tồn tại.
+- Mọi route `/box/:boxId/...` nằm trong `BoxRoute` (kiểm vai trò và hộp còn ghép).
+- **PWA:** web cài được lên màn hình chính — xem `MULTI_PLATFORM_STRATEGY.md`.

@@ -1,4 +1,4 @@
-# KiCad: lock files, backups, autosave, cache
+# KiCad: file khoá, backup, autosave, cache
 *.lck
 ~*.lck
 *-backups/
@@ -9,12 +9,12 @@ _autosave-*
 *.kicad_pcb-bak
 fp-info-cache
 \#auto_saved_files\#
-# KiCad 10 local history (auto-generated, contains its own git repo)
+# Lịch sử cục bộ KiCad 10 (tự sinh, bên trong là một repo git riêng)
 .history/
 
-# Per-machine local settings (visible layers, open windows...)
+# Cài đặt cục bộ theo từng máy (lớp đang hiện, cửa sổ đang mở...)
 *.kicad_prl
 
-# Fabrication outputs — regenerable from the design files
+# Kết quả xuất sản xuất — sinh lại được từ file thiết kế
 gerbers/
 production/

@@ -47,10 +47,10 @@ def steps():
     pa = area('PROPERTIES'); pa.spaces.active.context = 'DATA'
     move(700, 500)
     yield 1.2
-    click(1400, 298); yield 0.6     # dong Shape
-    click(1400, 406); yield 0.6     # dong Paragraph
-    click(1400, 378); yield 0.6     # mo Font
-    click(1400, 351); yield 0.8     # mo Geometry
+    click(1400, 298); yield 0.6     # collapse Shape
+    click(1400, 406); yield 0.6     # collapse Paragraph
+    click(1400, 378); yield 0.6     # expand Font
+    click(1400, 351); yield 0.8     # expand Geometry
     move(700, 500); yield 0.5
     shot("11b_text_props")
     yield 0.3

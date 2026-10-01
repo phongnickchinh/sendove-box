@@ -315,9 +315,9 @@ bool MediaPlayer::playItem(const char* identifier) {
                 _display->showWrappedText(asciiCaption, 8, bandY, SCREEN_WIDTH - 16, SCREEN_HEIGHT - bandY - 8);
             }
             // MEASURE only, not fixed yet. showWrappedText() puts char lines[16][48] =
-            // 768B on the stack and TASK_STACK_MEDIA_PLAYER was never measured (see
-            // MEMORY.md §9.7). This is the task's deepest stack path, so measure
-            // here. Refactor to two passes only if this drops < ~1024.
+            // 768B on the stack — a deep path for this task (the VLW glyph alloca in
+            // LayoutEngine is deeper and logs its own floor), so measure here (see
+            // MEMORY.md §9.7). Refactor to two passes only if this drops < ~1024.
             // On ESP-IDF the call returns BYTES (not words as in stock FreeRTOS) —
             // read it as is, don't multiply by 4.
             DLOG("[PLAY] stack hwm=%u", (unsigned)uxTaskGetStackHighWaterMark(nullptr));

@@ -6,7 +6,7 @@ OUT = r"C:\Users\phamp\AppData\Local\Temp\claude\P--coddd-sendove-box\d65a1008-4
 PY = r"P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py"
 os.makedirs(OUT, exist_ok=True)
 META = {}
-H = 900     # chieu cao cua so (toa do su kien tinh tu duoi len)
+H = 900     # window height (event coordinates count from the bottom up)
 
 def win():
     return bpy.context.window_manager.windows[0]
@@ -70,7 +70,7 @@ def steps():
     move(700, 500)
     yield 2.0
     shot("01_giao_dien")
-    # lac goc nhin (giong file cu) -> Frame All
+    # lost view (as in the old file) -> Frame All
     set_view((0, 0, 0), (-6, -9, 6), dist=12)
     yield 0.6
     shot("02_lac")
@@ -81,7 +81,7 @@ def steps():
     click(184, 38); yield 1.0
     shot("04_menu_view")
     esc(); yield 0.6
-    # cac goc nhin chuan
+    # standard views
     for nm, t in (("05_front", 'FRONT'), ("05_right", 'RIGHT'), ("05_top", 'TOP')):
         op3d(bpy.ops.view3d.view_axis, type=t)
         op3d(bpy.ops.view3d.view_all, center=False)
@@ -89,7 +89,7 @@ def steps():
         shot(nm)
     set_view((0, 31, 30), (-150, -230, 150), dist=190)
     yield 0.8
-    # an than vo -> thay linh kien ben trong
+    # hide the shell body -> components inside become visible
     bpy.data.objects["vo_than"].hide_set(True)
     select([], None)
     set_view((0, 31, 22), (-120, -170, 120), dist=150)
@@ -103,7 +103,7 @@ def steps():
     yield 0.8
     shot("07_xray")
     s.shading.show_xray = False
-    # bang N - kich thuoc
+    # N panel - dimensions
     select(["vo_than"], "vo_than")
     s.show_region_ui = True
     yield 1.0
@@ -122,7 +122,7 @@ def steps():
     move(73, 317); yield 1.2
     shot("15_menu_file_export")
     esc(2); yield 0.6
-    # Scripting: mo breadcat.py
+    # Scripting: open breadcat.py
     w = win()
     w.workspace = bpy.data.workspaces['Scripting']
     yield 1.5
@@ -134,7 +134,7 @@ def steps():
     shot("10_scripting")
     w.workspace = bpy.data.workspaces['Layout']
     yield 1.5
-    # ----- vi du khac chu duoi tam day
+    # ----- example: engraving text under the base plate
     only_visible({"tam_day"})
     a, r, s = v3d()
     with bpy.context.temp_override(window=win(), area=a, region=r, space_data=s):
@@ -168,7 +168,7 @@ def steps():
     set_view((0, 31, 0), (-40, -60, -110), dist=95)
     yield 1.5
     shot("13_boolean")
-    # hop thoai xuat STL
+    # STL export dialog
     a, r, s = v3d()
     with bpy.context.temp_override(window=win(), area=a, region=r):
         bpy.ops.wm.stl_export('INVOKE_DEFAULT')

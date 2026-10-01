@@ -70,11 +70,12 @@ static constexpr uint8_t NAND_SLOT_COUNT = 3;
 static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
     0x010000, 0x560000, 0xAB0000};
 
-// Size cap for one media download. This is NOT the per-slot overflow guard —
-// writeChunk() already stops at _slotCapacity (NAND slots are 0x560000-0x010000 =
-// 0x550000 = 5,570,560 bytes apart). It is an early exit with a clear log: without it, a URL returning
-// an endless stream (or a lying Content-Length) makes the box download for minutes
-// and then fail somewhere else with no explanation.
+// Size cap for one media download. On NAND, writeChunk() already stops at
+// _slotCapacity (slots are 0x560000-0x010000 = 0x550000 = 5,570,560 bytes apart);
+// on SD this is the only size cap. Either way it is an early exit with a clear
+// log: without it, a URL returning an endless stream (or a lying Content-Length)
+// makes the box download for minutes and then fail somewhere else with no
+// explanation.
 static constexpr uint32_t MAX_MEDIA_BYTES = 25500000;
 
 // Firebase configuration (kept in config_secrets.h so keys never reach Git)
@@ -245,8 +246,8 @@ static constexpr uint8_t SD_SLOT_COUNT = 20;
 
 // SD.begin() defaults to 4MHz — too slow for 15fps video (reading one ~15KB JPEG
 // frame eats the whole 66ms budget). The library drops to 400kHz during init and
-// then uses this value. Kept at 10MHz: higher values produce "Read short" /
-// "Bad jpegSize" on the breadboard.
+// then uses this value. 10MHz for the breadboard: "Read short" / "Bad jpegSize"
+// are the symptoms of a bus running too fast.
 static constexpr uint32_t SD_SPI_FREQ_HZ = 10000000;
 
 static constexpr const char *SD_MEDIA_DIR = "/media";

@@ -2512,7 +2512,8 @@ Vài comment vốn đã sai so với code thì sửa lại cho đúng luôn (ch�
 `MAX_MEDIA_BYTES` (comment còn nói 5,5 MB trong khi giá trị là 25,5 MB), `SD_SPI_FREQ_HZ`
 ("hạ xuống 10MHz nếu…" trong khi đã là 10MHz), biên độ bíp "4000" (thật là 32000), `prefill()`
 "nạp 2 buffer" (thật là nạp đầy DMA), `probe()` "dùng cardType()" (thật là mở file đọc 1 byte),
-stack MediaPlayer "đã hạ 8192→6144" (thật là 8192).
+stack MediaPlayer "đã hạ 8192→6144" (thật là 8192), `main.cpp` "nháy đèn nền báo lỗi" (thật là
+đứng yên `while(1)`), `NetworkManager.cpp` "mỗi chu kỳ 10s" (chu kỳ sync giờ là 20s).
 
 **Xác minh.** Từng file: bỏ comment bằng `g++ -fpreprocessed -dD -E -P` rồi so với bản ở HEAD,
 phải trùng khít (đã thử chèn một dòng code giả để chắc là phép so bắt được). `pio run` thành công

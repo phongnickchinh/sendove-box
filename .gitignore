@@ -32,5 +32,5 @@ serviceAccountKey.json
 sendlove_backend/firebase-debug.log
 firebase-debug.log
 
-# Blender backup tự sinh
+# Blender auto-generated backups
 *.blend1

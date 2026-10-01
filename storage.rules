@@ -1,28 +1,27 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Box ESP32 đọc media CỦA CHÍNH NÓ, không đọc được của box khác.
+    // An ESP32 box reads ITS OWN media, never another box's.
     //
-    // Vì sao so sánh thẳng được, không cần bảng tra cứu: đường dẫn upload là
-    // `media/{boxId}/{messageId}/...` (sendlove_backend message.service.ts:23),
-    // và tài khoản Auth của box được tạo với `uid` đặt ĐÚNG BẰNG BOX_ID
-    // (scripts/provision_box_auth.js). Nên `request.auth.uid == boxId` là đủ.
+    // Why a direct comparison works without a lookup table: the upload path is
+    // `media/{boxId}/{messageId}/...` (sendlove_backend message.service.ts), and
+    // the box's Auth account is created with `uid` set EXACTLY to BOX_ID
+    // (scripts/provision_box_auth.js). So `request.auth.uid == boxId` is enough.
     //
-    // Firmware gửi header `Authorization: Firebase <idToken>` — scheme này KHÁC
-    // với `Bearer` mà Realtime Database dùng. Chỉ có hiệu lực khi firmware bật
-    // FIREBASE_USE_IDTOKEN 1; ở chế độ Database Secret box KHÔNG gửi header nào
-    // nên sẽ bị chặn ở đây.
+    // The firmware sends `Authorization: Firebase <idToken>` — NOT `Bearer`. Only
+    // effective with FIREBASE_USE_IDTOKEN 1 in the firmware; in Database Secret mode
+    // the box sends NO header and is blocked here.
     //
-    // ⚠️ THỨ TỰ TRIỂN KHAI: phải flash firmware có header TRƯỚC, rồi mới deploy
-    // file này. Làm ngược lại là chết đường tải media ngay lập tức.
+    // ⚠️ DEPLOY ORDER: flash firmware that sends the header FIRST, then deploy this
+    // file. The other way round kills media downloads immediately.
     match /media/{boxId}/{allPaths=**} {
       allow read: if request.auth != null && request.auth.uid == boxId;
     }
 
-    // Còn lại chặn hết, kể cả ghi.
-    // Upload của web: server cấp signed POST policy. Download của backend
-    // (/device/poll): server cấp signed URL v4. Signed URL/POST xác thực bằng
-    // chữ ký GCS nên BYPASS toàn bộ rules ở đây — không bị ảnh hưởng.
+    // Everything else is denied, writes included.
+    // Web uploads: the server issues a signed POST policy. Backend downloads
+    // (/device/poll): the server issues a v4 signed URL. Signed URLs/POSTs are
+    // authenticated by the GCS signature and BYPASS these rules — unaffected.
     match /{allPaths=**} {
       allow read, write: if false;
     }

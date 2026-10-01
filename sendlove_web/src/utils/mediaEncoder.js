@@ -179,7 +179,8 @@ export const encodeVideoToBin = async (videoBlob, onProgress, range) => {
   });
 };
 
-function audioBufferToWavBlob(buffer) {
+/** Mono AudioBuffer (Float32) → 16-bit PCM WAV Blob. */
+export function audioBufferToWavBlob(buffer) {
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
   const format = 1; // PCM

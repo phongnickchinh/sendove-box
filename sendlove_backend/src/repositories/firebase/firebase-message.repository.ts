@@ -3,9 +3,7 @@ import { db } from '../../firebase';
 import { IMessageRepository } from '../interfaces/message.repository.interface';
 
 export class FirebaseMessageRepository implements IMessageRepository {
-  /**
-   * Tạo message mới dưới node messages/{boxId}/{messageId}
-   */
+  /** Create a message at messages/{boxId}/{messageId}. */
   async createMessage(boxId: string, messageId: string, data: Omit<Message, 'id'>): Promise<Message> {
     const ref = db.ref(`messages/${boxId}/${messageId}`);
     const record = { id: messageId, ...data };
@@ -13,9 +11,7 @@ export class FirebaseMessageRepository implements IMessageRepository {
     return record as Message;
   }
 
-  /**
-   * Lấy 1 message theo ID
-   */
+  /** Get one message by id. */
   async getMessage(boxId: string, messageId: string): Promise<Message | null> {
     const snapshot = await db.ref(`messages/${boxId}/${messageId}`).once('value');
     if (!snapshot.exists()) return null;
@@ -23,8 +19,8 @@ export class FirebaseMessageRepository implements IMessageRepository {
   }
 
   /**
-   * Liệt kê N message gần nhất, sắp xếp theo timestamp giảm dần.
-   * ESP32 dùng trường timestamp để so sánh với last_download_ts nội bộ.
+   * List the N newest messages, newest first.
+   * The ESP32 compares the timestamp field with its local last_download_ts.
    */
   async listMessages(boxId: string, limit: number = 20): Promise<Message[]> {
     const snapshot = await db.ref(`messages/${boxId}`)
@@ -45,9 +41,7 @@ export class FirebaseMessageRepository implements IMessageRepository {
     return messages.sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  /**
-   * Đếm số message trong 1 khoảng thời gian (dùng cho rate limiting)
-   */
+  /** Count messages within a time window (for rate limiting). */
   async countMessagesSince(boxId: string, senderId: string, sinceTimestamp: number): Promise<number> {
     const snapshot = await db.ref(`messages/${boxId}`)
       .orderByChild('timestamp')
@@ -66,9 +60,7 @@ export class FirebaseMessageRepository implements IMessageRepository {
     return count;
   }
 
-  /**
-   * Xoá mềm message (set deleted_at)
-   */
+  /** Soft-delete a message (sets deleted_at). */
   async softDelete(boxId: string, messageId: string): Promise<void> {
     await db.ref(`messages/${boxId}/${messageId}/deleted_at`).set(Date.now());
   }

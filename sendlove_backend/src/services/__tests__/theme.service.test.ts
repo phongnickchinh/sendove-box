@@ -40,8 +40,8 @@ describe('sanitizeWidgets', () => {
     [[{ ...clock, x: 100, w: 160 }], 'outside'],
     [[{ ...clock, x: 1.5 }], 'integer'],
     [[{ ...clock, color: '#000' }], 'color'],
-    [[{ ...clock, font: 'f_date' }], 'font'], // phông của clock_date, không phải clock_time
-    [[{ ...clock, font: 'Orbitron_32' }], 'font'], // phông biên dịch cứng đã gỡ khỏi firmware
+    [[{ ...clock, font: 'f_date' }], 'font'], // clock_date's font, not clock_time's
+    [[{ ...clock, font: 'Orbitron_32' }], 'font'], // a compiled-in font removed from the firmware
     [[{ ...clock, align: 'justify' }], 'align'],
     [[{ type: 'clock_date', x: 0, y: 0, w: 100, h: 16, format: 'MM-DD' }], 'format'],
     [[{ type: 'clock_date', x: 0, y: 0, w: 100, h: 16, locale: 'fr' }], 'locale'],
@@ -103,9 +103,9 @@ describe('ThemeService.saveTheme', () => {
   });
 
   it.each([
-    'media/box_2/theme/bg_1.bin',        // hộp khác
-    'media/box_1/msg_1/video.bin',       // file tin nhắn
-    'media/box_1/theme/../msg/x.bin',    // thoát thư mục
+    'media/box_2/theme/bg_1.bin',        // another box
+    'media/box_1/msg_1/video.bin',       // a message file
+    'media/box_1/theme/../msg/x.bin',    // path traversal
   ])('từ chối ảnh nền ngoài thư mục theme: %s', async (path) => {
     const { svc } = make();
     await expect(svc.saveTheme('box_1', 'u1', { theme_name: 'A', widgets: [clock], background: path })).rejects.toBeInstanceOf(AppError);

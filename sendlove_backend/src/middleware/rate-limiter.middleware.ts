@@ -7,15 +7,14 @@ import { config } from '../config';
 const rateLimitRepo = new FirebaseRateLimitRepository();
 
 /**
- * Rate Limiter Middleware cho việc gửi tin nhắn.
- * Giới hạn: N tin / 24 giờ cho mỗi cặp (sender_id + box_id).
+ * Rate limiter for sending messages: N messages / 24 hours per
+ * (sender_id + box_id) pair.
  *
- * Logic:
- * 1. Đọc record rate_limits/{senderId}_{boxId}
- * 2. Nếu chưa có → tạo mới (count=1, window_start=now) → cho qua
- * 3. Nếu window hết hạn (now - window_start > 24h) → reset → cho qua
- * 4. Nếu count >= LIMIT → trả 429
- * 5. Nếu dưới limit → tăng count → cho qua
+ * 1. Read rate_limits/{senderId}_{boxId}
+ * 2. Missing → create (count=1, window_start=now) → allow
+ * 3. Window expired (now - window_start > 24h) → reset → allow
+ * 4. count >= LIMIT → 429
+ * 5. Under the limit → increment → allow
  */
 export const messageSendRateLimit = async (
   req: AuthenticatedRequest,
@@ -31,7 +30,7 @@ export const messageSendRateLimit = async (
 
     const { maxMessagesPerWindow, windowDurationMs } = config.rateLimit;
 
-    // Atomic: check + increment trong 1 transaction duy nhất → tránh race condition
+    // Atomic: check + increment in a single transaction → no race condition
     const result = await rateLimitRepo.checkAndIncrement(
       senderId, boxId, maxMessagesPerWindow, windowDurationMs
     );

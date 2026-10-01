@@ -4,14 +4,14 @@ import { Alarm } from '../types/alarm.types';
 import { AppError } from '../middleware/error-handler.middleware';
 import { MusicService } from './music.service';
 
-/** Âm lượng báo thức mặc định (user chốt 2026-09-24), khớp AlarmItem.volume của firmware. */
+/** Default alarm volume (product decision), matching the firmware's AlarmItem.volume. */
 const DEFAULT_VOLUME = 80;
 
 type AlarmInput = {
   time?: string;
   is_enable?: boolean;
   repeatable?: boolean;
-  /** "" = bỏ nhạc, kêu bằng tiếng bíp */
+  /** "" = remove the music and ring with the beep */
   music_id?: string;
   volume?: number;
   ramp?: boolean;
@@ -23,7 +23,7 @@ export class AlarmService {
     private musicService: MusicService = new MusicService()
   ) {}
 
-  /** music_id phải là bài có trong thư viện của CHÍNH hộp này. "" -> null (gỡ nhạc). */
+  /** music_id must be a track in THIS box's library. "" -> null (remove the music). */
   private async resolveMusic(boxId: string, musicId: string | undefined): Promise<string | null | undefined> {
     if (musicId === undefined) return undefined;
     if (musicId === '') return null;
@@ -34,8 +34,8 @@ export class AlarmService {
   }
 
   /**
-   * Tạo alarm mới (max 10 alarms / box).
-   * Repository tự set a_flag = true khi tạo.
+   * Create an alarm (max 10 per box).
+   * The repository sets a_flag = true on create.
    */
   async createAlarm(boxId: string, data: AlarmInput & { time: string; is_enable: boolean; repeatable: boolean }): Promise<Alarm> {
     const alarms = await this.alarmRepo.listAlarms(boxId);
@@ -71,7 +71,7 @@ export class AlarmService {
     const musicId = await this.resolveMusic(boxId, music_id);
     return this.alarmRepo.updateAlarm(boxId, alarmId, {
       ...rest,
-      // null xoá khoá trong RTDB (update()) -> báo thức về tiếng bíp
+      // null deletes the key in RTDB (update()) -> the alarm falls back to the beep
       ...(musicId !== undefined ? { music_id: musicId } : {}),
       updated_at: Date.now(),
     } as Partial<Alarm>);

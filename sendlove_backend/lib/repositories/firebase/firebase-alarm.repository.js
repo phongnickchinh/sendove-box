@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.FirebaseAlarmRepository = void 0;
 const firebase_1 = require("../../firebase");
 /**
- * Alarm được lưu tại: boxes/{boxId}/config/alarm_list/{alarmId}
- * Khi thay đổi alarm list, cần set flags/a_flag = true để ESP32 biết.
+ * Alarms live at boxes/{boxId}/config/alarm_list/{alarmId}.
+ * Any change to the list must set flags/a_flag = true so the ESP32 notices.
  */
 class FirebaseAlarmRepository {
     getBasePath(boxId) {
@@ -14,7 +14,7 @@ class FirebaseAlarmRepository {
         const ref = firebase_1.db.ref(`${this.getBasePath(boxId)}/${alarmId}`);
         const record = { id: alarmId, ...data };
         await ref.set(record);
-        // Set a_flag = true để ESP32 biết alarm list đã thay đổi
+        // Set a_flag = true so the ESP32 knows the alarm list changed
         await firebase_1.db.ref(`boxes/${boxId}/flags/a_flag`).set(true);
         return record;
     }

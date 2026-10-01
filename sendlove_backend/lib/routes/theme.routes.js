@@ -5,9 +5,9 @@ const express_1 = require("express");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const role_guard_middleware_1 = require("../middleware/role-guard.middleware");
 /**
- * /boxes/:boxId/theme — giao diện màn chờ. Chỉ người nhận (người giữ hộp) sửa
- * được, giống báo thức. Body được kiểm tra trong ThemeService.sanitizeWidgets
- * (mảng lồng nhau, validate() phẳng không kiểm được).
+ * /boxes/:boxId/theme — the standby-screen theme. Only the receiver (who holds
+ * the box) can edit it, like alarms. The body is validated in
+ * ThemeService.sanitizeWidgets (a nested array the flat validate() can't check).
  */
 function themeRoutes(controller) {
     const router = (0, express_1.Router)({ mergeParams: true });

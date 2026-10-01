@@ -77,7 +77,7 @@ app.use('/users', (0, user_routes_1.default)(container.userController));
 const msgRouter = (0, message_routes_1.default)(container.messageController);
 const alrmRouter = (0, alarm_routes_1.default)(container.alarmController);
 const themeRouter = (0, theme_routes_1.default)(container.themeController);
-// Nhạc báo thức theo hộp (2026-09-24). Route /music cũ (thư viện giả 2 bài) đã gỡ.
+// Per-box alarm music.
 const musicRouter = (0, music_routes_1.default)(container.musicController);
 app.use('/boxes', (0, box_routes_1.default)(container.boxController, msgRouter, alrmRouter, themeRouter, musicRouter));
 app.use('/device', (0, device_routes_1.default)(container.deviceController));

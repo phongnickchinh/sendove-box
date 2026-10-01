@@ -4,9 +4,10 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role-guard.middleware';
 
 /**
- * /boxes/:boxId/music — thư viện nhạc báo thức của hộp. Chỉ người nhận (user chốt
- * 2026-09-24), giống báo thức và theme. Tải lên 2 bước: POST /upload lấy signed POST
- * policy -> web tải thẳng lên Storage -> POST /commit để backend kiểm file và ghi DB.
+ * /boxes/:boxId/music — the box's alarm music library. Receiver only (product
+ * decision), like alarms and themes. Two-step upload: POST /upload returns a
+ * signed POST policy → the web uploads straight to Storage → POST /commit has
+ * the backend validate the file and write the DB.
  */
 export default function musicRoutes(controller: MusicController) {
   const router = Router({ mergeParams: true });

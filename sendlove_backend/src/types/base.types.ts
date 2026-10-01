@@ -1,5 +1,5 @@
 // ==================================================
-// Base Model: Mọi entity đều kế thừa các trường này
+// Base model: fields every entity inherits
 // ==================================================
 export interface BaseModel {
   id: string;

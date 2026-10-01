@@ -6,15 +6,16 @@ import { AppError } from '../middleware/error-handler.middleware';
 import { AlarmMusic, MUSIC_LIMITS } from '../types/music.types';
 import { crc32 } from '../utils/crc32';
 
-// Thay cho thư viện giả (2 bài cứng) trước 2026-09-24. Thiết kế: MEMORY.md §28.
+// Design: firmware MEMORY.md §28.
 
 const ID_PATTERN = /^mus_\d{10,16}$/;
 
 export { crc32 };
 
 /**
- * Kiểm file đúng định dạng hộp phát được: "AUDC" + u16 tần số (LE) + u32 cỡ PCM, rồi
- * RIFF/WAVE 44 byte (AudioPlayer::parseAudc). Sai là hộp im -> chặn ngay ở đây.
+ * Checks the file is in the format the box can play: "AUDC" + u16 sample rate
+ * (LE) + u32 PCM size, then a 44-byte RIFF/WAVE header (AudioPlayer::parseAudc).
+ * A bad file makes the box silent -> reject it here.
  */
 function checkAudcFile(buf: Buffer): void {
   if (buf.length < 54 || buf.toString('ascii', 0, 4) !== 'AUDC') {
@@ -47,9 +48,10 @@ export class MusicService {
   }
 
   /**
-   * Bước 1: cấp signed POST policy. musicId có = thay nội dung bài đó (rev + 1), không có =
-   * bài mới. CHƯA ghi gì vào DB: tải lên hỏng giữa chừng thì không có bản ghi mồ côi trỏ
-   * tới file không tồn tại (hộp sẽ tải hỏng mãi).
+   * Step 1: issue a signed POST policy. With musicId = replace that track
+   * (rev + 1); without = a new track. NOTHING is written to the DB yet: if the
+   * upload dies midway there is no orphan record pointing at a missing file
+   * (which the box would fail to download forever).
    */
   async initiateUpload(boxId: string, musicId?: string) {
     let id = musicId;
@@ -73,8 +75,9 @@ export class MusicService {
   }
 
   /**
-   * Bước 2: file đã lên Storage. Backend TỰ tải về để đo size + crc32 và kiểm header,
-   * không tin con số web gửi: hộp dựa vào đúng hai số này để nhận file.
+   * Step 2: the file is in Storage. The backend downloads it ITSELF to measure
+   * size + crc32 and check the header, never trusting values sent by the web:
+   * the box relies on exactly these two numbers to accept the file.
    */
   async commit(boxId: string, uid: string, body: any): Promise<AlarmMusic> {
     const id = String(body?.music_id || '');
@@ -145,7 +148,7 @@ export class MusicService {
     await this.musicRepo.rename(boxId, musicId, n);
   }
 
-  /** Xoá bài; báo thức đang dùng nó chuyển về tiếng bíp trong cùng một lần ghi. */
+  /** Delete a track; alarms using it switch to the beep in the same write. */
   async remove(boxId: string, musicId: string): Promise<{ detached_alarms: number }> {
     const existing = ID_PATTERN.test(musicId) ? await this.musicRepo.get(boxId, musicId) : null;
     if (!existing) throw new AppError(404, 'music_not_found', 'Music not found');
@@ -154,7 +157,7 @@ export class MusicService {
     return { detached_alarms: detached };
   }
 
-  /** URL ký 15 phút để web nghe lại bài đã lưu (web tự bỏ 10 byte AUDC trước RIFF). */
+  /** 15-minute signed URL so the web can play a stored track (the web skips the 10 AUDC bytes before RIFF). */
   async previewUrl(boxId: string, musicId: string): Promise<string> {
     const existing = ID_PATTERN.test(musicId) ? await this.musicRepo.get(boxId, musicId) : null;
     if (!existing) throw new AppError(404, 'music_not_found', 'Music not found');

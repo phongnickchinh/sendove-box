@@ -42,7 +42,7 @@ describe('MessageService.getMessageDetails', () => {
     });
     expect(storageRepo.generateDownloadUrl).not.toHaveBeenCalledWith('media/b/msg_1/video.bin', expect.anything());
     expect(storageRepo.generateDownloadUrl).toHaveBeenCalledWith('media/b/msg_1/original.mp4', 15);
-    // Path thô vẫn giữ nguyên, không bị ghi đè bằng URL.
+    // The raw path stays as-is; it isn't overwritten with a URL.
     expect(res.video_url).toBe('media/b/msg_1/original.mp4');
   });
 

@@ -45,8 +45,8 @@ class AuthService {
         this.boxRepo = boxRepo;
     }
     /**
-     * Xử lý đăng nhập Google OAuth.
-     * Tạo user mới nếu chưa tồn tại, cập nhật profile nếu đã có.
+     * Handles Google OAuth sign-in: creates the user if missing, otherwise
+     * updates the profile.
      */
     async handleGoogleLogin(decodedToken) {
         const { uid, email, name, picture } = decodedToken;
@@ -56,7 +56,7 @@ class AuthService {
             throw new error_handler_middleware_1.AppError(403, 'account_deleted', 'Account has been deleted.');
         }
         if (!user) {
-            // Tạo user mới
+            // New user
             user = await this.userRepo.create(uid, {
                 id: uid,
                 email: email || '',
@@ -71,7 +71,7 @@ class AuthService {
             });
         }
         else {
-            // Cập nhật profile nếu thay đổi + ghi last_login_at
+            // Update the profile if it changed + record last_login_at
             const updateData = { last_login_at: now, updated_at: now };
             if (name && user.display_name !== name)
                 updateData.display_name = name;
@@ -86,7 +86,7 @@ class AuthService {
         if (!user)
             throw new error_handler_middleware_1.AppError(404, 'user_not_found', 'User not found');
         const deletedBoxes = [];
-        // 1. Hard delete: Unpair từ tất cả các box (xoá dữ liệu nhân bản)
+        // 1. Hard delete: unpair from every box (removes the denormalized copies)
         if (user.boxes_list) {
             for (const boxId of Object.keys(user.boxes_list)) {
                 try {
@@ -108,7 +108,7 @@ class AuthService {
                                 updated_at: now,
                             });
                         }
-                        // Thông báo device có thay đổi pairing
+                        // Tell the device its pairing changed
                         await this.boxRepo.updateFlags(boxId, { p_flag: true });
                     }
                 }
@@ -118,7 +118,7 @@ class AuthService {
                 deletedBoxes.push(boxId);
             }
         }
-        // 2. Hard delete: Xoá rate limit records cho user này
+        // 2. Hard delete: this user's rate-limit records
         try {
             const rateLimitsSnapshot = await firebase_1.db.ref('rate_limits')
                 .orderByKey()
@@ -137,9 +137,9 @@ class AuthService {
         catch (error) {
             console.warn(`[AuthService] Failed to clean rate limits for ${uid}:`, error);
         }
-        // 3. Soft delete: Đánh dấu user đã xoá (giữ data cho audit/history)
+        // 3. Soft delete: mark the user deleted (data kept for audit/history)
         await this.userRepo.softDelete(uid);
-        // 4. Hard delete: Xoá Firebase Auth user (ngăn đăng nhập lại)
+        // 4. Hard delete: the Firebase Auth user (prevents signing in again)
         try {
             await admin.auth().deleteUser(uid);
         }

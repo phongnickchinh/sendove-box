@@ -49,7 +49,7 @@ app.use('/users', userRoutes(container.userController));
 const msgRouter = messageRoutes(container.messageController);
 const alrmRouter = alarmRoutes(container.alarmController);
 const themeRouter = themeRoutes(container.themeController);
-// Nhạc báo thức theo hộp (2026-09-24). Route /music cũ (thư viện giả 2 bài) đã gỡ.
+// Per-box alarm music.
 const musicRouter = musicRoutes(container.musicController);
 app.use('/boxes', boxRoutes(container.boxController, msgRouter, alrmRouter, themeRouter, musicRouter));
 

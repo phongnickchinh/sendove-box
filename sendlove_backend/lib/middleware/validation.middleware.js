@@ -4,8 +4,8 @@ exports.heartbeatSchema = exports.registerDeviceSchema = exports.updateAlarmSche
 const error_handler_middleware_1 = require("./error-handler.middleware");
 /**
  * Validation middleware factory.
- * Chỉ các field có trong schema mới được giữ lại trong req.body (whitelist).
- * Các field không khai báo sẽ bị lọc bỏ → chống mass-assignment.
+ * Only fields declared in the schema survive in req.body (whitelist);
+ * undeclared fields are dropped → no mass assignment.
  */
 const validate = (schema) => {
     return (req, _res, next) => {
@@ -72,7 +72,7 @@ const validate = (schema) => {
         if (errors.length > 0) {
             return next(new error_handler_middleware_1.AppError(400, 'validation_error', errors.join('; ')));
         }
-        // Replace body with sanitized version — chỉ whitelisted fields đi qua
+        // Replace body with the sanitized version — only whitelisted fields pass
         req.body = sanitized;
         next();
     };
@@ -112,15 +112,15 @@ exports.confirmMessageSchema = {
     height: { type: 'number', min: 1, max: 320 },
     uploaded_files: { type: 'array', itemType: 'string' },
 };
-/** PATCH /users/me — chỉ cho phép sửa display_name và avatar_url */
+/** PATCH /users/me — only display_name and avatar_url are editable */
 exports.updateProfileSchema = {
     display_name: { type: 'string', minLength: 1, maxLength: 50 },
     avatar_url: { type: 'string', maxLength: 2048 },
 };
 /**
- * "HH:mm" 24h thật sự. Pattern cũ /^\d{2}:\d{2}$/ nhận cả "99:99": firmware
- * (AlarmClock::isValidTime) bỏ qua báo thức đó mà web vẫn hiện là đang bật.
- * Trùng regex với database.rules.json (nhánh box ghi alarm_list).
+ * A real 24h "HH:mm". A looser /^\d{2}:\d{2}$/ would accept "99:99": the
+ * firmware (AlarmClock::isValidTime) skips such an alarm while the web still
+ * shows it as on. Same regex as database.rules.json (the box's alarm_list write rule).
  */
 const ALARM_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** POST /boxes/:boxId/alarms */
@@ -128,7 +128,7 @@ exports.createAlarmSchema = {
     time: { type: 'string', required: true, pattern: ALARM_TIME_PATTERN },
     is_enable: { type: 'boolean', required: true },
     repeatable: { type: 'boolean', required: true },
-    // "" = không nhạc (tiếng bíp). < 24 ký tự: buffer musicId[24] của firmware.
+    // "" = no music (beep). < 24 chars: the firmware's musicId[24] buffer.
     music_id: { type: 'string', maxLength: 23 },
     volume: { type: 'number', min: 0, max: 100 },
     ramp: { type: 'boolean' },

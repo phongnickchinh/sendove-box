@@ -7,9 +7,7 @@ class FirebaseBoxRepository extends firebase_base_repository_1.FirebaseBaseRepos
     constructor() {
         super('boxes');
     }
-    /**
-     * Tìm box bằng mã pairing (scode hoặc rcode)
-     */
+    /** Find a box by pairing code (scode or rcode). */
     async findByPairingCode(code, codeType) {
         const field = `code/${codeType}`;
         const snapshot = await firebase_1.db.ref(this.collectionPath)
@@ -23,30 +21,22 @@ class FirebaseBoxRepository extends firebase_base_repository_1.FirebaseBaseRepos
         const boxId = Object.keys(data)[0];
         return { id: boxId, ...data[boxId] };
     }
-    /**
-     * Cập nhật flags (a_flag, ota_flag, p_flag)
-     */
+    /** Update flags (a_flag, ota_flag, p_flag, ...). */
     async updateFlags(boxId, flags) {
         await firebase_1.db.ref(`${this.collectionPath}/${boxId}/flags`).update(flags);
     }
-    /**
-     * Đọc flags hiện tại
-     */
+    /** Read the current flags. */
     async getFlags(boxId) {
         const snapshot = await firebase_1.db.ref(`${this.collectionPath}/${boxId}/flags`).once('value');
         if (!snapshot.exists())
             return null;
         return snapshot.val();
     }
-    /**
-     * Cập nhật status (online, battery, charging, last_seen, fw_version)
-     */
+    /** Update status (online, battery, charging, last_seen, fw_version). */
     async updateStatus(boxId, status) {
         await firebase_1.db.ref(`${this.collectionPath}/${boxId}/status`).update(status);
     }
-    /**
-     * Đọc status hiện tại
-     */
+    /** Read the current status. */
     async getStatus(boxId) {
         const snapshot = await firebase_1.db.ref(`${this.collectionPath}/${boxId}/status`).once('value');
         if (!snapshot.exists())

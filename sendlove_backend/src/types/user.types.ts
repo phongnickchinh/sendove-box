@@ -17,7 +17,7 @@ export interface User extends BaseModel {
   is_deleted: boolean;
 
   /**
-   * Denormalized copy: danh sách box mà user được pairing.
+   * Denormalized copy: the boxes this user is paired with.
    * Key = box_id, Value = { role, box_name }
    */
   boxes_list: Record<string, UserBoxEntry>;

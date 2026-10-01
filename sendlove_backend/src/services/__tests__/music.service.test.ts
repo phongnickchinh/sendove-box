@@ -1,6 +1,6 @@
 import { MusicService, crc32 } from '../music.service';
 
-/** File đúng định dạng hộp: AUDC + u16 16000 + u32 size + RIFF...WAVE (54 byte header) + PCM */
+/** A file in the box's format: AUDC + u16 16000 + u32 size + RIFF...WAVE (54-byte header) + PCM */
 const audc = (rate = 16000, pcm = 64) => {
   const b = Buffer.alloc(54 + pcm);
   b.write('AUDC', 0, 'ascii');
@@ -75,7 +75,7 @@ describe('MusicService', () => {
     [{ ...body, duration_ms: 3000 }, /5-60/],
     [{ ...body, name: '' }, /name/],
     [{ ...body, music_id: '../x' }, /music_id/],
-    [{ ...body, rev: 2 }, /changed/],  // bài mới phải là rev 1
+    [{ ...body, rev: 2 }, /changed/],  // a new track must be rev 1
   ])('commit từ chối đầu vào sai %#', async (b, msg) => {
     const { svc } = make();
     await expect(svc.commit('b1', 'uid', b)).rejects.toThrow(msg);

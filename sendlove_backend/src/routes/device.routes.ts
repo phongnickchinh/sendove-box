@@ -7,7 +7,7 @@ import { validate, registerDeviceSchema, heartbeatSchema } from '../middleware/v
 export default function deviceRoutes(controller: DeviceController) {
   const router = Router();
 
-  // Registration requires provisioning key (gắn trong firmware ESP32)
+  // Registration requires the provisioning key (built into the ESP32 firmware)
   router.post('/register', requireProvisioningKey, validate(registerDeviceSchema), controller.register);
 
   // All subsequent ESP32 endpoints require the X-Device-Id and X-Device-Secret headers

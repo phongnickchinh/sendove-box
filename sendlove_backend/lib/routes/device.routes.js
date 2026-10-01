@@ -7,7 +7,7 @@ const device_provisioning_middleware_1 = require("../middleware/device-provision
 const validation_middleware_1 = require("../middleware/validation.middleware");
 function deviceRoutes(controller) {
     const router = (0, express_1.Router)();
-    // Registration requires provisioning key (gắn trong firmware ESP32)
+    // Registration requires the provisioning key (built into the ESP32 firmware)
     router.post('/register', device_provisioning_middleware_1.requireProvisioningKey, (0, validation_middleware_1.validate)(validation_middleware_1.registerDeviceSchema), controller.register);
     // All subsequent ESP32 endpoints require the X-Device-Id and X-Device-Secret headers
     router.use(device_auth_middleware_1.requireDeviceAuth);

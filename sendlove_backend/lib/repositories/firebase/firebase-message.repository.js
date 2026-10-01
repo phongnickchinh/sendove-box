@@ -3,18 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.FirebaseMessageRepository = void 0;
 const firebase_1 = require("../../firebase");
 class FirebaseMessageRepository {
-    /**
-     * Tạo message mới dưới node messages/{boxId}/{messageId}
-     */
+    /** Create a message at messages/{boxId}/{messageId}. */
     async createMessage(boxId, messageId, data) {
         const ref = firebase_1.db.ref(`messages/${boxId}/${messageId}`);
         const record = { id: messageId, ...data };
         await ref.set(record);
         return record;
     }
-    /**
-     * Lấy 1 message theo ID
-     */
+    /** Get one message by id. */
     async getMessage(boxId, messageId) {
         const snapshot = await firebase_1.db.ref(`messages/${boxId}/${messageId}`).once('value');
         if (!snapshot.exists())
@@ -22,8 +18,8 @@ class FirebaseMessageRepository {
         return snapshot.val();
     }
     /**
-     * Liệt kê N message gần nhất, sắp xếp theo timestamp giảm dần.
-     * ESP32 dùng trường timestamp để so sánh với last_download_ts nội bộ.
+     * List the N newest messages, newest first.
+     * The ESP32 compares the timestamp field with its local last_download_ts.
      */
     async listMessages(boxId, limit = 20) {
         const snapshot = await firebase_1.db.ref(`messages/${boxId}`)
@@ -40,9 +36,7 @@ class FirebaseMessageRepository {
         // Sort descending by timestamp
         return messages.sort((a, b) => b.timestamp - a.timestamp);
     }
-    /**
-     * Đếm số message trong 1 khoảng thời gian (dùng cho rate limiting)
-     */
+    /** Count messages within a time window (for rate limiting). */
     async countMessagesSince(boxId, senderId, sinceTimestamp) {
         const snapshot = await firebase_1.db.ref(`messages/${boxId}`)
             .orderByChild('timestamp')
@@ -59,9 +53,7 @@ class FirebaseMessageRepository {
         }
         return count;
     }
-    /**
-     * Xoá mềm message (set deleted_at)
-     */
+    /** Soft-delete a message (sets deleted_at). */
     async softDelete(boxId, messageId) {
         await firebase_1.db.ref(`messages/${boxId}/${messageId}/deleted_at`).set(Date.now());
     }

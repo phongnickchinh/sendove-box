@@ -23,9 +23,7 @@ export class DeviceService {
     private storageRepo: IStorageRepository = new FirebaseStorageRepository()
   ) {}
 
-  /**
-   * ESP32 đăng ký lần đầu
-   */
+  /** First-time ESP32 registration. */
   async registerDevice(data: {
     deviceId: string;
     mac_address?: string;
@@ -34,7 +32,7 @@ export class DeviceService {
     const boxId = `box_${data.deviceId}`;
     const now = Date.now();
 
-    // Sinh pairing codes: 9 ký tự alphanumeric (A-Z, 0-9) → 36^9 ≈ 101 nghìn tỷ combinations
+    // Pairing codes: 9 alphanumeric chars (A-Z, 0-9) → 36^9 ≈ 1e14 combinations
     const alphanumChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const generateCode = (length: number): string => {
       const bytes = crypto.randomBytes(length);
@@ -95,8 +93,8 @@ export class DeviceService {
   }
 
   /**
-   * ESP32 poll định kỳ: kiểm tra flags, lấy messages mới, lấy alarm list nếu cần.
-   * ESP32 gửi last_download_ts → backend trả messages có timestamp > last_download_ts.
+   * Periodic ESP32 poll: check flags, fetch new messages, and the alarm list when needed.
+   * The ESP32 sends last_download_ts → the backend returns messages with a newer timestamp.
    */
   async poll(boxId: string, lastDownloadTs?: number, availableSlots: number = 3): Promise<any> {
     const box = await this.boxRepo.getById(boxId);
@@ -107,7 +105,7 @@ export class DeviceService {
       flags: box.flags,
     };
 
-    // Nếu có tin nhắn mới (ESP32 gửi last_download_ts)
+    // New messages (when the ESP32 sent last_download_ts)
     if (lastDownloadTs !== undefined) {
       const allMessages = await this.msgRepo.listMessages(boxId, 50);
       
@@ -145,14 +143,14 @@ export class DeviceService {
       }
     }
 
-    // Nếu a_flag = true → trả alarm list mới
+    // a_flag → return the new alarm list
     if (box.flags.a_flag) {
       response.alarm_list = await this.alarmRepo.listAlarms(boxId);
-      // Reset flag sau khi ESP32 đã đọc
+      // Clear the flag once the ESP32 has read it
       await this.boxRepo.updateFlags(boxId, { a_flag: false });
     }
 
-    // Nếu ota_flag = true → trả thông tin OTA task
+    // ota_flag → return the OTA task
     if (box.flags.ota_flag) {
       const otaTask = await this.otaRepo.findPendingByBoxId(boxId);
       if (otaTask) {
@@ -166,13 +164,13 @@ export class DeviceService {
       }
     }
 
-    // Nếu p_flag = true → trả pairing info mới
+    // p_flag → return the new pairing info
     if (box.flags.p_flag) {
       response.pairing = box.pairing;
       await this.boxRepo.updateFlags(boxId, { p_flag: false });
     }
 
-    // Nếu config_flag = true → trả led_state/display_brightness/playback_volume mới
+    // config_flag → return the new led_state/display_brightness/playback_volume
     if (box.flags.config_flag) {
       response.config = {
         led_state: box.config.led_state,
@@ -182,9 +180,9 @@ export class DeviceService {
       await this.boxRepo.updateFlags(boxId, { config_flag: false });
     }
 
-    // Nếu theme_flag = true → trả bố cục màn chờ + URL ký sẵn của ảnh nền.
-    // (Firmware hiện tại đọc RTDB trực tiếp, không gọi /device/poll — đường này
-    // dành cho khi firmware chuyển sang poll; xem memory sendlove-fw-todo-tu-fe.)
+    // theme_flag → return the standby layout + a signed URL for the background.
+    // (The current firmware reads RTDB directly and doesn't call /device/poll —
+    // this path is for when the firmware switches to polling.)
     if (box.flags.theme_flag) {
       const theme = box.config?.theme;
       if (theme) {
@@ -203,9 +201,7 @@ export class DeviceService {
     return response;
   }
 
-  /**
-   * ESP32 gửi heartbeat (cập nhật status)
-   */
+  /** ESP32 heartbeat (updates status). */
   async heartbeat(boxId: string, data: {
     battery?: number;
     charging?: boolean;
@@ -222,9 +218,7 @@ export class DeviceService {
     });
   }
 
-  /**
-   * ESP32 báo OTA hoàn tất
-   */
+  /** The ESP32 reports that OTA finished. */
   async ackOta(boxId: string, taskId: string, success: boolean, errorMessage?: string): Promise<void> {
     await this.otaRepo.updateOtaStatus(
       taskId,

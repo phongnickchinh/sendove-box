@@ -2499,3 +2499,38 @@ dần.** Số ở trên đã lỗi thời:
 -11,2 → -7,3 dB, năng lượng dải 2 kHz -20,6 → -15,1 dB. Bíp: RMS -3,2 dB, dồn hết vào một tần số.
 **Giới hạn vật lý:** nhạc chỉ bằng được sin toàn thang khi bị nén thành gần như sóng vuông (méo
 nặng). Khoảng cách còn lại ~4 dB RMS, ~11 dB ở dải 2 kHz.
+
+## 31. Dọn dẹp: comment chuyển sang tiếng Anh, gom file rác (2026-10-02, nhánh `chore/cleanup`)
+
+**Làm gì.** Toàn bộ comment trong `src/`, `include/`, `lib/**` (kể cả ghi chú vá `SPI_MODE3` của
+ta trong `lib/SD/src/sd_diskio.cpp`; phần còn lại của `lib/SD` là thư viện ngoài, không đụng),
+`platformio.ini`, `partitions_ota.csv`, `ota_upload.py` được rút gọn và dịch sang tiếng Anh.
+**Không đổi dòng code nào**, không đổi chuỗi log / chuỗi hiển thị / thông báo `#error` / nội dung
+trang portal trong `captive_portal_html.h`. Không refactor firmware.
+
+Vài comment vốn đã sai so với code thì sửa lại cho đúng luôn (chỉ sửa chữ, không sửa code):
+`MAX_MEDIA_BYTES` (comment còn nói 5,5 MB trong khi giá trị là 25,5 MB), `SD_SPI_FREQ_HZ`
+("hạ xuống 10MHz nếu…" trong khi đã là 10MHz), biên độ bíp "4000" (thật là 32000), `prefill()`
+"nạp 2 buffer" (thật là nạp đầy DMA), `probe()` "dùng cardType()" (thật là mở file đọc 1 byte),
+stack MediaPlayer "đã hạ 8192→6144" (thật là 8192).
+
+**Xác minh.** Từng file: bỏ comment bằng `g++ -fpreprocessed -dD -E -P` rồi so với bản ở HEAD,
+phải trùng khít (đã thử chèn một dòng code giả để chắc là phép so bắt được). `pio run` thành công
+sau khi dịch và sau khi gom file. **Chưa nạp máy thật** — không cần, vì mã sau tiền xử lý y nguyên.
+
+**Hệ quả cần biết.**
+- Số dòng trong file tài liệu này (vd. `NetworkManager.cpp:172-176`, `AudioPlayer.cpp:216-227`)
+  **đã lệch** vì comment ngắn đi. Tìm theo tên hàm, đừng tin số dòng cũ.
+- Comment lịch sử kiểu "trước ngày X làm thế này" đã bỏ khỏi code; lý do thiết kế vẫn giữ trong
+  comment và phần lịch sử nằm ở file này (các mục được dẫn bằng "see MEMORY.md §N").
+- `src/main.cpp.bak` (mục "Rác cần dọn" ở trên) đã **xoá**. `src/audio_data.h`, `upload_audio.py`,
+  `test.raw`, `wokwi.toml`, `ChakraPetch-*.ttf`, `image/`, `scratch/`, `implementation_plan.md`,
+  `FIREBASE_ANONYMOUS_AUTH.md` chuyển sang thư mục `trash can wait for user bring to throw away/`
+  ở gốc repo (xem `INDEX.md` trong đó). Các file `*.d` ở gốc firmware và bản trùng
+  `ota_architecture_design.md` đã xoá (bản thật ở `docs/`).
+- `codebase_review.md`, `code_review_2_9_gemini_38.md`, `fix_download_timeout_plan.md`,
+  `SHOULD_READ.md` **giữ nguyên chỗ cũ** vì file này và `sendlove_kicad/BOM.md` còn dẫn tới.
+
+**Ghi nhận, chưa làm (cần user quyết).** `checkAndDownloadNewMessages()` lặp đoạn đọc `timestamp`
+4 lần; đoạn đổi đường dẫn Storage → URL lặp ở 3 hàm (`downloadFile`, `downloadVoiceSegment`,
+`checkAndDownloadNewMessages`); `dumpHexBytes()` trong `MediaPlayer.cpp` là hàm rỗng. Gộp lại được nhưng là sửa code firmware nên không làm trong đợt "chỉ đổi hình thức" này.

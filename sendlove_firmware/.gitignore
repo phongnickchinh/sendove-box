@@ -4,6 +4,9 @@
 .vscode/launch.json
 .vscode/ipch
 
+# Stray compiler dependency files
+*.d
+
 .agents/
 
 # Secret API keys & credentials

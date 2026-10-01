@@ -16,18 +16,18 @@ function readStored() {
 }
 
 /**
- * Theme sáng/tối thật: đặt data-theme trên <html> để toàn bộ token bề mặt
- * trong tokens.css đảo theo (xem khối :root[data-theme='dark']). Mặc định
- * sáng — dự án chưa có nhu cầu đọc prefers-color-scheme của hệ điều hành.
+ * Light/dark theme: sets data-theme on <html> so the surface tokens in
+ * tokens.css switch (see :root[data-theme='dark']). Defaults to light — the OS
+ * prefers-color-scheme is intentionally not read.
  */
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(readStored);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem(STORAGE_KEY, theme); } catch { /* trình duyệt chặn storage, bỏ qua */ }
-    // Thanh trạng thái của app đã cài (PWA) tô theo <meta name="theme-color">:
-    // cho nó đi theo nền trang, không thì giao diện tối đội một thanh màu kem.
+    try { localStorage.setItem(STORAGE_KEY, theme); } catch { /* storage blocked by the browser; ignore */ }
+    // The installed app's (PWA) status bar is tinted by <meta name="theme-color">:
+    // keep it in sync with the page background, or dark mode wears a cream bar.
     const pageBg = getComputedStyle(document.documentElement).getPropertyValue('--bg-page').trim();
     if (pageBg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', pageBg);
   }, [theme]);

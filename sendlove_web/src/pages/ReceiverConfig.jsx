@@ -9,22 +9,23 @@ import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal } from '../comp
 import { useToast } from '../components/ui/Toast';
 
 /**
- * Màn 11 "box config page" + màn 14 "unpair confirm".
+ * Box settings page + unpair confirmation.
  *
- * Ba nhóm, ba API khác nhau — không gộp vào một nút Lưu chung được:
- *   Wi-Fi          PUT  /boxes/:boxId/wifi    (ssid 1..32, password ≤ 63)
- *   Đèn/màn/loa    PUT  /boxes/:boxId/config  (led_state, display_brightness, playback_volume)
- *   Huỷ ghép đôi   DELETE /boxes/:boxId/unpair
+ * Three groups, three different APIs — they can't share one Save button:
+ *   Wi-Fi               PUT  /boxes/:boxId/wifi    (ssid 1..32, password ≤ 63)
+ *   LED/screen/speaker  PUT  /boxes/:boxId/config  (led_state, display_brightness, playback_volume)
+ *   Unpair              DELETE /boxes/:boxId/unpair
  *
- * KHÔNG có nút "cập nhật firmware": backend có ota_flag và OtaTask nhưng không
- * có route cho người dùng bấm. Hộp tự cài. Dựng nút ở đây là dựng nút chết.
+ * There is NO "update firmware" button: the backend has ota_flag and OtaTask
+ * but no user-facing route, so a button here would be dead.
  */
 
 const DEFAULT_CFG = { led_state: 'OFF', display_brightness: 100, playback_volume: 100 };
 const CFG_KEYS = Object.keys(DEFAULT_CFG);
 
-/* LEDState enum ở firmware. Cả mục chưa được áp dụng (BREATHING còn chưa dựng hiệu
-   ứng) — nhãn "Sắp có" nằm ở tiêu đề mục, không gắn từng ô. */
+/* The firmware's LEDState enum. The firmware doesn't apply this section yet
+   (BREATHING has no effect implemented) — the "Coming soon" badge sits on the
+   section title, not on each option. */
 const LED_OPTIONS = [
   { value: 'OFF', label: 'Tắt' },
   { value: 'SOLID', label: 'Sáng đều' },
@@ -42,21 +43,21 @@ export default function ReceiverConfig() {
   const [error, setError] = useState(null);
   const [toast, showToast] = useToast();
 
-  // Wi-Fi: web không bao giờ đọc lại được mật khẩu. Ô trống = giữ mật khẩu đã lưu
-  // (không gửi password); mạng mở phải chọn rõ bằng openNet.
+  // Wi-Fi: the web can never read the password back. Empty field = keep the
+  // stored password (password not sent); an open network must be chosen explicitly via openNet.
   const [savedSsid, setSavedSsid] = useState('');
   const [ssid, setSsid] = useState('');
   const [password, setPassword] = useState('');
   const [openNet, setOpenNet] = useState(false);
   const [showPass, setShowPass] = useState(false);
 
-  // Mặc định khớp firmware (config.h SETTINGS_DEFAULT_*): 100 = mức hộp vẫn phát trước đây.
+  // Defaults match the firmware (config.h SETTINGS_DEFAULT_*): 100 = the level the box has always used.
   const [cfg, setCfg] = useState(DEFAULT_CFG);
   const [savedCfg, setSavedCfg] = useState(DEFAULT_CFG);
   const [saving, setSaving] = useState(false);
 
   const [confirmUnpair, setConfirmUnpair] = useState(false);
-  const [leaveTo, setLeaveTo] = useState(null); // đường dẫn định rời tới khi còn thay đổi chưa lưu
+  const [leaveTo, setLeaveTo] = useState(null); // where the user tried to go while changes were unsaved
 
   useEffect(() => {
     let alive = true;
@@ -88,8 +89,8 @@ export default function ReceiverConfig() {
   const cfgDirty = CFG_KEYS.some((k) => cfg[k] !== savedCfg[k]);
   const dirty = wifiDirty || cfgDirty;
 
-  // Đóng tab / tải lại khi còn thay đổi chưa lưu. Nút back của trình duyệt/điện thoại
-  // KHÔNG chặn được: HashRouter không có useBlocker (chỉ data router mới có).
+  // Closing the tab / reloading with unsaved changes. The browser/phone back
+  // button can NOT be intercepted: HashRouter has no useBlocker (data routers only).
   useEffect(() => {
     if (!dirty) return undefined;
     const onUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
@@ -102,7 +103,7 @@ export default function ReceiverConfig() {
   const saveAll = async () => {
     if (wifiDirty) {
       if (!ssid.trim()) { showToast('Tên Wi-Fi không được để trống.', 'err'); return false; }
-      // Đổi sang mạng khác mà ô mật khẩu trống: không phân biệt được "mạng mở" với "quên nhập".
+      // Switching networks with an empty password: "open network" and "forgot to type it" are indistinguishable.
       if (ssid.trim() !== savedSsid && !password && !openNet) {
         showToast('Nhập mật khẩu của mạng mới, hoặc bật "Mạng không có mật khẩu".', 'err');
         return false;
@@ -122,7 +123,7 @@ export default function ReceiverConfig() {
       if (cfgDirty) {
         await updateBoxConfig(boxId, cfg);
         setSavedCfg(cfg);
-        // Lấy lại config_rev mới để dòng trạng thái chuyển sang "đang chờ hộp".
+        // Fetch the new config_rev so the status line switches to "waiting for the box".
         const res = await getBoxDetails(boxId);
         if (res.success) setBox(res.data);
       }
@@ -150,8 +151,8 @@ export default function ReceiverConfig() {
           <>
             {/* --- Wi-Fi --- */}
             <label className="sl-field">
-              {/* Firmware hiện tại chưa đọc wifi_config từ DB (đổi ngay thì dùng trang cài
-                  đặt khi hộp phát Wi-Fi riêng) — huy hiệu thay cho dải cảnh báo cũ. */}
+              {/* The current firmware doesn't read wifi_config from the DB yet (to change
+                  it now, use the setup page the box serves on its own Wi-Fi) — hence the badge. */}
               <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
                 Tên Wi-Fi (SSID) <span className="sl-badge">Sắp có</span>
               </span>
@@ -159,8 +160,8 @@ export default function ReceiverConfig() {
                 className="sl-input" value={ssid} maxLength={32} autoComplete="off"
                 onChange={(e) => setSsid(e.target.value)} placeholder="Ví dụ: Nha_Duyen"
               />
-              {/* ESP32-C3 (esp32-c3-devkitm-1) chỉ có radio 2.4 GHz — mạng 5 GHz
-                  hộp không nhìn thấy. Đây là lý do hỏng hay gặp nhất khi đổi Wi-Fi. */}
+              {/* The ESP32-C3 has a 2.4 GHz radio only — it can't see 5 GHz networks.
+                  This is the most common failure when changing Wi-Fi. */}
               <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>Chỉ Wi-Fi 2.4 GHz</span>
             </label>
 
@@ -192,8 +193,8 @@ export default function ReceiverConfig() {
               </button>
             </div>
 
-            {/* --- đèn, màn, loa --- */}
-            {/* Firmware chưa áp dụng led_state (kể cả hiệu ứng "thở") — một huy hiệu cho cả mục. */}
+            {/* --- LED, screen, speaker --- */}
+            {/* The firmware doesn't apply led_state yet (including "breathing") — one badge for the whole section. */}
             <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
               Đèn báo <span className="sl-badge">Sắp có</span>
             </span>
@@ -210,9 +211,9 @@ export default function ReceiverConfig() {
               ))}
             </div>
 
-            {/* Firmware kẹp độ sáng tối thiểu 5% (SETTINGS_MIN_BRIGHTNESS): kéo về 0 thì
-                màn đen hẳn, người dùng tưởng hộp hỏng. Âm lượng 0 = tắt tiếng tin nhắn,
-                báo thức có âm lượng riêng. */}
+            {/* The firmware clamps brightness to at least 5% (SETTINGS_MIN_BRIGHTNESS): at 0
+                the screen goes black and the box looks dead. Volume 0 = mute messages;
+                alarms have their own volume. */}
             <Slider label="Độ sáng màn hình" value={cfg.display_brightness} min={5}
               onChange={(v) => setCfg({ ...cfg, display_brightness: v })} />
             <Slider label="Âm lượng phát tin nhắn" value={cfg.playback_volume}
@@ -220,7 +221,7 @@ export default function ReceiverConfig() {
 
             <ApplyState config={box?.config} status={box?.status} />
 
-            {/* --- giao diện màn hình hộp: lưu lên tài khoản, xem theme/layout.js --- */}
+            {/* --- box screen theme: saved to the account, see theme/layout.js --- */}
             <button
               type="button" className="sl-listcard" style={{ cursor: 'pointer' }}
               onClick={() => goTo(`/box/${boxId}/receiver/theme`)}
@@ -235,17 +236,17 @@ export default function ReceiverConfig() {
 
             <SdCard status={box?.status} />
 
-            {/* --- firmware: chỉ đọc, hộp tự cài --- */}
+            {/* --- firmware: read-only --- */}
             <div className="sl-listcard">
               <CircleIcon size={40} bg="var(--caramel-50)" color="var(--caramel-700)" icon="gear" iconSize={20} />
               <div className="sl-listcard__mid">
-                {/* Không nói "đang là bản mới nhất / hộp tự cài": firmware không đọc
-                    ota_flag, OTA giờ do người dùng kích hoạt trên hộp. */}
+                {/* Don't claim "up to date / updates itself": the firmware doesn't read
+                    ota_flag; OTA is triggered by the user on the box. */}
                 <span className="sl-label-s">Firmware {fwVersion(box?.status) || '—'}</span>
               </div>
             </div>
 
-            {/* --- vùng nguy hiểm --- */}
+            {/* --- danger zone --- */}
             <button
               type="button" className="sl-listcard" onClick={() => setConfirmUnpair(true)}
               style={{ background: 'var(--error-bg)', borderColor: 'var(--error-fill)', cursor: 'pointer' }}
@@ -296,9 +297,10 @@ export default function ReceiverConfig() {
 }
 
 /**
- * Thẻ nhớ + nhật ký lỗi gần nhất (status.sd_state / sd_free_mb / log_tail do firmware gửi).
- * Thẻ lỗi thì hộp vẫn chạy: giao diện nằm trong flash, báo thức kêu tiếng bíp, chỉ không
- * tải được tin và nhạc. Cách xử lý là thay/format thẻ, phần mềm không làm gì thêm.
+ * SD card + latest error log (status.sd_state / sd_free_mb / log_tail sent by the firmware).
+ * With a faulty card the box keeps running: the theme lives in flash and alarms
+ * beep; only messages and music can't download. The fix is to replace/format
+ * the card — software does nothing more.
  */
 function SdCard({ status }) {
   const [openLog, setOpenLog] = useState(false);
@@ -335,8 +337,9 @@ function SdCard({ status }) {
 }
 
 /**
- * Hộp đã áp dụng lần lưu gần nhất chưa: backend tăng config.config_rev mỗi lần lưu,
- * hộp chép số đó vào status.config_rev sau khi ghi NVS. Hộp ngủ thì tới 5 phút mới thức.
+ * Whether the box has applied the latest save: the backend bumps
+ * config.config_rev on every save, and the box copies it to status.config_rev
+ * after writing NVS. A sleeping box takes up to 5 minutes to wake.
  */
 function ApplyState({ config, status }) {
   const want = config?.config_rev;
@@ -351,7 +354,7 @@ function ApplyState({ config, status }) {
   );
 }
 
-/** Thanh trượt, đúng khoảng validation.middleware.ts:123-124 */
+/** Slider, with the range from validation.middleware.ts */
 function Slider({ label, value, onChange, min = 0 }) {
   return (
     <label className="sl-field">

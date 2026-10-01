@@ -1,12 +1,13 @@
 /*
- * Service worker tối giản của Sendlove Box.
+ * Sendlove Box's minimal service worker.
  *
- * CỐ Ý không cache JS/CSS/API: mọi thứ vẫn lấy từ mạng như khi chưa có service
- * worker, nên bản deploy mới luôn tới tay người dùng ngay lần tải sau — không
- * có chuyện kẹt bản cũ. Việc duy nhất nó làm: khi MỞ TRANG mà mất mạng thì trả
- * trang offline.html (đã lưu lúc cài) thay cho màn lỗi của trình duyệt.
+ * It INTENTIONALLY caches no JS/CSS/API: everything still comes from the
+ * network as if there were no service worker, so a new deploy reaches users on
+ * the next load — no stale versions. Its only job: when a PAGE LOAD fails
+ * offline, serve offline.html (cached at install) instead of the browser's
+ * error page.
  */
-// Sửa offline.html thì PHẢI tăng số phiên bản ở đây, không thì máy đã cài giữ bản cũ mãi.
+// Bump this version whenever offline.html changes, or installed devices keep the old copy forever.
 const CACHE = 'sendlove-offline-v1';
 const OFFLINE_URL = '/offline.html';
 
@@ -30,7 +31,7 @@ self.addEventListener('fetch', (event) => {
   if (request.mode !== 'navigate' || request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  // /__/ là trang xử lý đăng nhập redirect của Firebase Hosting — không được đụng.
+  // /__/ is Firebase Hosting's redirect sign-in handler — never intercept it.
   if (url.origin !== self.location.origin || url.pathname.startsWith('/__/')) return;
 
   event.respondWith(fetch(request).catch(() => caches.match(OFFLINE_URL)));

@@ -1,18 +1,18 @@
 /* ============================================================
-   Sendlove Box — primitive dựng từ auto-layout của file Figma.
-   Quy tắc chuyển đổi:
+   Sendlove Box — primitives built from the Figma file's auto-layout.
+   Mapping:
      AL(VERTICAL|HORIZONTAL)   -> flex container
      itemSpacing               -> gap
      padding[T,R,B,L]          -> padding
      primary/counterAxisAlign  -> justify-content / align-items
      fillW(node)               -> align-self: stretch
-     acts() ghim y=932-34-h    -> margin-top:auto (không position:absolute)
-   Toạ độ tuyệt đối của thiết kế (430x932, thân y=131) trở thành một cột
-   flex cao 100dvh: giữ nguyên thứ tự, khoảng cách và tỉ lệ, nhưng không
-   vỡ khi bàn phím mobile đẩy viewport hay khi nội dung dài ra.
+     acts() pinned at y=932-34-h -> margin-top:auto (no position:absolute)
+   The design's absolute 430x932 frame becomes a 100dvh flex column: same
+   order, spacing and proportions, but it survives the mobile keyboard and
+   long content.
    ============================================================ */
 
-/* ---------- nền trang + khung cột ---------- */
+/* ---------- page background + column shell ---------- */
 .sl-page {
   min-height: 100dvh;
   background: var(--caramel-50);
@@ -21,7 +21,7 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/* Form control khong thua ke font tu body theo mac dinh cua trinh duyet. */
+/* Form controls don't inherit the page font by default. */
 .sl-page button, .sl-page input, .sl-page textarea, .sl-page select {
   font-family: var(--font);
 }
@@ -37,25 +37,23 @@
   position: relative;
 }
 
-/* Desktop: thiết kế vẫn là mobile, nên giữ nguyên cột 430 và chỉ tách nó
-   khỏi nền bằng một viền mảnh — không dựng khung điện thoại giả. */
+/* Desktop: the design stays mobile — keep the 430 column and set it off with
+   a thin border; no fake phone frame. */
 @media (min-width: 768px) {
   .sl-page { background: var(--rose-50); padding: var(--sp-8) 0; }
   .sl-shell {
     min-height: min(932px, calc(100dvh - var(--sp-8) * 2));
     border: 1px solid var(--shell-line);
     border-radius: var(--r-lg);
-    /* clip, không hidden: hidden biến shell thành khung cuộn riêng và position:sticky bên
-       trong (màn xem trước của trình sửa giao diện) không còn dính. */
+    /* clip, not hidden: hidden makes the shell a scroll container and breaks
+       position:sticky inside it (theme editor preview). */
     overflow: clip;
   }
 }
 
 /* ---------- appbar ----------
-   Đúng frame appbar thật (create-content-dialog for video/image,
-   maindashboard-share-page): HORIZONTAL, gap 12, padding [16,20,16,20],
-   SPACE_BETWEEN/CENTER. Chiều cao KHÔNG cố định — tự nhiên theo nội dung
-   (ellipse back 40px hoặc khối "Hi, {name}!" 43px), giống auto-layout AUTO. */
+   Mirrors the Figma appbar frame: HORIZONTAL, gap 12, padding [16,20,16,20].
+   Height is NOT fixed — it follows its content, like auto-layout AUTO. */
 .sl-appbar {
   flex: 0 0 auto;
   display: flex;
@@ -75,13 +73,12 @@
   color: var(--caramel-800);
 }
 .sl-iconbtn:hover { background: var(--rose-50); }
-/* Biến thể 44px cho hàng nút icon thay nút chữ (thư viện nhạc) — đủ vùng chạm ngón tay. */
+/* 44px variant for icon-only button rows (music library) — finger-sized touch target. */
 .sl-iconbtn--44 { width: 44px; height: 44px; }
 .sl-iconbtn:disabled { opacity: .4; cursor: not-allowed; }
 
-/* Nút back của appbar: group "leave" trong Figma = ellipse 40x40 viền 0.5,
-   khác hẳn .sl-iconbtn (36px, không viền) dùng ở những chỗ khác (mắt mật khẩu,
-   nút đóng modal). */
+/* Appbar back button: 40x40 circle with a 0.5 border per Figma — distinct from
+   .sl-iconbtn (36px, no border) used elsewhere. */
 .sl-back {
   flex: 0 0 auto;
   width: 40px; height: 40px;
@@ -94,9 +91,8 @@
 }
 .sl-back:hover { background: var(--rose-50); }
 
-/* Pill "Step x/y": viền mảnh, KHÔNG nền đặc — Figma dùng RECTANGLE chỉ có
-   strokeWeight, chữ 14/600 caramel-800 (đúng thang .sl-label-s), không phải
-   12/600 rose-700 như bản cũ. */
+/* "Step x/y" pill: hairline border, NO solid fill; 14/600 caramel-800 text
+   (same scale as .sl-label-s), per Figma. */
 .sl-step {
   flex: 0 0 auto;
   padding: 4px 14px;
@@ -107,7 +103,7 @@
   white-space: nowrap;
 }
 
-/* ---------- thân màn hình: body(frame) pad [8,20,10,20] gap 16 ---------- */
+/* ---------- screen body: padding [8,20,10,20], gap 16 ---------- */
 .sl-body-col {
   flex: 1 1 auto;
   display: flex;
@@ -116,22 +112,21 @@
   padding: var(--sp-2) var(--sp-5) 10px;
   min-height: 0;
 }
-/* Man ket qua khong co appbar. Thiet ke dat than o y=131 roi cong them
-   paddingTop 72 -> noi dung bat dau ~203 trong khung 932; o day la
-   safe-top + 72 (khoang appbar) + 72. */
+/* Result screens have no appbar: content starts at safe-top + 72 (appbar
+   space) + 72, matching the design. */
 .sl-body-col--center {
   align-items: center; text-align: center;
   padding-top: calc(var(--safe-top) + 144px);
 }
 
-/* ---------- hdr(): tiêu đề + "Love to <tên>" ---------- */
+/* ---------- hdr(): title + "Love to <name>" ---------- */
 .sl-hdr { display: flex; flex-direction: column; gap: 2px; }
 .sl-hdr__to {
   display: flex; align-items: center; gap: var(--sp-1);
   color: var(--neutral-500);
 }
 
-/* ---------- thẻ: r16 sw1, r12 sw0.5, KHÔNG đổ bóng ---------- */
+/* ---------- cards: r16 sw1, r12 sw0.5, NO shadow ---------- */
 .sl-card {
   display: flex;
   flex-direction: column;
@@ -165,19 +160,19 @@
   background: var(--chip-accent-bg);
   color: var(--chip-accent-fg);
 }
-/* Chip trong DANH SÁCH (tin nhắn, widget, ô điều hướng). Light: hồng như
-   thiết kế gốc. Dark: hồng trong suốt — một hàng ô hồng ĐẶC trên nền rượu
-   vang là over color. */
+/* Chips in LISTS (messages, widgets, nav tiles). Light: pink as designed.
+   Dark: translucent pink — a row of SOLID pink tiles on the wine background
+   is too much color. */
 .sl-chip--muted { background: var(--chip-bg); color: var(--chip-fg); }
 
-/* ---------- circle(): vòng tròn icon ---------- */
+/* ---------- circle(): round icon holder ---------- */
 .sl-circle {
   flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--r-full);
 }
 
-/* ---------- tips(): dải nhắc nhỏ ---------- */
+/* ---------- tips(): small hint line ---------- */
 .sl-tips {
   display: flex; align-items: flex-start; gap: 5px;
   color: var(--tip-text);
@@ -185,7 +180,7 @@
 }
 .sl-tips svg { flex: 0 0 auto; margin-top: 1px; color: var(--tip-icon); }
 
-/* ---------- btn(): 390x44, r8. Chữ trên nút hồng là caramel/900 ---------- */
+/* ---------- btn(): 390x44, r8. Text on the pink button is caramel/900 ---------- */
 .sl-btn {
   display: inline-flex; align-items: center; justify-content: center;
   gap: var(--sp-2);
@@ -199,28 +194,29 @@
   transition: filter .18s ease, background .18s ease;
 }
 .sl-btn:disabled { opacity: .5; cursor: not-allowed; }
-/* on-accent CỐ Ý không đổi theo theme (mục tokens.css) — nút hồng giữ gần
-   như nguyên độ sáng ở cả hai theme, nên chữ trên nó cũng không cần đổi. */
+/* --on-accent is INTENTIONALLY theme-independent (see tokens.css): the pink
+   button keeps nearly the same lightness in both themes, so its text needn't change either. */
 .sl-btn--pri { background: var(--rose-400); color: var(--on-accent); }
 .sl-btn--pri:hover:not(:disabled) { filter: brightness(.96); }
 .sl-btn--gho { background: transparent; color: var(--text-accent); }
 .sl-btn--gho:hover:not(:disabled) { background: var(--rose-50); }
-/* Nút phá huỷ: nền error-fill chữ trắng, KHÔNG dùng hồng chính — hồng là màu
-   của hành động bình thường, mượn nó cho việc xoá là mời người dùng bấm nhầm. */
-/* Chữ trắng CỐ ĐỊNH: neutral-0 đảo thành nền thẻ tối ở dark mode. */
+/* Destructive button: error-fill with white text, NOT the primary pink — pink
+   means a normal action; borrowing it for delete invites mis-taps. */
+/* White is FIXED: neutral-0 flips to the dark card background in dark mode. */
 .sl-btn--dan { background: var(--error-fill); color: #FFFFFF; }
 .sl-btn--dan:hover:not(:disabled) { filter: brightness(.94); }
 .sl-btn--block { width: 100%; }
-/* Thứ bậc nút: mỗi màn MỘT nút hồng đặc (việc chính); việc quan trọng thứ hai = nút
-   viền (sec); huỷ/đóng/để sau = chữ trơn (gho); đỏ đặc chỉ ở bước xác nhận xoá (dan). */
+/* Button hierarchy: ONE solid pink button per screen (primary action); the
+   second-most important = outlined (sec); cancel/close/later = plain text (gho);
+   solid red only on a delete confirmation (dan). */
 .sl-btn--sec { background: transparent; color: var(--text-accent); box-shadow: inset 0 0 0 1px var(--text-accent); }
 .sl-btn--sec:hover:not(:disabled) { background: var(--rose-50); }
-/* Nút chính bị khoá: xám trung tính — hồng nhạt trông vẫn như bấm được. */
+/* Disabled primary: neutral grey — pale pink still looks tappable. */
 .sl-btn--pri:disabled { background: var(--neutral-100); color: var(--neutral-500); opacity: 1; }
 
-/* ---------- acts(): hàng nút ghim đáy, cách safe-area 34 ----------
-   Nằm trong .sl-body-col nên thừa hưởng padding ngang 20 của thân; 24 ở đây
-   cộng với 10 padding-bottom của thân ra đúng 34 như trong thiết kế. */
+/* ---------- acts(): button row pinned to the bottom, 34 above the safe area ----------
+   Lives inside .sl-body-col, so it inherits the 20px side padding; 24 here
+   plus the body's 10px bottom padding gives the designed 34. */
 .sl-acts {
   margin-top: auto;
   display: flex; flex-direction: column; gap: var(--sp-2);
@@ -228,7 +224,7 @@
   align-self: stretch;
 }
 
-/* ---------- field: nhãn + ô nhập r8 sw0.5 ---------- */
+/* ---------- field: label + input, r8 sw0.5 ---------- */
 .sl-field { display: flex; flex-direction: column; gap: 6px; }
 .sl-input {
   width: 100%;
@@ -248,7 +244,7 @@
   box-shadow: 0 0 0 3px var(--rose-50);
 }
 
-/* ---------- lưới chọn loại nội dung ---------- */
+/* ---------- content-type picker grid ---------- */
 .sl-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
 .sl-typecard {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -263,9 +259,9 @@
 }
 .sl-typecard:hover { border-color: var(--rose-400); background: var(--rose-50); }
 
-/* ---------- scrim + modal (nơi DUY NHẤT có đổ bóng) ---------- */
-/* fixed theo VIEWPORT, không absolute theo .sl-shell: shell cao bằng cả trang, nên trên
-   trang dài popup từng nằm ở đáy trang — ngoài màn hình khi người dùng đang ở đầu trang. */
+/* ---------- scrim + modal (the ONLY place with a shadow) ---------- */
+/* Fixed to the VIEWPORT, not absolute to .sl-shell: the shell is as tall as the
+   page, so on a long page the popup would land off-screen at the bottom. */
 .sl-scrim {
   position: fixed; inset: 0;
   background: rgba(61, 42, 32, 0.45);
@@ -296,14 +292,14 @@
   transition: width .3s ease;
 }
 
-/* ---------- steps trong popup ---------- */
+/* ---------- steps inside the popup ---------- */
 .sl-steps { display: flex; flex-direction: column; gap: 10px; }
 .sl-step-row { display: flex; align-items: center; gap: var(--sp-2); font-size: 12px; line-height: 1.4; }
 .sl-step-row--done { color: var(--neutral-500); font-weight: 400; }
 .sl-step-row--now  { color: var(--caramel-900); font-weight: 600; }
 .sl-step-row--wait { color: var(--neutral-400); font-weight: 400; }
 
-/* ---------- khối lý do lỗi ---------- */
+/* ---------- error reason block ---------- */
 .sl-reason {
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-md);
@@ -314,7 +310,7 @@
   text-align: left;
 }
 
-/* ---------- khung xem trước 1:1 = màn hộp 240x240 ---------- */
+/* ---------- 1:1 preview frame = the box's 240x240 screen ---------- */
 .sl-preview {
   width: 240px; height: 240px;
   max-width: 100%;
@@ -326,7 +322,7 @@
 .sl-preview > video,
 .sl-preview > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* ---------- toggle 44x24, knob 18 (toggle() ở màn 10/12) ---------- */
+/* ---------- toggle 44x24, knob 18 ---------- */
 .sl-toggle {
   flex: 0 0 auto;
   width: 44px; height: 24px;
@@ -339,10 +335,9 @@
   transition: background .18s ease;
 }
 .sl-toggle[aria-checked="true"] { background: var(--rose-400); justify-content: flex-end; }
-/* Toggle "Giao diện tối" trong account-popover: Figma dùng accent caramel
-   (#B87548, cùng tông chevron/pill receiver ở box-card), KHÔNG phải hồng như
-   toggle báo thức. Dark mode trỏ token này về hồng (caramel sáng trên nền
-   rượu vang không đủ tương phản với núm). */
+/* "Dark theme" toggle in the account popover: Figma uses the caramel accent,
+   NOT pink like the alarm toggle. Dark mode points this token at pink (light
+   caramel on the wine background lacks contrast with the knob). */
 .sl-toggle--accent[aria-checked="true"] { background: var(--toggle-accent-on); }
 .sl-toggle__knob {
   width: 18px; height: 18px;
@@ -351,7 +346,7 @@
 }
 .sl-toggle:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ---------- hàng viền đứt "thêm ..." (add-alarm, add-widget) ---------- */
+/* ---------- dashed "add ..." row (add-alarm, add-widget) ---------- */
 .sl-addrow {
   display: flex; align-items: center; justify-content: center;
   gap: var(--sp-2);
@@ -371,7 +366,7 @@
   cursor: not-allowed;
 }
 
-/* ---------- segmented control (seg/cell ở màn 10) ---------- */
+/* ---------- segmented control ---------- */
 .sl-seg {
   display: flex; gap: var(--sp-1);
   padding: var(--sp-1);
@@ -395,7 +390,7 @@
   color: var(--caramel-900);
 }
 
-/* ---------- dải ghi chú nền caramel (wake-note ở màn 10) ---------- */
+/* ---------- caramel note strip ---------- */
 .sl-note {
   display: flex; align-items: flex-start; gap: var(--sp-2);
   padding: var(--sp-3);
@@ -408,9 +403,9 @@
 .sl-note--warn { background: var(--warning-bg); color: var(--warning-text); }
 .sl-note--err  { background: var(--error-bg);   color: var(--error-text); }
 
-/* ---------- thanh trượt 0-100 (độ sáng, âm lượng) ----------
-   accent-color chỉ tô phần đã chọn; phần còn lại rơi về track mặc định của
-   trình duyệt và ra màu tối, nên phải tự vẽ cả hai đầu. */
+/* ---------- 0-100 slider (brightness, volume) ----------
+   accent-color only paints the filled part; the rest falls back to the
+   browser's dark default track, so both ends are drawn by hand. */
 .sl-range {
   width: 100%;
   height: 24px;
@@ -444,19 +439,19 @@
   border: 2px solid var(--neutral-0);
 }
 
-/* ---------- nhãn mục lớn (YOUR BOX): 17/SemiBold neutral-500, tách khỏi
-   sl-heading (17/SemiBold nhưng caramel-900) vì đây luôn là nhãn phụ. ---------- */
+/* ---------- large section label (YOUR BOX): 17/SemiBold neutral-500. Separate
+   from .sl-heading (same size, caramel-900): this is always a secondary label. ---------- */
 .sl-section-label { font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--neutral-500); }
 
-/* ---------- add-box-card (Dashboard): viền ĐẶC, khác .sl-addrow viền đứt
-   dùng ở Alarms/ThemeEditor — hai kiểu khác nhau thật trong Figma. ---------- */
+/* ---------- add-box-card (Dashboard): a separate Figma component from
+   .sl-addrow (Alarms/ThemeEditor) ---------- */
 .sl-addbox {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: var(--sp-2);
   width: 100%;
   padding: var(--sp-6) var(--sp-4);
   border-radius: 16px;
-  /* dash:[4,4] xác nhận từ Figma — viền đứt, không phải viền đặc. */
+  /* dash:[4,4] per Figma — dashed, not solid. */
   border: 1px dashed var(--add-line);
   background: transparent;
   cursor: pointer;
@@ -470,13 +465,12 @@
 }
 .sl-addbox__label { font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--text-accent); }
 
-/* ---------- biến thể viền đậm cho field trong dialog ghép hộp ---------- */
+/* ---------- stronger-border variant for fields in the pair-box dialog ---------- */
 .sl-input--accent { border-color: var(--input-accent); }
 
-/* ---------- card dialog "new-box" (PairBox) ----------
-   KHÁC card của Login ("Content", 327/r10/có viền): "inside-layer" trong Figma
-   là 379 rộng, r12, KHÔNG viền, padding 20 đều, gap 16. Từng nhầm dùng chung
-   .sl-login-card — hai card khác nhau thật trong thiết kế, tách riêng. */
+/* ---------- "new-box" dialog card (PairBox) ----------
+   NOT the Login card (327 wide, r10, bordered): this one is 379 wide, r12, NO
+   border, padding 20, gap 16. Two distinct cards in the design — keep them apart. */
 .sl-pair-card {
   width: 100%; max-width: 379px;
   display: flex; flex-direction: column;
@@ -486,18 +480,18 @@
   background: var(--neutral-0);
 }
 
-/* ---------- pill vai trò trên box-card ---------- */
+/* ---------- role pill on the box card ---------- */
 .sl-rolepill {
   flex: 0 0 auto;
   padding: 2px 10px;
   border-radius: var(--r-full);
   color: var(--rolepill-fg);
-  font-size: 14px; font-weight: 600; line-height: 1.4; /* xác nhận Figma: 14/SemiBold, không phải 12 */
+  font-size: 14px; font-weight: 600; line-height: 1.4; /* per Figma: 14/SemiBold, not 12 */
 }
 .sl-rolepill--sender { background: var(--rose-400); }
 .sl-rolepill--receiver { background: var(--rolepill-recv-bg); color: var(--rolepill-recv-fg); }
 
-/* ---------- avatar tròn: ảnh hoặc chữ cái đầu ---------- */
+/* ---------- round avatar: photo or initial ---------- */
 .sl-avatar {
   flex: 0 0 auto;
   width: 44px; height: 44px;
@@ -511,8 +505,8 @@
 }
 .sl-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* ---------- popover nhỏ neo theo appbar (chuông, avatar) ----------
-   Khác .sl-scrim (phủ đáy màn) — popover neo góc trên phải, không chiếm hết chiều rộng. */
+/* ---------- small popover anchored to the appbar (bell, avatar) ----------
+   Unlike .sl-scrim (covers the bottom), it anchors top-right and isn't full width. */
 .sl-popover-anchor { position: absolute; inset: 0; z-index: 10; }
 .sl-popover {
   position: absolute;
@@ -522,8 +516,7 @@
   display: flex; flex-direction: column; gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-sm);
-  /* Xác nhận Figma (Frame 42 trong account-popover.json): nền caramel-50,
-     KHÔNG phải trắng — trước đây dùng nhầm neutral-0. */
+  /* Per Figma (account-popover.json): caramel-50 background, NOT white. */
   background: var(--bg-popover);
   box-shadow: var(--shadow-modal);
 }
@@ -533,17 +526,17 @@
   color: var(--caramel-800);
   font-size: 15px; line-height: 1.4;
   background: none; border: none; width: 100%; cursor: pointer; text-align: left;
-  font-family: var(--font); /* <button> không thừa hưởng font của trang */
+  font-family: var(--font); /* <button> doesn't inherit the page font */
 }
 .sl-popover__row--rose { color: var(--text-accent); }
-/* Hành động phá huỷ (huỷ ghép) — cùng lý do với .sl-btn--dan: không mượn hồng. */
+/* Destructive action (unpair) — same reason as .sl-btn--dan: don't borrow pink. */
 .sl-popover__row--danger { color: var(--error-text); font-weight: 600; }
 .sl-popover__divider { height: 0.5px; background: var(--line-card); border: none; margin: 2px 0; }
 
-/* ---------- Login: ảnh nền tràn viền + card nổi (frame "login signup") ----------
-   Khác cấu trúc Body chuẩn nên có khối riêng. .sl-shell đã position:relative sẵn. */
-/* Ảnh nền thật (anthony-melone, Unsplash — đúng ảnh trong Figma). Ảnh hoa sáng và rối,
-   nên phủ một lớp tối ấm để logo và dòng điều khoản chữ trắng vẫn đọc được. */
+/* ---------- Login: full-bleed background photo + floating card ----------
+   Not the standard Body structure, hence its own block. .sl-shell is already position:relative. */
+/* The Figma photo (Anthony Melone, Unsplash) is bright and busy, so a warm dark
+   overlay keeps the white logo and terms line readable. */
 .sl-login-hero {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
@@ -563,18 +556,18 @@
   text-align: center;
 }
 .sl-login-logo {
-  font-family: 'Dancing Script', cursive; /* đúng Figma — riêng logo này KHÔNG dùng Quicksand */
+  font-family: 'Dancing Script', cursive; /* per Figma — this logo alone does NOT use Quicksand */
   font-size: 40px; font-weight: 700; line-height: 1.15;
-  /* Màu cố định #FDF0EF, KHÔNG dùng var(--rose-50): nền hero là gradient cố định,
-     không đổi theo theme, nhưng --rose-50 thì có (thành rose trong suốt ở dark mode
-     — gần như vô hình trên gradient). Chữ đè lên hero phải luôn cùng một màu. */
+  /* Fixed #FDF0EF, NOT var(--rose-50): the hero gradient is theme-independent
+     but --rose-50 isn't (translucent in dark mode — nearly invisible here).
+     Text on the hero must keep one color. */
   color: #FDF0EF;
   text-shadow: 0 2px 16px rgba(0, 0, 0, .35);
 }
-/* Thẻ đăng nhập là "đảo sáng" CỐ ĐỊNH: nằm trên hero gradient không đổi theo
-   theme, nên nó cũng không đổi. Khai báo lại token ngay tại đây để mọi thứ bên
-   trong (tiêu đề, nút, dải lỗi .sl-reason) dùng bảng màu sáng kể cả khi
-   <html data-theme="dark"> — trước đây nút tối với chữ #9E6244 chỉ 2,4:1. */
+/* The login card is a FIXED "light island": it sits on the theme-independent
+   hero, so it doesn't change either. Tokens are redeclared here so everything
+   inside (headline, buttons, .sl-reason) uses the light palette even under
+   <html data-theme="dark"> — otherwise button text contrast drops to 2.4:1. */
 .sl-login-card {
   --neutral-0: #FFFFFF;
   --caramel-50: #FDF8F3;
@@ -610,13 +603,14 @@
   font-size: 14px; font-weight: 600; line-height: 1.4;
   cursor: pointer;
   transition: background .18s ease;
-  /* INNER_SHADOW radius 6, #f4f5fa@0.60, offset (0,-3) — xác nhận từ Figma. */
+  /* INNER_SHADOW radius 6, #f4f5fa@0.60, offset (0,-3) — per Figma. */
   box-shadow: inset 0 -3px 6px rgba(244, 245, 250, .6);
 }
 .sl-login-btn:hover:not(:disabled) { background: var(--caramel-50); }
 .sl-login-btn:disabled { opacity: .6; cursor: not-allowed; }
-/* Gợi ý cài lên màn hình chính (InstallHint.jsx) — dòng phụ cuối thẻ đăng nhập,
-   tách bằng hairline. Không phải nút chính: màn này đã có hai nút đăng nhập. */
+/* Install hint (InstallHint.jsx) — secondary line at the bottom of the login
+   card, separated by a hairline. Not a primary button: this screen already
+   has two sign-in buttons. */
 .sl-install {
   display: flex; align-items: flex-start; gap: var(--sp-2);
   padding-top: var(--sp-3);
@@ -634,7 +628,7 @@
   color: var(--text-accent);
   text-decoration: underline;
 }
-/* Nút ẩn: hình 16px nhưng vùng chạm 32px, kéo lề âm để không đẩy dòng chữ. */
+/* Dismiss button: 16px glyph, 32px touch target; negative margins keep it from pushing the text. */
 .sl-install__close {
   flex: 0 0 auto;
   width: 32px; height: 32px; margin: -8px -8px -8px 0;
@@ -644,7 +638,7 @@
   color: var(--caramel-900);
 }
 .sl-install__close:hover { background: var(--caramel-50); }
-/* Biến thể thẻ (Dashboard): đứng một mình nên cần bề mặt riêng, cùng nền và viền với thẻ hộp. */
+/* Card variant (Dashboard): stands alone, so it needs its own surface — same background and border as a box card. */
 .sl-install--card {
   padding: var(--sp-3) var(--sp-4);
   border: 0.5px solid var(--line-card);
@@ -652,7 +646,7 @@
   background: var(--bg-card);
 }
 .sl-install--card .sl-install__close:hover { background: var(--bg-sunken); }
-/* Biến thể cảnh báo trình duyệt nhúng (Zalo/Facebook): khối nền vàng như .sl-reason. */
+/* In-app browser warning variant (Zalo/Facebook): yellow block like .sl-reason. */
 .sl-install--warn {
   padding: var(--sp-3) var(--sp-4);
   border-top: none;
@@ -664,18 +658,18 @@
 .sl-install--warn > svg { margin-top: 2px; color: var(--warning-text); }
 .sl-login-terms {
   font-size: 12px; line-height: 1.5;
-  /* Màu cố định #FFFFFF — lý do giống .sl-login-logo, xem ghi chú ở đó. */
+  /* Fixed #FFFFFF — same reason as .sl-login-logo. */
   color: #FFFFFF;
   text-shadow: 0 1px 8px rgba(0, 0, 0, .4);
 }
 
 /* ---------- box-card (Dashboard) ----------
-   Hai NHÓM thật theo Figma, không phải "tên+pill" rồi "chevron" rời:
-     trái  = avatar + tên + hàng trạng thái (chấm + "Online", icon pin + "%")
-     phải  = pill vai trò + chevron GỘP CHUNG một khối, neo phải nhờ
-             space-between của card cha.
-   Viền đổi màu theo vai trò: sender = rose-300 (khớp #F4A3AF tuyệt đối),
-   receiver = caramel-300 (khớp #E7AE75 tuyệt đối). */
+   Two groups per Figma:
+     left  = avatar + name + status row (dot + "Online", battery icon + "%")
+     right = role pill + chevron as ONE block, pushed right by the card's
+             space-between.
+   Border color comes from --boxcard-line-*: by role in light (rose-300 /
+   caramel-300), neutral in dark. */
 .sl-boxcard {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-3);
@@ -687,8 +681,9 @@
   cursor: pointer;
   text-align: left;
 }
-/* Viền KHÔNG theo vai trò nữa: viền + avatar + pill + chevron cùng hồng (hoặc
-   cùng caramel) là bốn lần nói một điều. Vai trò giờ chỉ nằm ở pill + nền avatar. */
+/* Dark theme drops the role-colored border: border + avatar + pill + chevron
+   in one hue says the same thing four times. Role then shows only in the pill
+   and the avatar background. */
 .sl-boxcard--sender { border-color: var(--boxcard-line-sender); }
 .sl-boxcard--receiver { border-color: var(--boxcard-line-recv); }
 
@@ -705,21 +700,20 @@
 
 .sl-boxcard__mid { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 
-/* Hàng trạng thái: chấm màu + nhãn, rồi icon pin + %. Cùng pattern gap:6 đã
-   dùng ở ReceiverUI cho hàng pin/firmware. */
+/* Status row: colored dot + label, then battery icon + %. Same gap:6 pattern
+   as the battery/firmware row in ReceiverUI. */
 .sl-boxcard__status { display: flex; align-items: center; gap: var(--sp-3); }
 .sl-boxcard__statusitem { display: flex; align-items: center; gap: 6px; color: var(--neutral-500); font-size: 12px; line-height: 1.4; }
 .sl-boxcard__dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: var(--r-full); }
 
 .sl-boxcard__right { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); }
 
-/* Chevron trong nhóm phải: rose-500 khớp tuyệt đối cho sender; receiver dùng
-   caramel-700 (không có hex gốc trong thang, giữ đúng ý "đậm hơn pill một
-   bậc" của Figma). */
+/* Chevron in the right group: rose-500 for sender; caramel-700 for receiver
+   ("one step darker than the pill", per Figma). */
 .sl-boxcard__chevron--sender { color: var(--chevron-sender); }
 .sl-boxcard__chevron--receiver { color: var(--chevron-recv); }
 
-/* ---------- dòng tin nhắn bấm được (lịch sử người gửi, danh sách người nhận) ---------- */
+/* ---------- clickable message row (sender history, receiver list) ---------- */
 .sl-msgrow {
   font-family: var(--font);
   cursor: pointer;
@@ -728,8 +722,8 @@
 .sl-msgrow:hover { border-color: var(--rose-300); background: var(--rose-50); }
 .sl-msgrow:focus-visible { outline: 2px solid var(--rose-400); outline-offset: 2px; }
 
-/* ---------- popup chi tiết tin nhắn (message-detail-popup) ----------
-   Chưa đối chiếu Figma — xem MessageDetail.jsx. Dựng trên .sl-modal có sẵn. */
+/* ---------- message detail popup ----------
+   Not yet checked against Figma — see MessageDetail.jsx. Built on .sl-modal. */
 .sl-msgdetail { gap: var(--sp-4); }
 .sl-msgdetail__head { display: flex; align-items: center; gap: var(--sp-3); }
 .sl-msgdetail__media {
@@ -761,7 +755,7 @@
 }
 .sl-msgdetail__note { display: flex; flex-direction: column; gap: var(--sp-1); }
 
-/* ---------- chip lọc (lịch sử tin nhắn) ---------- */
+/* ---------- filter chips (message history) ---------- */
 .sl-filters { display: flex; gap: var(--sp-2); overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
 .sl-filters::-webkit-scrollbar { display: none; }
 .sl-filter {
@@ -777,9 +771,9 @@
 }
 .sl-filter[aria-pressed="true"] { background: var(--chip-accent-bg); border-color: var(--boxcard-line-sender); color: var(--chip-accent-fg); font-weight: 600; }
 
-/* ---------- chọn đoạn video/âm thanh: hai range chồng nhau ----------
-   Thumb 20px nên vạch ray thụt vào 10px mỗi bên — tâm thumb chạy đúng từ đầu
-   tới cuối ray, vùng chọn tô bằng % khớp với vị trí thumb. */
+/* ---------- video/audio range picker: two stacked range inputs ----------
+   The thumb is 20px, so the rail is inset 10px each side — the thumb center
+   travels the full rail and the % fill lines up with the thumb. */
 .sl-trimwrap { display: flex; flex-direction: column; gap: var(--sp-1); width: 100%; }
 .sl-trim { position: relative; height: 32px; }
 .sl-trim__track {
@@ -810,10 +804,10 @@
 .sl-trim__input:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--rose-200); }
 .sl-trim__meta { display: flex; justify-content: space-between; align-items: center; font-variant-numeric: tabular-nums; }
 
-/* nút chọn nguồn âm thanh: thu trực tiếp / chọn file */
+/* audio source picker: record live / choose a file */
 .sl-srcpick { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); width: 100%; }
 
-/* ---------- xem trước tin chữ trên màn hộp (TextPreview) — màu của vật thật, không theo theme ---------- */
+/* ---------- text-message preview on the box screen (TextPreview) — colors of the physical device, not themed ---------- */
 .sl-textpreview {
   width: 240px; height: 240px; max-width: 100%;
   align-self: center; flex: 0 0 auto;
@@ -829,7 +823,7 @@
   display: -webkit-box; -webkit-line-clamp: 10; -webkit-box-orient: vertical; overflow: hidden;
 }
 
-/* ---------- hướng dẫn thao tác trên hộp (trang Báo thức) ---------- */
+/* ---------- how-to hint for gestures on the box (Alarms page) ---------- */
 .sl-howto {
   display: flex; align-items: center; gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
@@ -840,7 +834,7 @@
 .sl-howto svg { flex: 0 0 auto; color: var(--text-accent); }
 .sl-howto b { font-weight: 600; color: var(--caramel-800); }
 
-/* ---------- chip trạng thái nhỏ (lần hộp thức ở lịch sử người gửi) ---------- */
+/* ---------- small status chip (last box wake-up, sender history) ---------- */
 .sl-statuschip {
   align-self: flex-start;
   display: inline-flex; align-items: center; gap: 6px;
@@ -851,7 +845,7 @@
   font-size: 12px; font-weight: 500; line-height: 1; color: var(--neutral-500);
 }
 
-/* ---------- huy hiệu "Sắp có" cạnh tiêu đề mục firmware chưa áp dụng ---------- */
+/* ---------- "Coming soon" badge next to sections the firmware doesn't apply yet ---------- */
 .sl-badge {
   display: inline-flex; align-items: center;
   height: 20px; padding: 0 8px;
@@ -861,8 +855,8 @@
   vertical-align: middle;
 }
 
-/* ---------- trình sửa giao diện (ThemeEditor) ----------
-   Màn xem trước ghim đầu trang để bảng thuộc tính bên dưới cuộn mà vẫn thấy kết quả. */
+/* ---------- theme editor (ThemeEditor) ----------
+   The preview sticks to the top so the property panel can scroll while the result stays visible. */
 .sl-editor__stage {
   position: sticky; top: 0; z-index: 5;
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
@@ -872,9 +866,9 @@
   border-bottom: 0.5px solid var(--line-card);
 }
 .sl-editor__screen { display: flex; }
-/* Màn thấp (điện thoại ngang, máy nhỏ): 240px xem trước + hàng chip ăn gần hết chiều cao,
-   bảng thuộc tính chỉ còn một khe. Thu nhỏ xem trước; kéo thả vẫn đúng vì BoxScreen quy
-   đổi toạ độ theo kích thước hiển thị thật. */
+/* Short viewports (landscape phones, small devices): the 240px preview + chip
+   row eat most of the height. Shrink the preview; dragging stays correct because
+   BoxScreen converts coordinates from the actual rendered size. */
 @media (max-height: 760px) { .sl-editor__screen { zoom: .75; } }
 .sl-editor__chips {
   display: flex; gap: var(--sp-2); width: 100%;
@@ -916,16 +910,17 @@
 .sl-editor__num:focus-within { border-color: var(--rose-400); box-shadow: 0 0 0 3px var(--rose-50); }
 .sl-editor__num:has(input:disabled) { opacity: .5; }
 
-/* iOS tự phóng to cả trang khi chạm vào ô nhập có chữ nhỏ hơn 16px và không tự
-   thu lại. Chỉ iOS (nhận qua -webkit-touch-callout) nâng lên 16px; Android và
-   desktop giữ đúng 15px của thiết kế. Đặt SAU hai luật 15px ở trên để thắng. */
+/* iOS zooms the whole page when focusing an input with text under 16px and
+   doesn't zoom back. Raise to 16px on iOS only (detected via
+   -webkit-touch-callout); Android and desktop keep the designed 15px. Must
+   come AFTER the two 15px rules above to win. */
 @supports (-webkit-touch-callout: none) {
   .sl-input, .sl-editor__num input { font-size: 16px; }
 }
 .sl-editor__nudge { display: flex; justify-content: center; gap: var(--sp-2); }
 .sl-editor__nudge .sl-iconbtn { border: 0.5px solid var(--line-card); }
 
-/* ---------- ảnh thu nhỏ thay chip icon trong dòng tin nhắn (MessageRow) ---------- */
+/* ---------- thumbnail replacing the icon chip in a message row (MessageRow) ---------- */
 .sl-thumb { position: relative; overflow: hidden; background: var(--chip-bg); }
 .sl-thumb > img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sl-thumb__badge {
@@ -936,7 +931,7 @@
 }
 .sl-thumb__badge svg { fill: currentColor; stroke: none; }
 
-/* ---------- popup nghe nhạc (ReceiverMusic MusicPlayer) ---------- */
+/* ---------- music player popup (ReceiverMusic MusicPlayer) ---------- */
 .sl-player__times {
   display: flex; justify-content: space-between;
   font-size: 12px; line-height: 1.4; color: var(--neutral-500);
@@ -952,7 +947,7 @@
 }
 .sl-player__main:disabled { opacity: .5; cursor: default; }
 
-/* ---------- thanh nổi của lượt gửi chạy nền (context/SendContext.jsx) ---------- */
+/* ---------- floating bar for a background send (context/SendContext.jsx) ---------- */
 .sl-sendpill {
   position: fixed; z-index: 25;
   bottom: calc(var(--safe-bottom) + 16px); left: 50%; transform: translateX(-50%);
@@ -965,7 +960,7 @@
   box-shadow: var(--shadow-modal);
   color: var(--caramel-900);
 }
-/* Trang có thanh Lưu nổi (Cài đặt hộp): đẩy thanh gửi lên trên, không che nút Lưu. */
+/* Pages with the floating Save bar (box settings): lift the send bar so it doesn't cover Save. */
 body:has(.sl-savebar) .sl-sendpill { bottom: calc(var(--safe-bottom) + 84px); }
 .sl-sendpill__row { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
 .sl-sendpill__row > svg { flex: 0 0 auto; }
@@ -983,7 +978,7 @@ body:has(.sl-savebar) .sl-sendpill { bottom: calc(var(--safe-bottom) + 84px); }
 .sl-sendpill__err { font-size: 12px; line-height: 1.4; color: var(--error-text); }
 
 /* ---------- toast (components/ui/Toast.jsx) ----------
-   fixed ở mép trên VIEWPORT, không phải đầu trang: nút lưu thường nằm cuối trang dài. */
+   Fixed to the top of the VIEWPORT, not the page: the save button is often at the bottom of a long page. */
 .sl-toast {
   position: fixed; z-index: 30;
   top: calc(var(--safe-top) + 12px); left: 50%; transform: translateX(-50%);
@@ -996,14 +991,15 @@ body:has(.sl-savebar) .sl-sendpill { bottom: calc(var(--safe-bottom) + 84px); }
   animation: sl-toast-in .2s ease-out;
 }
 .sl-toast svg { flex: 0 0 auto; margin-top: 2px; }
-/* success-bg/error-bg ở dark là rgba trong suốt: lót nền thẻ bên dưới để toast không trong veo. */
+/* success-bg/error-bg are translucent rgba in dark mode: layer the card background underneath so the toast isn't see-through. */
 .sl-toast--ok  { background: linear-gradient(var(--success-bg), var(--success-bg)), var(--neutral-0); color: var(--success-text); }
 .sl-toast--err { background: linear-gradient(var(--error-bg), var(--error-bg)), var(--neutral-0);     color: var(--error-text); }
 @keyframes sl-toast-in { from { opacity: 0; transform: translate(-50%, -8px); } }
 @media (prefers-reduced-motion: reduce) { .sl-toast { animation: none; } }
 
-/* ---------- thanh lưu nổi đáy (Cài đặt hộp) ----------
-   fixed thay vì sticky: ở desktop .sl-shell có overflow:hidden, sticky sẽ không dính. */
+/* ---------- floating bottom save bar (box settings) ----------
+   fixed to the viewport rather than sticky (chosen when .sl-shell still used
+   overflow:hidden, which breaks sticky). */
 .sl-savebar {
   position: fixed; z-index: 9;
   bottom: 0; left: 50%; transform: translateX(-50%);
@@ -1015,5 +1011,5 @@ body:has(.sl-savebar) .sl-sendpill { bottom: calc(var(--safe-bottom) + 84px); }
 }
 .sl-savebar__text { flex: 1 1 auto; font-size: 13px; line-height: 1.4; color: var(--neutral-500); }
 .sl-savebar .sl-btn { flex: 0 0 auto; min-width: 120px; }
-/* chừa chỗ cho thanh lưu để mục cuối trang không bị che */
+/* reserve room for the save bar so the last section isn't covered */
 .sl-savebar-spacer { flex: 0 0 auto; height: 72px; }

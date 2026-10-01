@@ -40,7 +40,7 @@ async function getCroppedImg(imageSrc, pixelCrop) {
   });
 }
 
-/** tip={null}: bỏ dải gợi ý (loại Ảnh); tin tĩnh vẫn giữ dải cũ. */
+/** tip={null}: hide the hint line (Image type); still messages keep it. */
 const ImageInput = ({ onImageSelect, onCancel, tip = 'Ảnh được nén JPEG rồi lưu thẳng vào bộ nhớ của hộp.' }) => {
   const [file, setFile] = useState(null);
   const previewUrl = useObjectUrl(file);
@@ -51,7 +51,7 @@ const ImageInput = ({ onImageSelect, onCancel, tip = 'Ảnh được nén JPEG r
 
   const handleFileChange = (e) => {
     const picked = e.target.files[0];
-    e.target.value = ''; // chọn lại đúng file cũ vẫn phải bắn onChange
+    e.target.value = ''; // picking the same file again must still fire onChange
     if (picked) setFile(picked);
   };
 
@@ -87,7 +87,7 @@ const ImageInput = ({ onImageSelect, onCancel, tip = 'Ảnh được nén JPEG r
           </>
         ) : (
           <>
-            {/* Khung cắt đúng bằng màn hộp: cái nhìn thấy ở đây là cái hộp hiện */}
+            {/* The crop frame equals the box screen: what you see here is what the box shows */}
             <div className="sl-preview" style={{ background: 'var(--caramel-900)' }}>
               <Cropper
                 image={previewUrl}

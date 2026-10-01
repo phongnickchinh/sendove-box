@@ -2,14 +2,14 @@ import { encodeVideoToBin, encodeImageToBin, extractAudioFromVideo } from './med
 import { uploadMessage } from './mediaUploader';
 import { MAX_BIN_BYTES } from './boxStatus';
 
-/** Lỗi đọc được cho người dùng; lỗi lạ thì rơi về câu mặc định của màn báo lỗi. */
+/** A user-readable error; anything else falls back to the error screen's default text. */
 export class SendError extends Error {}
 
 /**
- * Mã hoá + tải một tin lên — tách khỏi SenderUI để việc gửi chạy tiếp sau khi người dùng
- * rời màn gửi (context/SendContext.jsx giữ trạng thái).
+ * Encode + upload one message — kept out of SenderUI so a send keeps running
+ * after the user leaves the send screen (context/SendContext.jsx holds the state).
  *
- * input: { type, text, mediaData, range } — mediaData tuỳ loại:
+ * input: { type, text, mediaData, range } — mediaData depends on the type:
  *   video/image: File · voice: { wavBlob, duration } · static: { imageBlob, audioData }
  * cb: { onPhase('uploading'), onProgress(0-100), onSummary({ fileName, duration }) }
  */
@@ -20,7 +20,7 @@ export async function runSend(boxId, { type, text, mediaData, range }, { onPhase
     const file = mediaData;
     onSummary({ fileName: file.name, duration: 0 });
     const encodeRes = await encodeVideoToBin(file, onProgress, range);
-    // Chặn TRƯỚC khi tải lên: máy chủ từ chối file bin quá MAX_BIN_BYTES.
+    // Fail BEFORE uploading: the server rejects a bin over MAX_BIN_BYTES.
     if (encodeRes.binBlob.size > MAX_BIN_BYTES) {
       const mb = (b) => (b / 1e6).toFixed(1).replace('.', ',');
       const fitSecs = Math.max(1, Math.floor(encodeRes.duration * (MAX_BIN_BYTES / encodeRes.binBlob.size)));
@@ -30,7 +30,7 @@ export async function runSend(boxId, { type, text, mediaData, range }, { onPhase
       );
     }
     onSummary({ fileName: file.name, duration: encodeRes.duration });
-    onProgress(0); // Reset progress cho bước trích xuất âm thanh
+    onProgress(0); // restart progress for the audio extraction step
     const voiceBlob = await extractAudioFromVideo(file, onProgress, range);
 
     payload = {
@@ -63,8 +63,8 @@ export async function runSend(boxId, { type, text, mediaData, range }, { onPhase
 
     payload = { ...payload, voiceBlob: wavBlob, metadata: { duration } };
   } else if (type === 'static') {
-    // Tin nhắn tĩnh: tuỳ tổ hợp ảnh / text / nhạc nền — tái dùng type "image"
-    // có sẵn ở backend (không thêm enum mới). mediaData = { imageBlob, audioData }.
+    // Still message: any mix of image / text / background music — reuses the
+    // backend's existing "image" type (no new enum). mediaData = { imageBlob, audioData }.
     const { imageBlob, audioData } = mediaData || {};
     let extra = {};
 
@@ -84,8 +84,8 @@ export async function runSend(boxId, { type, text, mediaData, range }, { onPhase
 
     payload = {
       ...payload,
-      // Chỉ có chữ thì gửi đúng là tin chữ — type 'image' không kèm ảnh nào
-      // làm lịch sử và hộp tưởng có ảnh.
+      // Text only → send a real text message; type 'image' without an image
+      // would make the history and the box expect a picture.
       type: imageBlob || audioData?.wavBlob ? 'image' : 'text',
       ...extra,
     };

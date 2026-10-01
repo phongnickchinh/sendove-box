@@ -6,12 +6,12 @@ import { initialRange } from '../../utils/trim';
 import useObjectUrl from '../../utils/useObjectUrl';
 
 /**
- * Thân của "create-content-dialog for video": một thẻ r16 nền trắng viền
- * caramel/300, bên trong là chip loại nội dung hoặc khung xem trước 240x240.
- * Khung máy (appbar, tiêu đề, ô lời nhắn) do SenderUI dựng.
+ * Body of the video step: a white r16 card with a caramel/300 border holding
+ * either the content-type chip or the 240x240 preview. The surrounding screen
+ * (appbar, title, caption field) is built by SenderUI.
  *
- * Chọn đoạn: video dài bao nhiêu cũng nhận, người dùng kéo chọn đoạn tối đa
- * `maxSeconds` (15s hộp NAND / 60s hộp thẻ SD — utils/boxStatus.js).
+ * Range picking: videos of any length are accepted; the user drags to choose
+ * up to `maxSeconds` (15s NAND box / 60s SD box — utils/boxStatus.js).
  */
 const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -24,7 +24,7 @@ const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
-    e.target.value = ''; // chọn lại đúng file cũ vẫn phải bắn onChange
+    e.target.value = ''; // picking the same file again must still fire onChange
     if (file) {
       setSelectedFile(file);
       setDuration(0);
@@ -40,9 +40,9 @@ const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
       setRange(initialRange(d, maxSeconds));
     };
     if (el.duration === Infinity) {
-      // WebM do trình duyệt tự quay (MediaRecorder) không ghi duration vào
-      // header: Chrome báo Infinity cho tới khi tua tới cuối file. Tua thật xa
-      // để nó quét, đọc duration thật ở durationchange rồi quay về đầu.
+      // WebM recorded by the browser (MediaRecorder) has no duration in its
+      // header: Chrome reports Infinity until it has seeked to the end. Seek far
+      // ahead to make it scan, read the real duration on durationchange, then rewind.
       const onChange = () => {
         if (!Number.isFinite(el.duration)) return;
         el.removeEventListener('durationchange', onChange);
@@ -82,7 +82,7 @@ const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
           </>
         ) : (
           <>
-            {/* 240x240 = đúng kích thước màn hộp, xem trước 1:1 với thứ sẽ phát */}
+            {/* 240x240 = the box screen size; a 1:1 preview of what will play */}
             <div className="sl-preview">
               <video
                 ref={videoRef} src={previewUrl} autoPlay loop muted playsInline

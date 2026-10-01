@@ -1,9 +1,10 @@
 import React from 'react';
 
 /**
- * Minh hoạ nét mảnh cho trạng thái trống và kết quả gửi. Màu lấy từ token nên đổi theo
- * sáng/tối: thân = caramel-100, nét = caramel-800, điểm nhấn = rose-400.
- * (fill/stroke đặt qua style vì thuộc tính SVG không nhận var(--…).)
+ * Thin-line illustrations for empty states and send results. Colors come from
+ * tokens, so they follow light/dark: body = caramel-100, lines = caramel-800,
+ * accent = rose-400. (fill/stroke are set through style because SVG attributes
+ * don't accept var(--…).)
  */
 const INK = { stroke: 'var(--caramel-800)', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' };
 const BODY = { ...INK, fill: 'var(--caramel-100)' };
@@ -17,7 +18,7 @@ const heart = (x, y, s, style = ACCENT) => (
 );
 
 const SCENES = {
-  // Hộp quà đang chờ, tim bay lên: chưa có tin nhắn.
+  // A waiting gift box with hearts floating up: no messages yet.
   inbox: (
     <>
       <ellipse cx="80" cy="108" rx="44" ry="5" style={SOFT} />
@@ -30,7 +31,7 @@ const SCENES = {
       <path style={{ ...LINE, strokeDasharray: '2 5' }} d="M100 40c4-6 2-10-1-12" />
     </>
   ),
-  // Chuông ngủ: chưa đặt báo thức.
+  // A sleeping bell: no alarms set.
   alarm: (
     <>
       <ellipse cx="80" cy="108" rx="40" ry="5" style={SOFT} />
@@ -41,7 +42,7 @@ const SCENES = {
       <path style={{ ...LINE, strokeWidth: 1.75 }} d="M112 22h8l-8 9h8M124 12h6l-6 7h6" />
     </>
   ),
-  // Nốt nhạc và sóng âm: thư viện nhạc trống.
+  // A note and sound waves: empty music library.
   music: (
     <>
       <ellipse cx="80" cy="108" rx="40" ry="5" style={SOFT} />
@@ -53,7 +54,7 @@ const SCENES = {
       <path style={LINE} d="M36 50c-5 5-5 15 0 20" />
     </>
   ),
-  // Hộp mở, tim bay vào: gửi thành công.
+  // An open box with a heart flying in: sent.
   sent: (
     <>
       <ellipse cx="80" cy="108" rx="44" ry="5" style={SOFT} />
@@ -65,7 +66,7 @@ const SCENES = {
       <path style={LINE} d="M40 30l4 4M120 30l-4 4M34 44h6M126 44h-6" />
     </>
   ),
-  // Phong bì kèm dấu chấm than: chưa gửi được.
+  // An envelope with an exclamation mark: send failed.
   failed: (
     <>
       <ellipse cx="80" cy="108" rx="44" ry="5" style={SOFT} />

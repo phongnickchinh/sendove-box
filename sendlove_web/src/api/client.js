@@ -11,7 +11,7 @@ const apiClient = axios.create({
   },
 });
 
-// Interceptor: Gắn token của Firebase Auth vào mỗi request
+// Attach the Firebase Auth ID token to every request.
 apiClient.interceptors.request.use(async (config) => {
   const user = auth.currentUser;
   if (user) {

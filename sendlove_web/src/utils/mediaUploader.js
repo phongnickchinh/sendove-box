@@ -1,6 +1,6 @@
 import { initiateMessage, confirmMessage } from '../api/message';
 
-/** Khớp maxSize trong typeMap của message.service.ts initiateMessage. */
+/** Must match maxSize in typeMap of message.service.ts initiateMessage. */
 const ORIGINAL_MAX_BYTES = {
   original_video: 50 * 1024 * 1024,
   original_image: 10 * 1024 * 1024,
@@ -69,9 +69,10 @@ export const uploadMessage = async (boxId, data, onProgress) => {
     const originalType = data.type === 'video' ? 'original_video' :
                          data.type === 'image' ? 'original_image' :
                          data.type === 'gif' ? 'original_gif' : null;
-    // Bản gốc chỉ để xem lại trên web (popup chi tiết), hộp không tải nó. Vượt
-    // trần của signed policy (message.service.ts initiateMessage) thì GCS từ
-    // chối và CẢ lượt gửi hỏng — nên bỏ bản gốc, tin vẫn tới hộp bình thường.
+    // The original is only for viewing on the web (detail popup); the box never
+    // downloads it. Over the signed-policy limit (message.service.ts
+    // initiateMessage) GCS rejects it and the WHOLE send fails — so drop the
+    // original and let the message reach the box normally.
     const tooBig = originalType && data.originalBlob.size > ORIGINAL_MAX_BYTES[originalType];
     if (tooBig) console.warn(`[upload] bỏ ${originalType} (${data.originalBlob.size} B) — vượt trần máy chủ`);
     if (originalType && !tooBig) {

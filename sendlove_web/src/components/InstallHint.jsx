@@ -6,9 +6,10 @@ import {
 } from '../utils/installHint';
 
 /**
- * Cảnh báo khi trang mở trong trình duyệt nhúng của Zalo/Facebook/Messenger:
- * Google từ chối đăng nhập ở đó, người dùng chỉ thấy lỗi khó hiểu. Link hộp quà
- * thường được gửi qua chính các app này nên đây là đường vào phổ biến.
+ * Warning shown when the page opens in the in-app browser of Zalo / Facebook /
+ * Messenger: Google refuses sign-in there and the user only sees a cryptic
+ * error. Box links are usually shared through these apps, so this is a common
+ * entry point.
  */
 export function InAppBrowserWarning() {
   const [mode] = useState(currentInstallMode);
@@ -25,12 +26,13 @@ export function InAppBrowserWarning() {
 }
 
 /**
- * Gợi ý đưa app lên màn hình chính. iPhone không có lời mời cài tự động nên
- * phải chỉ đường qua nút Chia sẻ; Android/desktop thì bấm là mở hộp thoại cài
- * của trình duyệt. Đã cài rồi, hoặc đã bấm ẩn, thì không hiện.
+ * "Add to home screen" hint. iPhone has no automatic install prompt, so it
+ * points at the Share button; on Android/desktop a tap opens the browser's
+ * install dialog. Hidden once installed or dismissed.
  *
- * card: dựng thành thẻ riêng (Dashboard). Mặc định là dòng cuối của thẻ đăng nhập.
- * Phải có mặt ở Dashboard vì người đã đăng nhập không bao giờ thấy màn Login.
+ * card: render as a standalone card (Dashboard). The default is the last line
+ * of the login card. It must also appear on the Dashboard because signed-in
+ * users never see the Login screen.
  */
 export default function InstallHint({ card = false }) {
   const [mode] = useState(currentInstallMode);

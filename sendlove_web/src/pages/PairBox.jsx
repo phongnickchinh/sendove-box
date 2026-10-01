@@ -6,12 +6,12 @@ import Icon from '../components/ui/Icon';
 import { Screen, Body, Button, Tips } from '../components/ui/Screen';
 
 /**
- * Frame "new-box" trong Figma — ở đó đây là một modal đè lên Dashboard.
- * Giữ route /pair độc lập (không refactor thành modal-trên-Dashboard — đổi
- * kiến trúc điều hướng để có lớp nền mờ hiện Dashboard phía sau tốn công
- * không tương xứng), chỉ dựng đúng phong cách CARD của dialog đó.
+ * The Figma "new-box" frame — a modal over the Dashboard in the design. Here it
+ * stays a standalone /pair route (changing the navigation architecture just to
+ * show the Dashboard dimmed behind isn't worth it) and only reproduces that
+ * dialog's CARD styling.
  */
-/** Khớp pairBoxSchema của backend: S/R + 6–9 ký tự A-Z0-9. */
+/** Matches the backend's pairBoxSchema: S/R + 6–9 chars of A-Z0-9. */
 const PAIRING_CODE = /^[SR][A-Z0-9]{6,9}$/;
 
 export default function PairBox() {
@@ -31,8 +31,8 @@ export default function PairBox() {
   const handlePair = async (e) => {
     e.preventDefault();
     if (!code) { setError('Vui lòng nhập mã kết nối'); return; }
-    // Kiểm ngay tại đây, đúng biểu thức backend (validation.middleware.ts
-    // pairBoxSchema) — trước đây mã sai vẫn gửi đi rồi mới nhận lỗi 400.
+    // Validate here with the backend's exact pattern (validation.middleware.ts
+    // pairBoxSchema) instead of sending a bad code and getting a 400.
     if (!PAIRING_CODE.test(code)) {
       setError(/^[SR]/.test(code)
         ? 'Mã phải gồm 7–10 ký tự, chỉ chữ in hoa và số.'
@@ -49,7 +49,7 @@ export default function PairBox() {
         boxName: boxName.trim(),
       });
       if (res.data.success) {
-        // Tải lại profile để danh sách box ở Dashboard có hộp vừa ghép.
+        // Reload the profile so the Dashboard lists the newly paired box.
         await refreshProfile();
         navigate('/dashboard');
       }
@@ -68,8 +68,8 @@ export default function PairBox() {
     <Screen>
       <Body center>
         <form onSubmit={handlePair} className="sl-pair-card" style={{ position: 'relative', textAlign: 'left' }}>
-          {/* Màu #9E6244 xác nhận từ Figma (carbon:close-outline) — cùng màu chữ
-              nút đăng nhập ở Login, không có trong thang token nên dùng literal. */}
+          {/* #9E6244 per Figma (carbon:close-outline) — same as the Login button
+              text; it isn't in the token scale, hence the literal. */}
           <button
             type="button" className="sl-iconbtn" onClick={() => navigate('/dashboard')}
             aria-label="Đóng" style={{ position: 'absolute', top: -4, right: -4, color: '#9E6244' }}
@@ -89,7 +89,7 @@ export default function PairBox() {
 
           {error && <div className="sl-reason">{error}</div>}
 
-          {/* fontWeight 600 xác nhận Figma (14/SemiBold) — .sl-label mặc định 500. */}
+          {/* fontWeight 600 per Figma (14/SemiBold) — .sl-label defaults to 500. */}
           <label className="sl-field">
             <span className="sl-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', fontWeight: 600 }}>
               <Icon name="key" size={12} style={{ color: 'var(--neutral-700)' }} />
@@ -120,7 +120,7 @@ export default function PairBox() {
             />
           </label>
 
-          {/* Nút chính tràn ngang như mọi màn khác; thoát bằng nút X ở góc (bỏ "Huỷ" trùng lặp). */}
+          {/* Full-width primary button like every other screen; exit with the corner X (no duplicate "Cancel"). */}
           <Button kind="pri" type="submit" disabled={isLoading} style={{ marginTop: 'var(--sp-2)' }}>
             {isLoading ? 'Đang ghép đôi…' : 'Ghép đôi ngay'}
           </Button>

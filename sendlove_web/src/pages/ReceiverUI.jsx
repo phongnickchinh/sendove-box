@@ -12,14 +12,14 @@ import { timeAgo } from '../utils/messageFormat';
 import { fwVersion, lastSeenMs, syncTone } from '../utils/boxStatus';
 
 /**
- * Màn 09 "box status + history-part" trong file Figma.
+ * Box status + received messages (receiver home).
  *
- * Hai trường có trong BoxStatus nhưng CỐ Ý không hiện:
- *   online   — hộp ngủ và chỉ thức 5 phút một lần, nên online = false gần như
- *              suốt thời gian hộp vẫn khoẻ. Hiện nó ra là báo hỏng nhầm.
- *              Trạng thái ở đây suy từ last_seen.
- *   charging — PowerManager::isCharging() hardcode return false, không có mạch
- *              báo sạc. Chỉ hiện phần trăm pin.
+ * Two BoxStatus fields are INTENTIONALLY not shown:
+ *   online   — the box sleeps and wakes only every 5 minutes, so online = false
+ *              nearly all the time while the box is fine; showing it would be
+ *              a false alarm. Status here is derived from last_seen.
+ *   charging — PowerManager::isCharging() is hardcoded to return false (there
+ *              is no charge-detect circuit). Only the battery % is shown.
  */
 
 
@@ -45,8 +45,8 @@ export default function ReceiverUI() {
     let alive = true;
     const load = async () => {
       try {
-        // Hai lời gọi độc lập nhau: tin nhắn hỏng thì vẫn xem được trạng thái
-        // hộp và ngược lại, nên allSettled chứ không phải all.
+        // The two calls are independent: if messages fail the box status is
+        // still shown and vice versa — hence allSettled, not all.
         const [msgRes, boxRes] = await Promise.allSettled([
           getMessages(boxId),
           getBoxDetails(boxId),
@@ -57,7 +57,7 @@ export default function ReceiverUI() {
         if (msgRes.status === 'rejected' && boxRes.status === 'rejected') {
           setError('Không đọc được dữ liệu hộp. Kiểm tra kết nối rồi thử lại.');
         } else if (msgRes.status === 'rejected') {
-          // Không báo thì danh sách rỗng trông y như "chưa có tin nào".
+          // Without an error, an empty list looks just like "no messages yet".
           setError('Không tải được danh sách tin nhắn.');
         }
       } finally {
@@ -78,7 +78,7 @@ export default function ReceiverUI() {
       <Body>
         <Header title="Hộp của tôi" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
-        {/* --- thẻ đồng bộ --- */}
+        {/* --- sync card --- */}
         <div className="sl-card" style={{ gap: 'var(--sp-3)', padding: 'var(--sp-4)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
             <CircleIcon size={44} bg={tone.bg} color={tone.fg} icon={tone.icon} iconSize={20} />
@@ -111,13 +111,13 @@ export default function ReceiverUI() {
 
         {error && <div className="sl-reason">{error}</div>}
 
-        {/* --- hai lối đi --- */}
+        {/* --- navigation tiles --- */}
         <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
           <NavTile icon="bell" label="Báo thức" onClick={() => navigate(`/box/${boxId}/receiver/alarm`)} />
           <NavTile icon="gear" label="Cài đặt" onClick={() => navigate(`/box/${boxId}/receiver/config`)} />
         </div>
 
-        {/* --- tin đã nhận --- */}
+        {/* --- received messages --- */}
         <span className="sl-label">Tin nhắn</span>
 
         {loading ? (
@@ -142,7 +142,7 @@ export default function ReceiverUI() {
   );
 }
 
-/** Ô điều hướng cao 64, viền mảnh — tile() ở màn 09. */
+/** Navigation tile, 64 tall with a hairline border. */
 function NavTile({ icon, label, onClick }) {
   return (
     <button type="button" className="sl-listcard" onClick={onClick}

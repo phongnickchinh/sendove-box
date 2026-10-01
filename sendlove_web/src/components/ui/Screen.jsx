@@ -4,15 +4,15 @@ import '../../styles/tokens.css';
 import '../../styles/sendlove.css';
 
 /**
- * Các khối dựng màn hình, dịch 1-1 từ helper của figma-scripts/_prelude.js.
+ * Screen building blocks, mapped 1:1 from the Figma script helpers
  * chrome()/body()/acts()/hdr()/tips()/btn()/chip()/circle()/modal().
  *
- * Khác biệt duy nhất so với Figma: thiết kế đặt mọi thứ theo toạ độ tuyệt đối
- * trong khung 430x932. Ở đây khung đó là một cột flex cao 100dvh, nên hàng nút
- * dính đáy bằng margin-top:auto chứ không phải y = 932 - 34 - h.
+ * The only difference from Figma: the design positions everything absolutely
+ * in a 430x932 frame. Here that frame is a 100dvh flex column, so the button
+ * row sticks to the bottom with margin-top:auto instead of y = 932 - 34 - h.
  */
 
-/** Khung máy: nền trang + cột 430, canh giữa khi màn hình rộng */
+/** Device frame: page background + the 430 column, centered on wide screens */
 export function Screen({ children }) {
   return (
     <div className="sl-page">
@@ -22,10 +22,10 @@ export function Screen({ children }) {
 }
 
 /**
- * chrome(frame, stepLabel) — appbar. step = null thì bỏ pill bước.
- * title/subtitle: biến thể Dashboard — "Hi, {name}!" + phụ đề nằm NGAY TRONG
- * appbar (đúng frame maindashboard-share-page), không phải trong Body.
- * onBack và title loại trừ nhau ở hai đầu trái của thanh — chỉ dùng một.
+ * chrome(frame, stepLabel) — the appbar. step = null hides the step pill.
+ * title/subtitle: the Dashboard variant — the greeting + subtitle sit INSIDE
+ * the appbar (per Figma), not in Body.
+ * onBack and title are mutually exclusive on the left side — use one.
  */
 export function AppBar({ onBack, title, subtitle, step, right }) {
   return (
@@ -48,19 +48,19 @@ export function AppBar({ onBack, title, subtitle, step, right }) {
   );
 }
 
-/** body(frame, gap) — thân màn hình, pad [8,20,10,20] */
+/** body(frame, gap) — screen body, padding [8,20,10,20] */
 export function Body({ center = false, children }) {
   return (
     <div className={`sl-body-col${center ? ' sl-body-col--center' : ''}`}>{children}</div>
   );
 }
 
-/** acts(frame, buttons) — hàng nút ghim đáy */
+/** acts(frame, buttons) — button row pinned to the bottom */
 export function Actions({ children }) {
   return <div className="sl-acts">{children}</div>;
 }
 
-/** hdr(title, to) — icon 12px, khớp solar:mailbox-linear trong Figma (không phải 16px). */
+/** hdr(title, to) — 12px icon, matching solar:mailbox-linear in Figma (not 16px). */
 export function Header({ title, to }) {
   return (
     <div className="sl-hdr">
@@ -75,7 +75,7 @@ export function Header({ title, to }) {
   );
 }
 
-/** tips(text) — icon 12px, khớp material-symbols:privacy-tip-outline-rounded. */
+/** tips(text) — 12px icon, matching material-symbols:privacy-tip-outline-rounded. */
 export function Tips({ children }) {
   return (
     <div className="sl-tips">
@@ -98,7 +98,7 @@ export function Button({ kind = 'gho', block = true, children, ...rest }) {
   );
 }
 
-/** chip(iconKey) — ô 44x44 nền rose/200 */
+/** chip(iconKey) — 44x44 tile on rose/200 */
 export function Chip({ icon }) {
   return (
     <span className="sl-chip">
@@ -120,9 +120,9 @@ export function CircleIcon({ size, bg, color, icon, iconSize, sw }) {
 }
 
 /**
- * scrim(frame) + modal(frame) — lớp phủ và popup, chỗ duy nhất có đổ bóng.
- * onClose (tuỳ chọn): bấm ra ngoài hoặc Esc thì đóng. Bỏ trống khi popup đang
- * chạy việc không được ngắt (đang huỷ ghép, đang mã hoá).
+ * scrim(frame) + modal(frame) — overlay and popup, the only place with a shadow.
+ * onClose (optional): clicking outside or Esc closes it. Omit it while the
+ * popup runs something that must not be interrupted (unpairing, encoding).
  */
 export function Modal({ children, onClose, className = '' }) {
   useEffect(() => {

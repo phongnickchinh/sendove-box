@@ -1,10 +1,11 @@
 import React from 'react';
 
 /**
- * Xem trước tin chữ như hộp vẽ (DisplayDriver::showWrappedText + MediaPlayer): nền đen,
- * chữ trắng FreeSansBold 9pt, căn giữa từ mép trên, lề 8px, dòng cao 22px, tối đa 10 dòng,
- * quá thì "...". Hộp bỏ dấu tiếng Việt trước khi vẽ (asciiFoldVietnamese) — xem trước bỏ
- * dấu y như vậy để người gửi thấy đúng thứ hộp hiện.
+ * Previews a text message the way the box draws it (DisplayDriver::showWrappedText
+ * + MediaPlayer): black background, white FreeSansBold 9pt, centered from the
+ * top, 8px margin, 22px line height, at most 10 lines, then "...". The box
+ * strips Vietnamese diacritics before drawing (asciiFoldVietnamese) — the
+ * preview strips them the same way so the sender sees what the box will show.
  */
 const fold = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
 

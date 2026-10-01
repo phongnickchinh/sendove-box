@@ -1,24 +1,24 @@
 /**
- * Trạng thái "cài app lên màn hình chính" (PWA) của trình duyệt hiện tại.
+ * "Add to home screen" (PWA) state of the current browser.
  */
 
 const DISMISS_KEY = 'sendlove-install-hint';
 
-/** Trình duyệt nhúng trong app khác: Google chặn đăng nhập OAuth ở các WebView này. */
+/** Browsers embedded in other apps: Google blocks OAuth sign-in in these WebViews. */
 const IN_APP_BROWSER = /FBAN|FBAV|FB_IAB|Instagram|Zalo|Line\//i;
 
 /**
- * Hàm thuần — nhận userAgent thay vì tự đọc navigator để thử được không cần thiết bị.
+ * Pure — takes the userAgent instead of reading navigator so it can be tested without a device.
  * @returns {'installed' | 'in-app' | 'ios' | 'other'}
- *   installed: đang chạy từ icon màn hình chính, không cần gợi ý gì.
- *   in-app:    trình duyệt trong Zalo/Facebook/… — phải mở bằng trình duyệt thật.
- *   ios:       iPhone/iPad — không có lời mời cài tự động, phải hướng dẫn bấm Chia sẻ.
- *   other:     Android/desktop — chờ sự kiện beforeinstallprompt của trình duyệt.
+ *   installed: running from the home-screen icon; no hint needed.
+ *   in-app:    browser inside Zalo/Facebook/… — must be reopened in a real browser.
+ *   ios:       iPhone/iPad — no automatic install prompt; point the user at Share.
+ *   other:     Android/desktop — wait for the browser's beforeinstallprompt event.
  */
 export function detectInstallMode({ userAgent, standalone, maxTouchPoints = 0 }) {
   if (standalone) return 'installed';
   if (IN_APP_BROWSER.test(userAgent)) return 'in-app';
-  // iPadOS tự xưng là Macintosh; phân biệt với máy Mac thật bằng màn cảm ứng.
+  // iPadOS reports itself as Macintosh; a touch screen tells it apart from a real Mac.
   const isIOS = /iPhone|iPad|iPod/.test(userAgent)
     || (/Macintosh/.test(userAgent) && maxTouchPoints > 1);
   return isIOS ? 'ios' : 'other';
@@ -39,13 +39,13 @@ export function isHintDismissed() {
 }
 
 export function dismissHint() {
-  try { localStorage.setItem(DISMISS_KEY, 'off'); } catch { /* trình duyệt chặn storage, bỏ qua */ }
+  try { localStorage.setItem(DISMISS_KEY, 'off'); } catch { /* storage blocked by the browser; ignore */ }
 }
 
 /*
- * beforeinstallprompt (Chrome/Edge trên Android và desktop) bắn MỘT lần, sớm,
- * có thể trước khi màn Login kịp dựng — nên phải nghe ngay khi module được nạp
- * và giữ sự kiện lại cho component lấy sau.
+ * beforeinstallprompt (Chrome/Edge on Android and desktop) fires ONCE, early,
+ * possibly before the Login screen mounts — so listen at module load and keep
+ * the event for the component to pick up later.
  */
 let installPrompt = null;
 const listeners = new Set();
@@ -56,7 +56,7 @@ function setInstallPrompt(event) {
 }
 
 window.addEventListener('beforeinstallprompt', (event) => {
-  event.preventDefault(); // tự hiện nút của mình thay cho thanh mời mặc định
+  event.preventDefault(); // show our own button instead of the default install banner
   setInstallPrompt(event);
 });
 window.addEventListener('appinstalled', () => setInstallPrompt(null));
@@ -70,7 +70,7 @@ export function getInstallPrompt() {
   return installPrompt;
 }
 
-/** Mở hộp thoại cài đặt của trình duyệt. Sự kiện chỉ dùng được một lần. */
+/** Open the browser's install dialog. The event can be used only once. */
 export async function promptInstall() {
   const event = installPrompt;
   if (!event) return;

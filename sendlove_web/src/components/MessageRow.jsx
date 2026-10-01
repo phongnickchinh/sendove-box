@@ -3,10 +3,10 @@ import Icon from './ui/Icon';
 import { iconOf, titleOf } from '../utils/messageFormat';
 
 /**
- * Một dòng tin nhắn — dùng chung cho lịch sử người gửi và danh sách người nhận.
+ * One message row — shared by the sender history and the receiver list.
  *
- * msg.thumbnail: signed URL (15 phút) backend gắn sẵn trong GET /messages. Không có
- * (tin chữ/thoại, backend chưa deploy) hoặc ảnh hỏng (URL hết hạn) thì về icon như cũ.
+ * msg.thumbnail: a signed URL (15 minutes) the backend attaches in GET /messages.
+ * When absent (text/voice messages) or broken (expired URL), fall back to the icon.
  */
 export default function MessageRow({ msg, meta, noText = null, onOpen }) {
   const [broken, setBroken] = useState(false);

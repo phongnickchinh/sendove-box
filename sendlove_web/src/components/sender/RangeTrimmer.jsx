@@ -2,12 +2,12 @@ import React, { useEffect, useRef } from 'react';
 import { clampRange, fmtTime } from '../../utils/trim';
 
 /**
- * Thanh chọn đoạn hai tay nắm cho video / âm thanh.
+ * Two-handle range picker for video / audio.
  *
- * Hai <input type="range"> chồng lên nhau (không cần thư viện, dùng được bằng
- * bàn phím: Tab tới tay nắm rồi mũi tên, bước 0,1s). mediaRef (tuỳ chọn) là
- * thẻ <video>/<audio> xem trước: kéo tay nắm thì tua tới đó, và khi phát thì
- * chỉ lặp trong đoạn đã chọn — nghe/xem đúng thứ sẽ được gửi.
+ * Two stacked <input type="range"> (no library; keyboard-accessible: Tab to a
+ * handle, then arrow keys, 0.1s steps). mediaRef (optional) is the preview
+ * <video>/<audio>: dragging a handle seeks to it, and playback loops inside the
+ * chosen range — you hear/see exactly what will be sent.
  */
 export default function RangeTrimmer({ duration, maxSpan, value, onChange, mediaRef }) {
   const lastHandle = useRef('start');
@@ -18,7 +18,7 @@ export default function RangeTrimmer({ duration, maxSpan, value, onChange, media
     onChange(clampRange(handle, Number(e.target.value), value, opts));
   };
 
-  // Tua tới mép vừa kéo: đầu đoạn khi kéo đầu, 1s trước cuối khi kéo cuối.
+  // Seek to the edge just dragged: the start, or 1s before the end.
   useEffect(() => {
     const el = mediaRef?.current;
     if (!el) return;
@@ -26,7 +26,7 @@ export default function RangeTrimmer({ duration, maxSpan, value, onChange, media
     if (Number.isFinite(t)) el.currentTime = t;
   }, [value.start, value.end, mediaRef]);
 
-  // Giữ phần phát xem trước nằm trong đoạn.
+  // Keep preview playback inside the range.
   useEffect(() => {
     const el = mediaRef?.current;
     if (!el) return undefined;

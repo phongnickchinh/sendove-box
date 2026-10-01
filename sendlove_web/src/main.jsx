@@ -6,7 +6,7 @@ import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
-// Chỉ bản build: lúc dev service worker chặn giữa trình duyệt và Vite, dễ gây nhầm.
+// Production builds only: in dev a service worker sits between the browser and Vite and causes confusion.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((error) => {

@@ -11,11 +11,11 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null); // Data from backend (e.g. boxes_list)
   const [loading, setLoading] = useState(true);
-  // Profile không tải được (mất mạng, backend tắt). Không báo thì Dashboard
-  // hiện "chưa có hộp nào" — người dùng tưởng mất hết hộp đã ghép.
+  // The profile failed to load (offline, backend down). Without this flag the
+  // Dashboard shows "no boxes yet" and the user thinks their paired boxes are gone.
   const [profileError, setProfileError] = useState(false);
 
-  // Lấy dữ liệu profile từ backend sau khi có auth token
+  // Fetch the backend profile once there is an auth token.
   const fetchProfile = async () => {
     try {
       const res = await apiClient.get('/users/me');
@@ -26,9 +26,8 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error("Failed to fetch user profile:", error);
       setProfileError(true);
-      // Nếu user chưa tồn tại trên backend (vừa đăng ký xong), backend middleware 'requireAuth'
-      // tự động gọi userRepository.createOrUpdate để tạo user mới nên thường sẽ không lỗi 404,
-      // nhưng cứ an toàn catch lỗi ở đây.
+      // A brand-new user normally doesn't 404: the backend's requireAuth
+      // middleware creates the user record on first request.
     }
   };
 
@@ -51,7 +50,7 @@ export const AuthProvider = ({ children }) => {
     profile,
     profileError,
     loading,
-    refreshProfile: fetchProfile // Export để component khác gọi lại khi thêm box mới
+    refreshProfile: fetchProfile // lets other components reload after pairing a new box
   };
 
   return (

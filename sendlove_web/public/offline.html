@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#FDF8F3" />
     <title>Sendlove Box — Mất kết nối</title>
-    <!-- Trang này do sw.js trả về khi mở app lúc mất mạng. Nó đứng một mình, không
-         tải được tokens.css, nên màu chép tay từ tokens.css (caramel-50/900,
-         neutral-500, rose-400) và dùng phông hệ thống. -->
+    <!-- Served by sw.js when the app is opened offline. It stands alone and can't
+         load tokens.css, so its colors are copied by hand from tokens.css
+         (caramel-50/900, neutral-500, rose-400) and it uses system fonts. -->
     <style>
       body {
         margin: 0; min-height: 100dvh;
@@ -28,13 +28,13 @@
       }
     </style>
     <script>
-      // Theo đúng lựa chọn sáng/tối của app (ThemeContext lưu ở khoá này), không theo hệ điều hành.
+      // Follow the app's own light/dark choice (ThemeContext stores it under this key), not the OS.
       try {
         if (localStorage.getItem('sendlove-theme') === 'dark') {
           document.documentElement.dataset.theme = 'dark';
           document.querySelector('meta[name="theme-color"]').content = '#1C1216';
         }
-      } catch { /* trình duyệt chặn storage: giữ bản sáng */ }
+      } catch { /* storage blocked by the browser: stay light */ }
     </script>
   </head>
   <body>

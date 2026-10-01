@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, FacebookAuthProvider } from "firebase/auth";
 
-// Cấu hình Firebase từ biến môi trường Vite
+// Firebase config from Vite env variables.
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -12,21 +12,19 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// Khởi tạo Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Khởi tạo các dịch vụ
 export const auth = getAuth(app);
-// Web không đọc RTDB hay Storage trực tiếp — mọi thứ đi qua backend (api/*),
-// media dùng signed URL. Khởi tạo getDatabase/getStorage chỉ để thừa từng làm
-// bundle nặng thêm ~123 kB (645 → 522 kB), nên đã bỏ.
+// The web never reads RTDB or Storage directly — everything goes through the
+// backend (api/*) and media uses signed URLs. Don't add getDatabase/getStorage:
+// unused, they cost ~123 kB of bundle.
 
-// Provider cho Google Sign-in
+// Provider for Google sign-in
 export const googleProvider = new GoogleAuthProvider();
 
-// Provider cho Facebook Sign-in. Phải tự bật "Facebook" trong
-// Firebase Console > Authentication > Sign-in method (cần App ID/Secret từ
-// Meta for Developers) — không cấu hình được từ code.
+// Facebook sign-in provider. "Facebook" must be enabled by hand in Firebase
+// Console > Authentication > Sign-in method (needs an App ID/Secret from Meta
+// for Developers) — it can't be configured from code.
 export const facebookProvider = new FacebookAuthProvider();
 
 export default app;

@@ -1,14 +1,14 @@
 import apiClient from './client';
 
 /**
- * Báo thức của hộp — /boxes/:boxId/alarms.
- * Chỉ role receiver gọi được (alarm.routes.ts:13 requireRole('receiver')).
+ * Box alarms — /boxes/:boxId/alarms.
+ * Receiver role only (alarm.routes.ts requireRole('receiver')).
  *
- * Ràng buộc từ validation.middleware.ts:151-162 — vi phạm là 400, không phải
- * lỗi mạng, nên phải chặn ngay ở form:
- *   time       "HH:mm" đúng 5 ký tự, có số 0 đứng đầu ("07:30", KHÔNG phải "7:30")
- *   is_enable  bắt buộc khi tạo
- *   repeatable bắt buộc khi tạo — false = kêu một lần rồi tự tắt
+ * Constraints from validation.middleware.ts — a violation is a 400, not a
+ * network error, so the form must enforce them:
+ *   time       "HH:mm", exactly 5 chars with a leading zero ("07:30", NOT "7:30")
+ *   is_enable  required on create
+ *   repeatable required on create — false = ring once, then turn itself off
  */
 
 export const getAlarms = async (boxId) => {
@@ -17,8 +17,8 @@ export const getAlarms = async (boxId) => {
 };
 
 /**
- * music_id: "" = tiếng bíp, còn lại phải là bài trong thư viện nhạc của hộp (api/music.js).
- * volume 0–100 (mặc định 80, web chặn < 20), ramp = tăng dần trong 20 giây.
+ * music_id: "" = beep; otherwise a track from the box's music library (api/music.js).
+ * volume 0–100 (default 80; the web blocks < 20), ramp = fade in over 20 seconds.
  */
 export const createAlarm = async (boxId, { time, is_enable, repeatable, music_id, volume, ramp }) => {
   const response = await apiClient.post(`/boxes/${boxId}/alarms`, {
@@ -27,7 +27,7 @@ export const createAlarm = async (boxId, { time, is_enable, repeatable, music_id
   return response.data; // 201 { success: true, data: Alarm }
 };
 
-/** PATCH: gửi được từng field một, dùng cho nút bật/tắt nhanh trong danh sách. */
+/** PATCH: accepts single fields; used by the quick on/off toggle in the list. */
 export const updateAlarm = async (boxId, alarmId, patch) => {
   const response = await apiClient.patch(`/boxes/${boxId}/alarms/${alarmId}`, patch);
   return response.data;

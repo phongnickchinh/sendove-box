@@ -4,11 +4,11 @@ import { Screen, AppBar, Body, Actions, Button, Chip, CircleIcon, Modal } from '
 import Illustration from '../ui/Illustration';
 
 /**
- * Ba màn của bước 3 trong thiết kế:
- *   03-convert-popup   -> phase 'encoding' | 'uploading'  (popup đè lên nền bước 2)
+ * The three step-3 screens in the design:
+ *   03-convert-popup   -> phase 'encoding' | 'uploading'  (popup over the step-2 screen)
  *   04-send-successful -> phase 'done'
  *   05-send-fail       -> phase 'error'
- * Popup là chỗ duy nhất trong luồng được phép có đổ bóng.
+ * The popup is the only place in the flow allowed to have a shadow.
  */
 
 const TYPE_ICON = { video: 'video', image: 'image', voice: 'mic', text: 'text', static: 'image' };
@@ -19,7 +19,7 @@ function summaryLine(type, duration) {
   return duration ? `${label} · ${duration}s` : label;
 }
 
-/** Một dòng trong danh sách 3 bước của popup */
+/** One row in the popup's 3-step list */
 function StepRow({ state, label }) {
   let dot;
   if (state === 'done') {
@@ -55,7 +55,7 @@ const EncodingProgress = ({
   onLeave,
   errorText,
 }) => {
-  // ---- 04 / 05: màn kết quả, không có appbar theo thiết kế ----
+  // ---- 04 / 05: result screens, no appbar by design ----
   if (phase === 'done' || phase === 'error') {
     const ok = phase === 'done';
     return (
@@ -105,7 +105,7 @@ const EncodingProgress = ({
     );
   }
 
-  // ---- 03: popup đè lên nền bước 2 ----
+  // ---- 03: popup over the step-2 screen ----
   const uploading = phase === 'uploading';
   return (
     <Screen>
@@ -149,8 +149,8 @@ const EncodingProgress = ({
 
         <p className="sl-caption">Có thể rời màn này, việc gửi vẫn chạy.</p>
 
-        {/* Đúng như dòng chú thích ngay trên: nút này chỉ rời màn hình,
-            không huỷ được lượt tải đang chạy. */}
+        {/* As the caption above says: this button only leaves the screen;
+            it can't cancel the upload in progress. */}
         <Button kind="gho" onClick={onLeave}>Để sau</Button>
       </Modal>
     </Screen>

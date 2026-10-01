@@ -9,7 +9,7 @@ import SenderDashboard from './pages/SenderDashboard';
 import ReceiverUI from './pages/ReceiverUI';
 import ReceiverAlarms from './pages/ReceiverAlarms';
 import ReceiverConfig from './pages/ReceiverConfig';
-// Ba trang theme chỉ người nhận mở, và hiếm — tách chunk riêng (lazy).
+// Receiver-only, rarely opened pages — split into their own lazy chunks.
 const ThemePicker = lazy(() => import('./pages/ThemePicker'));
 const ThemeEditor = lazy(() => import('./pages/ThemeEditor'));
 const ThemeSend = lazy(() => import('./pages/ThemeSend'));
@@ -18,7 +18,7 @@ import AuthRoute from './components/AuthRoute';
 import BoxRoute from './components/BoxRoute';
 import { SendProvider } from './context/SendContext';
 
-/** SPA không tự cuộn lên đầu khi đổi trang: trang mới mở ra ở đúng vị trí cuộn của trang cũ. */
+/** An SPA doesn't scroll to the top on navigation: a new page would open at the previous page's scroll position. */
 function ScrollToTop() {
   const { pathname } = useLocation();
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
@@ -32,19 +32,19 @@ function App() {
       <ScrollToTop />
       <Suspense fallback={<Screen><Body center><span className="sl-heading">Đang tải…</span></Body></Screen>}>
       <Routes>
-        {/* Trang Login công khai */}
+        {/* Public login page */}
         <Route path="/" element={<Login />} />
 
-        {/* Mọi trang trong đây tự dựng <Screen> của mình — AuthRoute chỉ chặn khách. */}
+        {/* Every page in here renders its own <Screen> — AuthRoute only blocks guests. */}
         <Route element={<AuthRoute />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/pair" element={<PairBox />} />
 
-          {/* BoxRoute: hộp phải còn trong tài khoản và đúng vai trò, không thì
-              chuyển hướng thay vì để trang nhận 403. */}
+          {/* BoxRoute: the box must still be in the account with the right role;
+              otherwise redirect instead of letting the page hit a 403. */}
           <Route path="/box/:boxId/sender" element={<BoxRoute role="sender" />}>
             <Route index element={<SenderUI />} />
-            {/* Lịch sử tin đã gửi (nút "Lịch sử tin nhắn" ở bước 1). */}
+            {/* Sent-message history (opened from step 1). */}
             <Route path="dashboard" element={<SenderDashboard />} />
           </Route>
 
@@ -53,14 +53,14 @@ function App() {
             <Route path="alarm" element={<ReceiverAlarms />} />
             <Route path="alarm/music" element={<ReceiverMusic />} />
             <Route path="config" element={<ReceiverConfig />} />
-            {/* Theme màn chờ: lưu qua /boxes/:boxId/theme. Firmware chưa tải về — xem theme/layout.js. */}
+            {/* Standby-screen theme: saved through /boxes/:boxId/theme — see theme/layout.js. */}
             <Route path="theme" element={<ThemePicker />} />
             <Route path="theme/edit" element={<ThemeEditor />} />
             <Route path="theme/send" element={<ThemeSend />} />
           </Route>
         </Route>
 
-        {/* Bắt mọi path sai về trang chủ */}
+        {/* Unknown paths go home */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Suspense>

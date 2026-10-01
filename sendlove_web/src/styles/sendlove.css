@@ -907,6 +907,13 @@
 }
 .sl-editor__num:focus-within { border-color: var(--rose-400); box-shadow: 0 0 0 3px var(--rose-50); }
 .sl-editor__num:has(input:disabled) { opacity: .5; }
+
+/* iOS tự phóng to cả trang khi chạm vào ô nhập có chữ nhỏ hơn 16px và không tự
+   thu lại. Chỉ iOS (nhận qua -webkit-touch-callout) nâng lên 16px; Android và
+   desktop giữ đúng 15px của thiết kế. Đặt SAU hai luật 15px ở trên để thắng. */
+@supports (-webkit-touch-callout: none) {
+  .sl-input, .sl-editor__num input { font-size: 16px; }
+}
 .sl-editor__nudge { display: flex; justify-content: center; gap: var(--sp-2); }
 .sl-editor__nudge .sl-iconbtn { border: 0.5px solid var(--line-card); }
 

@@ -1,11 +1,20 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: thiếu nó thì env(safe-area-inset-*) trong tokens.css luôn bằng 0. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Sendlove Box - Gửi yêu thương qua những thông điệp nhỏ bé. Kết nối với Hộp quà thông minh để ghi âm, gửi video và tin nhắn đặc biệt." />
-    <meta name="theme-color" content="#ff758c" />
+    <!-- Màu thanh trạng thái = nền trang bản sáng (caramel-50). ThemeContext đổi theo khi bật giao diện tối. -->
+    <meta name="theme-color" content="#FDF8F3" />
+    <!-- Cài lên màn hình chính (PWA). iPhone không đọc icon trong manifest, cần apple-touch-icon riêng. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Sendlove" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta property="og:title" content="Sendlove Box" />
     <meta property="og:description" content="Gửi yêu thương qua những thông điệp nhỏ bé. Kết nối với Hộp quà thông minh." />
     <meta property="og:type" content="website" />

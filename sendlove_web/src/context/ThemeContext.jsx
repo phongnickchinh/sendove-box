@@ -26,6 +26,10 @@ export function ThemeProvider({ children }) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try { localStorage.setItem(STORAGE_KEY, theme); } catch { /* trình duyệt chặn storage, bỏ qua */ }
+    // Thanh trạng thái của app đã cài (PWA) tô theo <meta name="theme-color">:
+    // cho nó đi theo nền trang, không thì giao diện tối đội một thanh màu kem.
+    const pageBg = getComputedStyle(document.documentElement).getPropertyValue('--bg-page').trim();
+    if (pageBg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', pageBg);
   }, [theme]);
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));

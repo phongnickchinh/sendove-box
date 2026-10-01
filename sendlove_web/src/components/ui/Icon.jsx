@@ -234,6 +234,14 @@ const PATHS = {
       <path d="M4.5 19.5h15" />
     </>
   ),
+  /* Nút Chia sẻ của iOS (hộp + mũi tên lên) — để người dùng nhận ra đúng nút trong Safari. */
+  share: (
+    <>
+      <path d="M12 15V3.5" />
+      <path d="M8 7l4-3.5L16 7" />
+      <path d="M8 10.5H6.5A1.5 1.5 0 0 0 5 12v7a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-7a1.5 1.5 0 0 0-1.5-1.5H16" />
+    </>
+  ),
   alignL: (
     <>
       <path d="M4 6h16" /><path d="M4 12h9" /><path d="M4 18h13" />

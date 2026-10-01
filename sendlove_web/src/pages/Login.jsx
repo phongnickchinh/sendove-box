@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { signInWithGoogle, signInWithFacebook, readRedirectError } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
 import { Screen } from '../components/ui/Screen';
+import InstallHint, { InAppBrowserWarning } from '../components/InstallHint';
 
 /**
  * Frame "login signup" trong Figma. Ảnh nền thật (anthony-melone…unsplash) nằm ở
@@ -89,6 +90,7 @@ export default function Login() {
           </div>
 
           {error && <div className="sl-reason">{error}</div>}
+          <InAppBrowserWarning />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <button
@@ -108,6 +110,8 @@ export default function Login() {
               {loading === 'facebook' ? 'Đang kết nối…' : 'Đăng nhập bằng Facebook'}
             </button>
           </div>
+
+          <InstallHint />
         </div>
 
         <p className="sl-login-terms">

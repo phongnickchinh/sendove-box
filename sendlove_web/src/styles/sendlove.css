@@ -582,6 +582,8 @@
   --caramel-900: #3D2A20;
   --error-bg: #FBE6E4;
   --error-text: #8E2F29;
+  --warning-bg: #FBF0DC;
+  --warning-text: #8A5F16;
   --text-accent: #9E3A52;
   color-scheme: light;
 
@@ -613,6 +615,45 @@
 }
 .sl-login-btn:hover:not(:disabled) { background: var(--caramel-50); }
 .sl-login-btn:disabled { opacity: .6; cursor: not-allowed; }
+/* Gợi ý cài lên màn hình chính (InstallHint.jsx) — dòng phụ cuối thẻ đăng nhập,
+   tách bằng hairline. Không phải nút chính: màn này đã có hai nút đăng nhập. */
+.sl-install {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 0.5px solid var(--caramel-100);
+  color: var(--caramel-900);
+  font-size: 12px; line-height: 1.5;
+  text-align: left;
+}
+.sl-install > svg { flex: 0 0 auto; margin-top: 1px; color: var(--text-accent); }
+.sl-install__text { flex: 1 1 auto; }
+.sl-install__glyph { vertical-align: -3px; color: var(--text-accent); }
+.sl-install__action {
+  padding: 0; border: none; background: none; cursor: pointer;
+  font-size: 12px; font-weight: 600; line-height: 1.5;
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+/* Nút ẩn: hình 16px nhưng vùng chạm 32px, kéo lề âm để không đẩy dòng chữ. */
+.sl-install__close {
+  flex: 0 0 auto;
+  width: 32px; height: 32px; margin: -8px -8px -8px 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none; cursor: pointer;
+  border-radius: var(--r-full);
+  color: var(--caramel-900);
+}
+.sl-install__close:hover { background: var(--caramel-50); }
+/* Biến thể cảnh báo trình duyệt nhúng (Zalo/Facebook): khối nền vàng như .sl-reason. */
+.sl-install--warn {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: none;
+  border-radius: var(--r-md);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 14px; font-weight: 500;
+}
+.sl-install--warn > svg { margin-top: 2px; color: var(--warning-text); }
 .sl-login-terms {
   font-size: 12px; line-height: 1.5;
   /* Màu cố định #FFFFFF — lý do giống .sl-login-logo, xem ghi chú ở đó. */

@@ -1,18 +1,18 @@
-02:15.250  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_doc.png'
-02:16.000  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_ngang.png'
-02:16.359  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_no_tung.png'
-02:16.718  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_mat_sau.png'
-02:17.015  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_day.png'
+02:21.781  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_doc.png'
+02:22.766  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_ngang.png'
+02:23.063  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_no_tung.png'
+02:23.313  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_mat_sau.png'
+02:23.563  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_day.png'
 HEART z 43.7..63.6
 BBOX inner [-24.38, 24.38, 1.9, 60.1, -12.1, 50.47]
-BUILD 124 s
+BUILD 130 s
 REPORT
-body: canh_hong=0 manh=1 the_tich=23.6cm3
+body: canh_hong=0 manh=1 the_tich=23.5cm3
 base: canh_hong=0 manh=1 the_tich=5.6cm3
 ear_R: canh_hong=0 manh=1 the_tich=0.8cm3
 ear_L: canh_hong=0 manh=1 the_tich=0.8cm3
-man_hinh_kinh: cham_than=False cham_day=False khe_min=0.15
-man_hinh_mach: cham_than=False cham_day=False khe_min=0.05
+man_hinh_lcd: cham_than=False cham_day=False khe_min=0.15
+man_hinh_pcb: cham_than=False cham_day=False khe_min=0.25
 pin: cham_than=False cham_day=False khe_min=0.20
 pcb: cham_than=False cham_day=False khe_min=0.60
 loa: cham_than=False cham_day=False khe_min=0.23
@@ -23,31 +23,33 @@ LED_ear_L: cham_tai=False
 KICH_THUOC ngoai: 51.0 rong x 74.5 dai x 63.6 cao (ke ca tai, duoi)
 DO_THAT: than rong day 51.0 / dinh thanh (z=38) 46.0 mm, dinh vom 52.3 mm, dai than 62.0 mm
 LOA x=13.9..21.0  CAM_UNG dinh z=50.0
+MAN_HINH: PCB 27.6 x 39.0 x 1.2, LCD 26.0 x 29.2 x 2.0 z 7.9..37.1, hien thi 25.6 z 11.5..37.1, 4 lo vit tam cach mep PCB 1.90 (x +-11.90)
+MICA: tam 28.6 x 28.6 x 1.0 mm, ranh 28.90 x 28.90, bac do 1.55 mm/ben day 1.0 mm, o lo man hinh 25.80 mm, z 11.4..37.2
 PCB bao: x -22.9..22.9  y 9.5..59.5
 Info: File exported successfully
 Info: File exported successfully
 Info: File exported successfully
 Info: File exported successfully
 Info: Saved as "breadcat_vo.blend"
-SAVED 129 s
-DONE 134 s
+SAVED 135 s
+DONE 140 s
 Blender 5.2.1 LTS (hash 9e2066aef7ef built 2026-08-25 02:38:20)
-Timer 'STL Export' took 163.23 ms
-Timer 'STL Export' took 6.61 ms
-Timer 'STL Export' took 12.84 ms
-Timer 'STL Export' took 13.62 ms
+Timer 'STL Export' took 159.37 ms
+Timer 'STL Export' took 7.67 ms
+Timer 'STL Export' took 15.04 ms
+Timer 'STL Export' took 14.63 ms
 
 Blender quit
 P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:206: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
   m = bpy.data.materials.new("toast"); m.use_nodes = True
 P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:235: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
   m = bpy.data.materials.new(name); m.use_nodes = True
-P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:271: DeprecationWarning: 'World.use_nodes' is expected to be removed in Blender 6.0
+P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:279: DeprecationWarning: 'World.use_nodes' is expected to be removed in Blender 6.0
   w = bpy.data.worlds.new("w"); sc.world = w; w.use_nodes = True
-00:17.843  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_v34.png'
-00:27.859  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_front.png'
-00:38.922  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_side.png'
-00:51.828  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_back.png'
+00:17.579  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_v34.png'
+00:28.110  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_front.png'
+00:39.000  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_side.png'
+00:51.500  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_back.png'
 HEART z 43.7..63.6
 DIMS 51.0 74.5 63.6
 RONG z=0.3: 48.03

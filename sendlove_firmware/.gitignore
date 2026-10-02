@@ -4,6 +4,11 @@
 .vscode/launch.json
 .vscode/ipch
 
+# Stray compiler dependency files
+*.d
+# Generated for clangd: pio run -t compiledb
+compile_commands.json
+
 .agents/
 
 # Secret API keys & credentials

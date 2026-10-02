@@ -8,9 +8,7 @@ export class FirebaseOtaRepository extends FirebaseBaseRepository<OtaTask> imple
     super('ota_tasks');
   }
 
-  /**
-   * Cập nhật trạng thái OTA task
-   */
+  /** Update an OTA task's status. */
   async updateOtaStatus(taskId: string, status: OtaStatus, extras?: { progress_percent?: number; error_message?: string }): Promise<void> {
     const updateData: Partial<OtaTask> = {
       status,
@@ -20,9 +18,7 @@ export class FirebaseOtaRepository extends FirebaseBaseRepository<OtaTask> imple
     await db.ref(`${this.collectionPath}/${taskId}`).update(updateData);
   }
 
-  /**
-   * Tìm OTA task đang pending cho box cụ thể
-   */
+  /** Find the pending OTA task for a box. */
   async findPendingByBoxId(boxId: string): Promise<OtaTask | null> {
     const snapshot = await db.ref(this.collectionPath)
       .orderByChild('box_id')

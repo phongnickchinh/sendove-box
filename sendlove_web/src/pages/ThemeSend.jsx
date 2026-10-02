@@ -8,14 +8,12 @@ import { toApiWidgets } from '../theme/layout';
 import { buildThemeFonts } from '../utils/themePack';
 
 /**
- * Màn 21 "theme send" — lưu gói theme lên tài khoản (thiết kế 2026-09-24, firmware §28).
- *
- *   1. Cắt phông: mỗi loại widget chữ dùng phông web -> một file VLW đúng các ký tự cần
- *      (utils/vlw.js). Xem trước bên dưới vẽ bằng CHÍNH các file này (đề xuất #10).
- *   2. Tải lên: ảnh nền mới (hoặc nền mặc định) 115.200 B + các file phông.
- *   3. PUT /theme {theme_name, widgets, background, fonts} -> backend đo size + crc32 từng
- *      file, tăng rev, bật theme_flag. Hộp tải gói về thẻ nhớ ở lần đồng bộ kế tiếp rồi
- *      chép sang bộ nhớ trong và vẽ lại.
+ * Theme send — saves the theme package to the account (firmware MEMORY.md §28):
+ *   1. Subset fonts into VLW files (utils/vlw.js); the preview is drawn from THESE
+ *      very files (firmware MEMORY.md §29, proposal #10).
+ *   2. Upload the background (115,200 B) + the font files.
+ *   3. PUT /theme → the backend bumps rev and sets theme_flag; the box installs
+ *      it on its next sync.
  */
 export default function ThemeSend() {
   const { boxId } = useParams();
@@ -30,7 +28,7 @@ export default function ThemeSend() {
 
   const bg = draft?.bg;
 
-  // Cắt phông + lấy bytes nền để xem trước đúng như hộp.
+  // Subset the fonts + get the background bytes for a box-accurate preview.
   useEffect(() => {
     if (!draft?.widgets) return undefined;
     let alive = true;
@@ -55,7 +53,7 @@ export default function ThemeSend() {
     return () => { alive = false; };
   }, [draft, bg]);
 
-  // Mở thẳng URL mà không có bản nháp → quay về trình sửa.
+  // Opened directly without a draft → go back to the editor.
   if (!draft?.widgets) return <Navigate to={`/box/${boxId}/receiver/theme/edit`} replace />;
 
   const hasNewBg = !!bg?.bytes;

@@ -1,23 +1,18 @@
 /**
- * Cắt phông thành file VLW cho hộp (thiết kế 2026-09-24, firmware MEMORY.md §28).
- *
- * Định dạng khớp LovyanGFX VLWfont::loadFont / drawChar (lgfx_fonts.cpp) — mọi số nguyên
- * 32-bit BIG-endian:
- *   header 24 B : glyphCount, version(11), cỡ(px), 0, ascent, descent
- *   mỗi glyph 28 B: unicode, height, width, xAdvance, dY (đỉnh glyph trên baseline),
- *                   dX (mép trái so với con trỏ), 0
- *   rồi bitmap từng glyph nối nhau, 1 byte alpha mỗi pixel (w*h)
- * Glyph PHẢI xếp tăng theo unicode: hộp tìm bằng lower_bound. width/xAdvance là uint8,
- * dX là int8 trên hộp -> cỡ chữ bị chặn ở PX_RANGE (theme/layout.js).
- *
- * Alpha NHỊ PHÂN (0 hoặc 255), không khử răng cưa: ST7789 của hộp không đọc ngược được
- * pixel, LovyanGFX trộn pixel alpha trung gian với MỘT màu nền cố định chứ không với ảnh
- * nền -> viền chữ sẽ lem màu đen. Alpha 0/255 thì pixel được vẽ thẳng hoặc bỏ qua.
+ * Subsets a font into a VLW file for the box (firmware MEMORY.md §28), in the
+ * LovyanGFX VLWfont format — every integer 32-bit BIG-endian:
+ *   24 B header   : glyphCount, version(11), size(px), 0, ascent, descent
+ *   28 B per glyph: unicode, height, width, xAdvance, dY, dX, 0
+ *   then the glyph bitmaps, 1 alpha byte per pixel
+ * Glyphs MUST be sorted by unicode (the box uses lower_bound). The box stores
+ * width/xAdvance as uint8, hence the size cap PX_RANGE (theme/layout.js).
+ * Alpha is BINARY (0 or 255): the ST7789 can't be read back, so partial alpha
+ * would blend against a fixed color and smear the glyph edges.
  */
 
 const GOOGLE_CSS = 'https://fonts.googleapis.com/css2';
 
-/** Nạp họ phông Google (có bộ ký tự tiếng Việt) một lần, chờ tới khi canvas vẽ được. */
+/** Load a Google font family (with its Vietnamese subset) once and wait until canvas can draw it. */
 export async function ensureWebFont(family, weight) {
   const id = `gf-${family.replace(/\s+/g, '-')}-${weight}`;
   if (!document.getElementById(id)) {
@@ -27,7 +22,7 @@ export async function ensureWebFont(family, weight) {
     link.href = `${GOOGLE_CSS}?family=${encodeURIComponent(family)}:wght@${weight}&display=swap`;
     document.head.appendChild(link);
   }
-  // Tải đúng các khối chữ sẽ dùng (tiếng Việt nằm ở subset riêng).
+  // Load exactly the unicode blocks in use (Vietnamese lives in its own subset).
   await document.fonts.load(`${weight} 32px "${family}"`, 'Thứ ảắ 0123456789');
 }
 
@@ -58,7 +53,7 @@ export function buildVlw({ family, weight, px, chars }) {
   const glyphs = [];
   const missing = [];
   let maxGlyphBytes = 0;
-  const ox = px; // gốc vẽ cách mép để glyph tràn trái/lên trên vẫn nằm trong canvas
+  const ox = px; // draw origin inset from the edge so glyphs overflowing left/up stay on the canvas
   const oy = px * 2;
 
   for (const code of codes) {
@@ -112,7 +107,7 @@ export function buildVlw({ family, weight, px, chars }) {
   return { bytes: out, maxGlyphBytes, missing };
 }
 
-/** Đọc lại file VLW (chính bytes sẽ gửi xuống hộp) để vẽ xem trước. */
+/** Parse a VLW file (the very bytes sent to the box) to draw the preview. */
 export function parseVlw(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const n = view.getInt32(0, false);
@@ -121,7 +116,7 @@ export function parseVlw(bytes) {
   let maxAscent = view.getInt32(16, false);
   let maxDescent = view.getInt32(20, false);
   const px = view.getInt32(8, false);
-  // loadFont tính spaceWidth từ header, TRƯỚC khi cập nhật max theo từng glyph.
+  // loadFont derives spaceWidth from the header, BEFORE updating the max from each glyph.
   const spaceWidth = Math.floor(Math.max(px, maxAscent + maxDescent) * 2 / 7);
   for (let i = 0; i < n; i++) {
     const o = 24 + i * 28;
@@ -139,8 +134,8 @@ export function parseVlw(bytes) {
 }
 
 /**
- * Vẽ `text` như LovyanGFX vẽ trên hộp: căn theo datum middle_*, pixel alpha 255 vẽ thẳng,
- * glyph thiếu thì vẽ ô trống (hộp vẽ drawCharDummy, không sập — case bắt buộc #7).
+ * Draw `text` the way LovyanGFX does on the box; a missing glyph is an empty
+ * box (the box doesn't crash — mandatory case, firmware MEMORY.md §28).
  */
 export function drawVlwText(ctx, font, text, x, y, color, align) {
   const codes = [...text.normalize('NFC')].map((c) => c.codePointAt(0));

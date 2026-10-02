@@ -1,8 +1,4 @@
-/**
- * CRC-32 zlib/IEEE (poly 0xEDB88320) — cùng công thức firmware (SdStore::crc32Update) dùng để
- * kiểm file tải về thẻ (nhạc báo thức, gói theme). Backend tự tính từ file đã lên Storage,
- * không tin con số web gửi.
- */
+/** CRC-32 zlib/IEEE (poly 0xEDB88320), the same formula the firmware uses to verify downloaded files. */
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {

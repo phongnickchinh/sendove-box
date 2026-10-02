@@ -7,30 +7,30 @@ const firebase_storage_repository_1 = require("../repositories/firebase/firebase
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
 const crc32_1 = require("../utils/crc32");
 exports.SCREEN = 240;
-/** 240 × 240 × 2 byte RGB565 — đúng kích thước nền LayoutEngine đọc từ phân vùng theme. */
+/** 240 × 240 × 2 bytes of RGB565 — the background size LayoutEngine reads from the theme partition. */
 exports.BG_BYTES = exports.SCREEN * exports.SCREEN * 2;
-/** Phông VLW web cắt sẵn đúng tập ký tự cần dùng: vài chục glyph, vài chục KB là nhiều. */
+/** VLW fonts are subset by the web to the needed characters: a few dozen glyphs, a few dozen KB at most. */
 exports.FONT_MAX_BYTES = 64 * 1024;
 const MAX_WIDGETS = 8;
-/** LayoutEngine::formatDate — web cắt phông theo đúng các chuỗi này. */
+/** LayoutEngine::formatDate — the web subsets fonts from exactly these strings. */
 exports.DATE_FORMATS = ['WD, DD.MM', 'WD DD.MM', 'DD/MM/YYYY'];
 const LOCALES = ['vi', 'en'];
 /**
- * Luật theo từng type — chỉ nhận đúng khoá firmware đọc cho type đó.
- * Phông (2026-09-24): 'f_time'/'f_date' = VLW trong gói theme (phải kèm file trong `fonts`),
- * 'Font7'/'Font2' = phông có sẵn trong firmware. ChakraPetch/Orbitron/Roboto biên dịch
- * cứng đã GỠ khỏi firmware, tên cũ firmware sẽ âm thầm vẽ bằng phông có sẵn -> chặn ở đây.
+ * Per-type rules: only the keys the firmware reads for that type. Fonts:
+ * 'f_time'/'f_date' = VLW files in the package (must be present in `fonts`),
+ * 'Font7'/'Font2' = firmware built-ins. Any other name is rejected: the firmware
+ * would silently fall back to a built-in font.
  */
 const RULES = {
     clock_time: { color: true, align: true, fonts: ['f_time', 'Font7'] },
     clock_date: { color: true, align: true, fonts: ['f_date', 'Font2'], date: true },
     chip_temp: { color: true, align: true },
     wifi_icon: { color: true, align: false },
-    battery_icon: { color: false, align: false }, // pushImage nhiều màu, bỏ qua cfg.color
+    battery_icon: { color: false, align: false }, // multi-color pushImage, ignores cfg.color
 };
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 const isInt = (v) => typeof v === 'number' && Number.isInteger(v);
-/** Kiểm tra + chuẩn hoá widgets; ném 400 với lý do đọc được. */
+/** Validate + normalize widgets; throws a 400 with a readable reason. */
 function sanitizeWidgets(input) {
     if (!Array.isArray(input) || input.length === 0) {
         throw new error_handler_middleware_1.AppError(400, 'invalid_theme', "'widgets' must be a non-empty array");
@@ -44,7 +44,7 @@ function sanitizeWidgets(input) {
             throw new error_handler_middleware_1.AppError(400, 'invalid_theme', `${where} must be an object`);
         const type = raw.type;
         const rule = RULES[type];
-        // LayoutEngine.cpp strcmp(type, ...) không kiểm tra null — widget thiếu type làm sập hộp.
+        // LayoutEngine.cpp's strcmp(type, ...) has no null check — a widget without a type crashes the box.
         if (!rule)
             throw new error_handler_middleware_1.AppError(400, 'invalid_theme', `${where}.type must be one of: ${Object.keys(RULES).join(', ')}`);
         for (const k of ['x', 'y', 'w', 'h']) {
@@ -59,7 +59,7 @@ function sanitizeWidgets(input) {
         }
         const out = { type, x: raw.x, y: raw.y, w: raw.w, h: raw.h };
         if (rule.color) {
-            // Thiếu màu thì firmware tô ĐEN (mặc định "#000000"), không phải trắng — ghi rõ ra.
+            // Without a color the firmware draws BLACK (default "#000000"), not white — store it explicitly.
             const color = raw.color ?? '#000000';
             if (typeof color !== 'string' || !HEX.test(color)) {
                 throw new error_handler_middleware_1.AppError(400, 'invalid_theme', `${where}.color must be #RRGGBB`);
@@ -74,14 +74,14 @@ function sanitizeWidgets(input) {
             out.align = align;
         }
         if (rule.fonts) {
-            // Mặc định là phông có sẵn (phần tử cuối): không cần file phông nào.
+            // Defaults to the built-in font (the last element): needs no font file.
             const font = raw.font ?? rule.fonts[rule.fonts.length - 1];
             if (!rule.fonts.includes(font)) {
                 throw new error_handler_middleware_1.AppError(400, 'invalid_theme', `${where}.font must be one of: ${rule.fonts.join(', ')}`);
             }
             out.font = font;
-            // Chỉ để web mở lại trình sửa đúng như lúc lưu (họ phông + cỡ đã cắt ra file VLW).
-            // Firmware không đọc hai khoá này: hình chữ nằm sẵn trong file phông.
+            // Only so the web can reopen the editor as saved (the family + size subset into the VLW file).
+            // The firmware ignores both keys: the glyphs are already in the font file.
             if (typeof raw.family === 'string' && raw.family.length >= 1 && raw.family.length <= 40)
                 out.family = raw.family;
             if (isInt(raw.px) && raw.px >= 8 && raw.px <= 72)
@@ -107,7 +107,7 @@ class ThemeService {
         this.storageRepo = storageRepo;
         this.bgPrefix = (boxId) => `media/${boxId}/theme/`;
     }
-    /** Theme đã lưu (null = chưa lưu lần nào), kèm URL ký 15 phút để web xem trước ảnh nền. */
+    /** The saved theme (null = never saved), with a 15-minute signed URL so the web can preview the background. */
     async getTheme(boxId) {
         const box = await this.boxRepo.getById(boxId);
         if (!box)
@@ -126,21 +126,21 @@ class ThemeService {
         }
         return { ...theme, background_url };
     }
-    /** Cấp signed POST policy để web tải ảnh nền lên thẳng Storage. */
+    /** Issue a signed POST policy so the web uploads the background straight to Storage. */
     async initiateBackgroundUpload(boxId) {
         const path = `${this.bgPrefix(boxId)}bg_${Date.now()}.bin`;
         const upload = await this.storageRepo.generateUploadPolicy(path, 'application/octet-stream', exports.BG_BYTES, 15);
         return { path, upload };
     }
-    /** Như ảnh nền, cho một file phông VLW (web cắt sẵn tập ký tự). */
+    /** Same as the background, for a VLW font file (subset by the web). */
     async initiateFontUpload(boxId) {
         const path = `${this.bgPrefix(boxId)}f_${Date.now()}_${Math.floor(Math.random() * 1000)}.vlw`;
         const upload = await this.storageRepo.generateUploadPolicy(path, 'application/octet-stream', exports.FONT_MAX_BYTES, 15);
         return { path, upload };
     }
     /**
-     * Kiểm một file của gói (đúng thư mục theme của CHÍNH hộp này, đúng đuôi) rồi tự đo size
-     * + crc32 từ file thật. Hộp dựa vào đúng hai số này để nhận file.
+     * Validate one package file (inside THIS box's theme folder, right extension),
+     * then measure size + crc32 from the actual file.
      */
     async measureAsset(boxId, path, ext, field) {
         const re = ext === 'bin' ? /^[\w./-]+\.bin$/ : /^[\w./-]+\.vlw$/;
@@ -169,8 +169,8 @@ class ThemeService {
             assets.bg = bg;
             background = bg.path;
         }
-        // Phông VLW: widget dùng 'f_time'/'f_date' thì PHẢI kèm file tương ứng, không thì hộp
-        // vẽ bằng phông có sẵn trong khi web xem trước bằng phông khác -> người dùng tưởng lỗi.
+        // VLW fonts: a widget using 'f_time'/'f_date' MUST come with the matching file, or the
+        // box draws with a built-in font while the web previews another -> looks like a bug.
         for (const key of ['f_time', 'f_date']) {
             const used = widgets.some((w) => w.font === key);
             const path = body?.fonts?.[key];

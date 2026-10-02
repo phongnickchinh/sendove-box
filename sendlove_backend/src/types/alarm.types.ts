@@ -1,25 +1,20 @@
 import { BaseModel } from './base.types';
 
-// ==================================================
-// Alarm — Lưu tại: boxes/{boxId}/config/alarm_list/{alarmId}
-// ==================================================
+// Alarm — boxes/{boxId}/config/alarm_list/{alarmId}
 export interface Alarm extends BaseModel {
-  /** Giờ báo thức, format "HH:mm" (24h) */
+  /** Ring time, "HH:mm" (24h) */
   time: string;
 
-  /** Bật/tắt alarm này */
+  /** Whether this alarm is on */
   is_enable: boolean;
 
-  /**
-   * true  = báo lặp lại mỗi ngày
-   * false = one-shot, sau khi kích hoạt sẽ tự set is_enable = false
-   */
+  /** true = repeats daily; false = one-shot (the box sets is_enable = false after ringing). */
   repeatable: boolean;
 
-  /** Bài trong boxes/{boxId}/music. Không có = tiếng bíp. Hộp chỉ tải bài báo thức dùng. */
+  /** A track in boxes/{boxId}/music. Absent = beep. The box only downloads tracks that alarms use. */
   music_id?: string | null;
-  /** 0-100, riêng từng báo thức (mặc định 80). Web chặn < 20. */
+  /** 0-100, per alarm (default 80). The web blocks < 20. */
   volume?: number;
-  /** Tăng dần từ 30% mức đã chọn trong 20s (mặc định bật). */
+  /** Fade in from 30% of the chosen level over 20s (on by default). */
   ramp?: boolean;
 }

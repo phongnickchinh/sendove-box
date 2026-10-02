@@ -29,9 +29,7 @@ const container = createContainer();
 // Security headers (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.)
 app.use(helmet());
 
-// TODO: Restrict CORS origins before production deployment.
-// Current config allows all origins for development/testing convenience.
-// Example: app.use(cors({ origin: ['https://iot-app-839a2.web.app'] }));
+// TODO: restrict CORS before production, e.g. cors({ origin: ['https://iot-app-839a2.web.app'] }).
 app.use(cors({ origin: true }));
 
 // Parse JSON with explicit body size limit to prevent DoS via large payloads
@@ -49,7 +47,7 @@ app.use('/users', userRoutes(container.userController));
 const msgRouter = messageRoutes(container.messageController);
 const alrmRouter = alarmRoutes(container.alarmController);
 const themeRouter = themeRoutes(container.themeController);
-// Nhạc báo thức theo hộp (2026-09-24). Route /music cũ (thư viện giả 2 bài) đã gỡ.
+// Per-box alarm music.
 const musicRouter = musicRoutes(container.musicController);
 app.use('/boxes', boxRoutes(container.boxController, msgRouter, alrmRouter, themeRouter, musicRouter));
 

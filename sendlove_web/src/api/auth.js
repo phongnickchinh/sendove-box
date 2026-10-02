@@ -2,13 +2,10 @@ import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 
 import { auth, googleProvider, facebookProvider } from "../config/firebase";
 
 /**
- * Popup bị trình duyệt di động chặn / không hỗ trợ → chuyển sang redirect.
- * Kết quả redirect KHÔNG trả về đây: trang tải lại, onAuthStateChanged trong
- * AuthContext nhận user như mọi lần đăng nhập khác.
- *
- * Lưu ý cấu hình: trên Chrome/Safari mới (chặn lưu trữ bên thứ ba), redirect
- * chỉ chạy ổn khi VITE_FIREBASE_AUTH_DOMAIN là CHÍNH tên miền đang host web
- * (iot-app-839a2.web.app), không phải *.firebaseapp.com.
+ * Popup blocked → fall back to redirect; its result arrives through
+ * onAuthStateChanged after the reload, not here. Redirect only works when
+ * VITE_FIREBASE_AUTH_DOMAIN is the domain hosting the web app
+ * (iot-app-839a2.web.app), not *.firebaseapp.com.
  */
 const REDIRECT_INSTEAD = new Set([
   'auth/popup-blocked',
@@ -30,7 +27,7 @@ async function signInWith(provider, label) {
         return { user: null, error: redirectError };
       }
     }
-    // Người dùng tự đóng cửa sổ: không phải lỗi, chỉ trả nút về như cũ.
+    // The user closed the popup: not an error, just reset the button.
     if (error?.code === 'auth/popup-closed-by-user') {
       return { user: null, error: null, cancelled: true };
     }
@@ -39,20 +36,13 @@ async function signInWith(provider, label) {
   }
 }
 
-/** Đăng nhập bằng tài khoản Google (popup, dự phòng redirect). */
+/** Sign in with Google (popup, redirect fallback). */
 export const signInWithGoogle = () => signInWith(googleProvider, 'Google');
 
-/**
- * Đăng nhập bằng tài khoản Facebook (popup, dự phòng redirect). Nếu Facebook
- * chưa được bật trong Firebase Console, Firebase trả lỗi
- * "auth/operation-not-allowed" — hiện đúng thông báo lỗi, không crash.
- */
+/** Sign in with Facebook (popup, redirect fallback). Must be enabled in the Firebase Console. */
 export const signInWithFacebook = () => signInWith(facebookProvider, 'Facebook');
 
-/**
- * Lỗi của lượt redirect vừa quay về (nếu có). Thành công thì không cần gọi —
- * onAuthStateChanged đã nhận user; hàm này chỉ để hiện lỗi thay vì im lặng.
- */
+/** The error of the redirect that just returned, if any (success comes via onAuthStateChanged). */
 export const readRedirectError = async () => {
   try {
     await getRedirectResult(auth);
@@ -63,9 +53,7 @@ export const readRedirectError = async () => {
   }
 };
 
-/**
- * Đăng xuất
- */
+/** Sign out. */
 export const logOut = async () => {
   try {
     await signOut(auth);

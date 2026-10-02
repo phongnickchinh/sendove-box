@@ -3,10 +3,8 @@ import Icon from './ui/Icon';
 import { iconOf, titleOf } from '../utils/messageFormat';
 
 /**
- * Một dòng tin nhắn — dùng chung cho lịch sử người gửi và danh sách người nhận.
- *
- * msg.thumbnail: signed URL (15 phút) backend gắn sẵn trong GET /messages. Không có
- * (tin chữ/thoại, backend chưa deploy) hoặc ảnh hỏng (URL hết hạn) thì về icon như cũ.
+ * One message row, shared by sender and receiver. msg.thumbnail is a 15-minute
+ * signed URL; when absent or expired, fall back to the icon.
  */
 export default function MessageRow({ msg, meta, noText = null, onOpen }) {
   const [broken, setBroken] = useState(false);

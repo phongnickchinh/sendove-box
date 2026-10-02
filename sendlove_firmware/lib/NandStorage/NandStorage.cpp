@@ -1,53 +1,19 @@
 #include "NandStorage.h"
 #include "ScreenLogger.h"
 
-// ============================================================================
-// NandStorage Implementation — Hardware SPI2
-// ============================================================================
-
 // W25Q128 SPI commands
 static constexpr uint8_t W25Q_READ_DATA      = 0x03;
 static constexpr uint8_t W25Q_READ_STATUS_1  = 0x05;
 
-// SPI transaction settings cho NAND. Ba hằng số cho ba luồng khác nhau — đừng gộp.
-//
-// Trần phần cứng (đo/tra datasheet, không phải phỏng đoán): chân 4/5/6 không trùng
-// IOMUX của FSPI trên ESP32-C3 nên SPI đi qua GPIO matrix, trần thực tế quanh 40MHz.
-// Về phía chip W25Q128JV: opcode đọc 0x03 chịu ~50MHz, Page Program 0x02 chịu 133MHz.
-// Nghĩa là giới hạn thật nằm ở DÂY trên breadboard, không nằm ở chip.
+// SPI settings for the NAND: three constants for three paths — don't merge them.
+// All run at 4MHz: at 20MHz the breadboard WIRING corrupts data intermittently
+// (stutter, Bad jpegSize), see MEMORY.md §14. Don't raise them on the breadboard;
+// on a PCB, re-test with a NEWLY downloaded message played many times.
 
-// XOÁ (eraseSector / eraseRange / formatAll). Giữ 4MHz và đừng nâng.
-// Nâng lên 20MHz tiết kiệm khoảng 6 MICRO giây: lệnh erase chỉ dài 4 byte
-// (opcode + 3 byte địa chỉ), còn 150-2000ms xoá thật diễn ra BÊN TRONG chip,
-// không liên quan clock SPI. Đổi lại, một byte địa chỉ lỗi trên dây = xoá nhầm
-// sector khác, mất dữ liệu im lặng. Canh bạc tệ nhất trong ba đường.
+// ERASE: one corrupted address byte erases the wrong sector.
 static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
-
-// ĐỌC (readRaw) — HẠ 20MHz -> 4MHz ngày 2026-09-05, sau khi giật QUAY LẠI dù
-// đường ghi đã ở 4MHz. Hạ nốt đường đọc thì phát mượt trở lại (user xác nhận).
-//
-// Lý thuyết ở §8 nói ngược: đọc chậm thì giữ spiMutex lâu, giành bus với render
-// JPEG và gây giật. Thực tế bác lại — đọc CHẬM HƠN 5 lần lại MƯỢT HƠN. Điều đó
-// chứng minh vấn đề là TÍNH TOÀN VẸN DỮ LIỆU trên dây, không phải tranh chấp
-// bus. 20MHz trên breadboard này chập chờn, không phải hỏng hẳn: nó từng chạy
-// ổn suốt từ 8d9ef7d nên rất dễ tưởng là an toàn.
-//
-// Đừng nâng lại trên breadboard. Lên PCB thật trace ngắn thì thử lại được,
-// nhưng phải đo bằng tin tải MỚI và phát nhiều lần — lỗi này không tái hiện
-// mỗi lần.
 static const SPISettings NAND_READ_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
-
-// GHI (writeRaw) — HẠ 20MHz -> 4MHz (2026-09-05). Ban đầu là để chẩn đoán, giờ
-// đã thành kết luận: cả ba đường đều chạy 4MHz và đó là cấu hình duy nhất phát
-// mượt ổn định trên breadboard này.
-// eb3c9b2 nâng đường này 4->20MHz và chính commit đó ghi sẵn: "REVERT 1 DÒNG nếu
-// breadboard không chịu nổi: dấu hiệu là dữ liệu tải về bị hỏng (ảnh nhiễu /
-// Bad jpegSize / audio rè bất thường)". User gặp đúng lớp triệu chứng đó.
-// Mất mát tốc độ nhỏ hơn vẻ ngoài: phần tăng tốc chính của eb3c9b2 là chuyển
-// SPI.transfer() từng byte sang SPI.writeBytes() bulk — thay đổi đó ĐỘC LẬP với
-// clock và vẫn giữ nguyên. 4MHz bulk ~500KB/s, vẫn nhanh hơn tốc độ tải Wi-Fi.
-// LƯU Ý: đổi giá trị này KHÔNG chữa được tin đã tải về từ trước — byte hỏng đã
-// nằm trên NAND. Phải tải tin MỚI HOÀN TOÀN mới đánh giá được.
+// WRITE: bulk writes still give ~500KB/s, faster than the Wi-Fi download.
 static const SPISettings NAND_WRITE_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
 bool NandStorage::init(SemaphoreHandle_t spiMutex) {
@@ -96,8 +62,7 @@ void NandStorage::setSlotText(uint8_t slot, const char* text, uint16_t len) {
         _slots[slot].text[0] = '\0';
         return;
     }
-    // Cắt bớt an toàn nếu vượt buffer — không cắt giữa 1 ký tự UTF-8 nhiều byte
-    // (byte tiếp theo là continuation byte nếu (b & 0xC0) == 0x80).
+    // Truncate at a UTF-8 boundary (continuation bytes match (b & 0xC0) == 0x80).
     uint16_t copyLen = (len < SLOT_TEXT_MAX_LEN - 1) ? len : (SLOT_TEXT_MAX_LEN - 1);
     while (copyLen > 0 && (((uint8_t)text[copyLen]) & 0xC0) == 0x80) {
         copyLen--;
@@ -123,7 +88,7 @@ uint16_t NandStorage::getSlotText(uint8_t slot, char* outBuf, size_t maxLen) con
 int NandStorage::readAtSlot(uint32_t offset, uint8_t* buf, uint32_t len) {
     if (_currentSlot < 0 || len == 0) return 0;
 
-    // Trần cứng là biên slot vật lý, không phải dataSize: vùng audio nằm SAU dataSize.
+    // Limit = the physical slot boundary, not dataSize (the audio sits after it).
     uint32_t slotSpan = ((_currentSlot + 1) < NAND_SLOT_COUNT)
                             ? (NAND_SLOT_ADDRS[_currentSlot + 1] - NAND_SLOT_ADDRS[_currentSlot])
                             : (0x1000000UL - NAND_SLOT_ADDRS[_currentSlot]);
@@ -219,8 +184,7 @@ void NandStorage::readRaw(uint32_t addr, uint8_t* data, uint32_t len) {
     SPI.transfer((addr >> 8) & 0xFF);
     SPI.transfer(addr & 0xFF);
 
-    // Nạp cả khối một lần thay vì gọi SPI.transfer() từng byte: vòng lặp cũ
-    // trả ~3.5us/byte (phần lớn là overhead lời gọi), bulk transfer ~0.45us/byte.
+    // Bulk transfer: ~0.45us/byte vs ~3.5us/byte for per-byte SPI.transfer().
     SPI.transferBytes(nullptr, data, len);
 
     digitalWrite(PIN_NAND_CS, HIGH);
@@ -251,8 +215,7 @@ static void writeEnableInternal() {
 }
 
 bool NandStorage::eraseSector(uint32_t addr) {
-    // Erase bi skip im lang cuc ky nguy hiem: NAND chi clear bit 1->0, ghi de len
-    // vung CHUA erase cho ra du lieu rac ma khong he bao loi.
+    // Never skip an erase silently: writing over unerased flash gives garbage with no error.
     if (!acquireSPI()) {
         DLOG("[NAND] ERR: eraseSector SPI timeout @ %lu", (unsigned long)addr);
         return false;
@@ -346,8 +309,7 @@ bool NandStorage::eraseRange(uint32_t addr, uint32_t len) {
 
 bool NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
     if (!data || len == 0) return false;
-    // Truoc day return im lang o day -> khong ghi gi nhung caller van tuong da ghi
-    // xong (writeChunk tra ve len vo dieu kien) -> file tai ve thung lo am tham.
+    // Report the failure, or the caller ends up with holes in the file.
     if (!acquireSPI()) {
         DLOG("[NAND] ERR: write SPI timeout @ %lu", (unsigned long)addr);
         return false;
@@ -372,9 +334,7 @@ bool NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
         SPI.transfer((currentAddr >> 8) & 0xFF);
         SPI.transfer(currentAddr & 0xFF);
 
-        // Bulk thay vi vong lap tung byte — cung ly do da ap dung cho duong DOC o
-        // readRaw(): SPI.transfer() don byte ton ~3.5us/byte (phan lon la overhead
-        // loi goi), bulk ~0.45us/byte. Ghi 1 page 256B: ~900us -> ~120us.
+        // Bulk write (see readRaw()): a 256B page takes ~120us instead of ~900us.
         SPI.writeBytes(data + dataOffset, chunkLen);
         digitalWrite(PIN_NAND_CS, HIGH);
 
@@ -399,7 +359,7 @@ bool NandStorage::acquireSPI() {
         SPI.transfer(0x00); //send NOP command data
         SPI.transfer(0x00);
         delayMicroseconds(2);
-        digitalWrite(PIN_TFT_DC, HIGH); // Data Mode -> Bắt đầu bỏ qua data
+        digitalWrite(PIN_TFT_DC, HIGH); // data mode: the display ignores bus traffic
         SPI.endTransaction();
 
         return true;
@@ -420,8 +380,7 @@ void NandStorage::writeSlotTable() {
     for (uint8_t i = 0; i < NAND_SLOT_COUNT; i++) {
         memcpy(header + 4 + i * sizeof(SlotEntry), &_slots[i], sizeof(SlotEntry));
     }
-    // Bảng slot hỏng = mất toàn bộ metadata của mọi slot, nên phải kêu lên khi
-    // ghi trượt thay vì im lặng như trước.
+    // A failed slot-table write loses every slot's metadata: report it loudly.
     if (!eraseRange(0x000000, 4096) || !writeRaw(0x000000, header, sizeof(header))) {
         DLOG("[NAND] ERR: slot table write FAILED");
         return;

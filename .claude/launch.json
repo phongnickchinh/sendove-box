@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "sendlove_web"],
       "port": 5173
+    },
+    {
+      "name": "sendlove-web-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--prefix", "sendlove_web", "--", "--port", "4173", "--strictPort"],
+      "port": 4173
     }
   ]
 }

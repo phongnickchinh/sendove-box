@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
 
 /**
- * Thông báo nổi ở mép trên màn hình — luôn nằm trong tầm mắt, kể cả khi nút vừa bấm ở
- * cuối một trang dài (thông báo đặt ở đầu trang từng nằm khuất 700px phía trên).
+ * Floating notice at the top of the viewport.
  * const [toast, showToast] = useToast(); showToast('Đã lưu'); showToast('Lỗi…', 'err');
  */
 export function useToast() {

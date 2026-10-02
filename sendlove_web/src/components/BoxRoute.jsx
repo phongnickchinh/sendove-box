@@ -2,15 +2,9 @@ import { Navigate, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 /**
- * Chặn vào trang của một hộp khi:
- *   - hộp không còn trong tài khoản (đã huỷ ghép, hoặc mở lại link cũ)
- *     → về Dashboard;
- *   - sai vai trò (người gửi gõ URL /receiver/... hoặc ngược lại)
- *     → sang đúng trang của vai trò thật.
- * Không có lớp này thì các trang tự gọi API và nhận một loạt lỗi 403 thô.
- *
- * Profile chưa tải được (mất mạng) thì KHÔNG chặn: không biết danh sách hộp
- * thì không được đoán; để trang tự báo lỗi mạng như bình thường.
+ * Guards a box's pages: a box no longer in the account → Dashboard; the wrong
+ * role → the page for the actual role. If the profile failed to load (offline),
+ * do NOT block: let the page report the network error itself.
  */
 export default function BoxRoute({ role }) {
   const { boxId } = useParams();

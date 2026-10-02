@@ -9,9 +9,7 @@ class AuthController {
         // but useful if you want to sync users explicitly
         this.login = async (req, res, next) => {
             try {
-                // In a real scenario, the token is verified in middleware, 
-                // but here we might pass the token to the service for additional claims
-                // assuming req.user is set by auth middleware
+                // req.user is set by the auth middleware
                 res.status(200).json({ success: true, data: { message: 'Logged in' } });
             }
             catch (error) {

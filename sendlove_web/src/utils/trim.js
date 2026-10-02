@@ -1,13 +1,10 @@
 /**
- * Kẹp đoạn cắt [start, end] (giây) khi người dùng kéo một trong hai tay nắm.
- *
- * Luật: 0 ≤ start < end ≤ duration, minSpan ≤ end - start ≤ maxSpan.
- * Kéo một đầu làm đoạn dài quá maxSpan thì đầu kia BỊ KÉO THEO (giữ nguyên
- * đầu người dùng đang cầm) — cảm giác tự nhiên hơn là chặn tay nắm lại.
- *
- * @param {'start'|'end'} handle  tay nắm vừa đổi
- * @param {number} value          giá trị mới của tay nắm đó
- * @param {{start:number,end:number}} range  đoạn hiện tại
+ * Clamp the trim range [start, end] (seconds) as the user drags one handle:
+ * 0 ≤ start < end ≤ duration, minSpan ≤ end - start ≤ maxSpan. Dragging past
+ * maxSpan drags the OTHER end along.
+ * @param {'start'|'end'} handle  the handle that just moved
+ * @param {number} value          its new value
+ * @param {{start:number,end:number}} range  the current range
  */
 export function clampRange(handle, value, range, { duration, maxSpan, minSpan = 1 }) {
   const min = Math.min(minSpan, duration);
@@ -26,15 +23,15 @@ export function clampRange(handle, value, range, { duration, maxSpan, minSpan = 
   return { start: round(start), end: round(end) };
 }
 
-/** Đoạn mặc định: từ đầu, dài tối đa maxSpan. */
+/** Default range: from the start, at most maxSpan long. */
 export const initialRange = (duration, maxSpan) => ({ start: 0, end: round(Math.min(duration, maxSpan)) });
 
 const round = (x) => Math.round(x * 10) / 10;
 
 /** 75.4 → "1:15.4", 9 → "0:09" */
 export function fmtTime(sec) {
-  // Làm tròn tổng số phần mười TRƯỚC khi tách phút/giây: tách trước rồi mới
-  // làm tròn thì 59.96 ra "0:59" thay vì "1:00".
+  // Round the total tenths BEFORE splitting minutes/seconds: splitting first
+  // turns 59.96 into "0:59" instead of "1:00".
   const tenths = Math.round(Math.max(0, sec) * 10);
   const m = Math.floor(tenths / 600);
   const whole = Math.floor((tenths % 600) / 10);

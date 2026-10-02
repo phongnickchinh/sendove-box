@@ -7,72 +7,66 @@
 class IStorageProvider;
 class SDCardManager;
 
-// ============================================================================
-// SdStore — lớp file tổng quát trên thẻ SD (theme, nhạc báo thức, log)
-// ============================================================================
-// Tin nhắn vẫn đi đường SDStorageProvider (slot + manifest) như cũ. Mọi dữ liệu nặng
-// khác nằm dưới cây thư mục này (thiết kế 2026-09-24, MEMORY.md §28):
-//   /sys/layout.json     {"schema":1} — phiên bản cấu trúc thẻ
-//   /sys/log/log0.txt    nhật ký (SdLog), log1.txt = bản cũ
-//   /theme/...           gói theme (ThemeStore)
-//   /alarm/...           nhạc báo thức (MusicStore)
+// SdStore — general files on the SD card (messages go through SDStorageProvider).
+// Tree (MEMORY.md §28):
+//   /sys/layout.json     {"schema":1}, the card layout version
+//   /sys/log/log0.txt    the log (SdLog); log1.txt = the previous one
+//   /theme/...           theme packages (ThemeStore)
+//   /alarm/...           alarm music (MusicStore)
 //
-// Quy tắc ghi an toàn khi mất điện:
-//   - File nhỏ: writeAtomic() = ghi X.tmp -> xoá X -> đổi tên. Boot: có X.tmp mà không
-//     có X thì đổi tên; có cả hai thì xoá X.tmp.
-//   - File lớn tải về: ghi X.part, kiểm size + crc32 rồi mới đổi tên. .part GIỮ LẠI
-//     qua reboot để tải tiếp bằng HTTP Range (NetworkManager::downloadFile).
+// Power-loss-safe writes:
+//   - small files: writeAtomic() = X.tmp -> delete X -> rename (repaired at boot)
+//   - large downloads: X.part, verified by size + crc32, then renamed; the .part is
+//     KEPT across reboots for HTTP Range resume
 //
-// Thẻ bị rút KHÔNG có nhánh xử lý riêng (nguyên tắc edge case, §28): lỗi I/O thì
-// probe(), thẻ không trả lời thì về ABSENT, remount ở lần sync kế tiếp.
-// ============================================================================
+// A removed card has NO dedicated handling (§28): on an I/O error probe(); if it
+// doesn't answer, go ABSENT and remount on the next sync.
 
 namespace SdStore {
 
 enum class State : uint8_t {
-    NONE,    // bản build không dùng thẻ (NAND)
-    ABSENT,  // có đường thẻ nhưng chưa mount được / vừa mất
+    NONE,    // this build doesn't use a card (NAND)
+    ABSENT,  // a card path exists but it isn't mounted / was just lost
     READY,
 };
 
-/// Gọi một lần sau storage->init(): tạo cây thư mục, dọn .tmp, đo dung lượng trống.
+/// Once after storage->init(): directory tree, .tmp cleanup, free space.
 void begin(IStorageProvider* storage);
 
 State state();
-/// "ok" | "absent" | "none" — gửi lên status.sd_state
+/// "ok" | "absent" | "none" — reported as status.sd_state
 const char* stateName();
 
-/// Thẻ đang dùng được thì trả SDCardManager, không thì nullptr.
+/// The SDCardManager when the card is usable, otherwise nullptr.
 SDCardManager* card();
 
-/// Tăng mỗi lần thẻ mount lại thành công -> theme/nhạc biết để kiểm và tải lại.
+/// Bumped on every successful remount -> theme/music know to re-check and re-download.
 extern std::atomic<uint32_t> mountEpoch;
 
-/// Thử mount lại khi đang ABSENT. CHỈ gọi lúc không phát tin/nhạc và không giữ file
-/// nào mở. true = vừa mount lại được.
+/// Try to remount while ABSENT. ONLY while nothing plays and no file is open.
 bool tryRemount();
 
-/// Báo một thao tác thẻ vừa lỗi -> probe(); thẻ không trả lời thì chuyển ABSENT.
+/// Report a failed card operation -> probe(); an unresponsive card becomes ABSENT.
 void noteIoError();
 
-/// Dung lượng trống (MB), đo lúc mount và sau refreshFree() (đo thật có thể mất vài giây).
+/// Cached free space (MB); refreshFree() re-measures (may take seconds).
 uint32_t freeMB();
 void refreshFree();
 
-/// Ghi nguyên tử một file nhỏ (xem đầu file).
+/// Atomically write a small file (see the top of this file).
 bool writeAtomic(const char* path, const uint8_t* data, size_t len);
-/// Đọc file nhỏ thành chuỗi kết thúc '\0'. Trả số byte đọc được, -1 nếu không có file.
+/// Read a small file as a '\0'-terminated string. Returns bytes read, -1 if the file is missing.
 int32_t readText(const char* path, char* buf, size_t maxLen);
 
 bool exists(const char* path);
 bool remove(const char* path);
-/// Xoá thư mục cùng các file bên trong (một cấp, đủ cho gói theme /theme/t_<id>_r<rev>).
+/// Remove a directory and the files in it (one level — enough for a theme package /theme/t_<id>_r<rev>).
 bool removeTree(const char* dir);
 int32_t fileSize(const char* path);
 
-/// CRC-32 chuẩn (zlib/IEEE, poly 0xEDB88320) — web tính cùng công thức.
+/// Standard CRC-32 (zlib/IEEE, poly 0xEDB88320) — the web uses the same formula.
 uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len);
-/// crc32 của `size` byte đầu file. ok = false nếu đọc hụt.
+/// crc32 of the first `size` bytes of a file. ok = false on a short read.
 uint32_t crc32File(const char* path, uint32_t size, bool* ok);
 
 }  // namespace SdStore

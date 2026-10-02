@@ -1,6 +1,6 @@
 import { initiateMessage, confirmMessage } from '../api/message';
 
-/** Khớp maxSize trong typeMap của message.service.ts initiateMessage. */
+/** Must match maxSize in typeMap of message.service.ts initiateMessage. */
 const ORIGINAL_MAX_BYTES = {
   original_video: 50 * 1024 * 1024,
   original_image: 10 * 1024 * 1024,
@@ -44,18 +44,10 @@ export const uploadToSignedPolicy = (policyObj, blob, onProgress) => {
 };
 
 /**
- * Orchestrates the full upload process: initiate -> upload files -> confirm
- * 
- * @param {string} boxId 
- * @param {Object} data 
- * @param {string} data.type - 'video' | 'image' | 'voice'
- * @param {string} data.text 
- * @param {Blob} data.binBlob 
- * @param {Blob} data.voiceBlob 
- * @param {Blob} data.thumbBlob 
- * @param {Blob} data.originalBlob - mp4, jpg, gif
- * @param {Object} data.metadata - { duration, frameCount, width, height }
- * @param {Function} onProgress - callback for total upload progress (0-100)
+ * Full upload: initiate -> upload files -> confirm.
+ * data: { type: 'video'|'image'|'voice', text, binBlob, voiceBlob, thumbBlob,
+ *         originalBlob, metadata: { duration, frameCount, width, height } }
+ * onProgress: total upload progress (0-100)
  */
 export const uploadMessage = async (boxId, data, onProgress) => {
   const blobsToUpload = [];
@@ -69,9 +61,8 @@ export const uploadMessage = async (boxId, data, onProgress) => {
     const originalType = data.type === 'video' ? 'original_video' :
                          data.type === 'image' ? 'original_image' :
                          data.type === 'gif' ? 'original_gif' : null;
-    // Bản gốc chỉ để xem lại trên web (popup chi tiết), hộp không tải nó. Vượt
-    // trần của signed policy (message.service.ts initiateMessage) thì GCS từ
-    // chối và CẢ lượt gửi hỏng — nên bỏ bản gốc, tin vẫn tới hộp bình thường.
+    // The original is only for viewing on the web. Over the signed-policy limit GCS
+    // would fail the WHOLE send, so drop it and let the message reach the box.
     const tooBig = originalType && data.originalBlob.size > ORIGINAL_MAX_BYTES[originalType];
     if (tooBig) console.warn(`[upload] bỏ ${originalType} (${data.originalBlob.size} B) — vượt trần máy chủ`);
     if (originalType && !tooBig) {

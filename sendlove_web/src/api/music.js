@@ -1,22 +1,17 @@
 import apiClient from './client';
 import { uploadToSignedPolicy } from '../utils/mediaUploader';
 
-/**
- * Thư viện nhạc báo thức của hộp — /boxes/:boxId/music (music.routes.ts), chỉ người nhận.
- * Tối đa 10 bài, mỗi bài 5–60 giây (MUSIC_LIMITS ở backend).
- * Mọi response bọc { success, data }.
- */
+/** The box's alarm music library — /boxes/:boxId/music, receiver only. Up to 10 tracks, 5–60 seconds each. */
 
-/** data: AlarmMusic[] {music_id, name, rev, duration_ms, size, ...} theo thứ tự thêm */
+/** data: AlarmMusic[] {music_id, name, rev, duration_ms, size, ...} in insertion order */
 export const listMusic = async (boxId) => {
   const response = await apiClient.get(`/boxes/${boxId}/music`);
   return response.data;
 };
 
 /**
- * Tải lên 2 bước: xin policy → tải thẳng lên Storage → commit (backend tự đo size + crc32
- * và kiểm header AUDC). musicId có = thay nội dung bài đó (rev mới).
- * blob: kết quả encodeAlarmMusic(). Trả AlarmMusic đã lưu.
+ * Upload: request a policy → upload to Storage → commit (the backend verifies
+ * the file). musicId replaces that track. blob comes from encodeAlarmMusic().
  */
 export const uploadMusic = async (boxId, blob, { name, durationMs, musicId }, onProgress) => {
   const init = await apiClient.post(`/boxes/${boxId}/music/upload`, musicId ? { music_id: musicId } : {});
@@ -33,13 +28,13 @@ export const renameMusic = async (boxId, musicId, name) => {
   return response.data;
 };
 
-/** data: { detached_alarms } — số báo thức đang dùng bài này, đã chuyển về tiếng bíp. */
+/** data: { detached_alarms } — how many alarms used this track and were switched to the beep. */
 export const deleteMusic = async (boxId, musicId) => {
   const response = await apiClient.delete(`/boxes/${boxId}/music/${musicId}`);
   return response.data;
 };
 
-/** data: { url } ký 15 phút tới file .aud (bỏ 10 byte đầu để nghe, xem audFileToWavBlob). */
+/** data: { url } signed for 15 minutes to the .aud file (skip the first 10 bytes to play it; see audFileToWavBlob). */
 export const getMusicPreviewUrl = async (boxId, musicId) => {
   const response = await apiClient.get(`/boxes/${boxId}/music/${musicId}/preview`);
   return response.data;

@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import VideoInput from '../components/sender/VideoInput';
-// Kéo theo react-easy-crop — chỉ tải khi chọn thẻ Ảnh / Tin tĩnh.
+// Pulls in react-easy-crop — loaded only when the Image / Still card is picked.
 const ImageInput = lazy(() => import('../components/sender/ImageInput'));
 const loadingInput = <span className="sl-body">Đang tải…</span>;
 import VoiceInput from '../components/sender/VoiceInput';
@@ -15,7 +15,7 @@ import { useSend } from '../context/SendContext';
 import { useToast } from '../components/ui/Toast';
 import { MAX_SECONDS, maxSecondsFor } from '../utils/boxStatus';
 
-/** Thẻ loại nội dung; hint là hàm vì trần thời lượng phụ thuộc loại hộp. */
+/** Content-type cards; hint is a function because the duration cap depends on the box type. */
 const TYPES = [
   { key: 'video', icon: 'video', label: 'Video', hint: (max) => `Tối đa ${max} giây` },
   { key: 'image', icon: 'image', label: 'Ảnh', hint: () => 'Khung vuông' },
@@ -36,25 +36,24 @@ export default function SenderUI() {
   const { boxId } = useParams();
   const navigate = useNavigate();
 
-  const [step, setStep] = useState(1); // 1: Chọn loại, 2: Nhập nội dung, 3: Mã hoá & gửi
+  const [step, setStep] = useState(1); // 1: pick type, 2: enter content, 3: encode & send
   const [type, setType] = useState(null); // 'video' | 'image' | 'voice' | 'text' | 'static'
   const [text, setText] = useState('');
 
-  // Card "Tin nhắn tĩnh": giữ tạm ảnh/nhạc nền đã chọn cho tới khi bấm Gửi
-  // chung — khác với các card cũ (ảnh/voice riêng lẻ) tự upload ngay khi xong.
+  // "Still message" card: holds its image / music until the shared Send button
+  // (single-media cards send as soon as their input is done).
   const [staticImageBlob, setStaticImageBlob] = useState(null);
   const [staticAudioData, setStaticAudioData] = useState(null); // { wavBlob, duration }
 
-  // Lượt gửi sống trong SendContext (sống lâu hơn trang này): "Để sau" hay rời trang thì
-  // thanh nổi đáy màn hình báo tiến độ và kết quả, lỗi thì có nút Thử lại.
+  // The send lives in SendContext and outlives this page (floating bottom bar).
   const { job, running, start, retry, leave } = useSend();
   const [toast, showToast] = useToast();
 
   const { profile } = useAuth();
   const boxName = profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`;
 
-  // Trần thời lượng theo loại bộ nhớ của hộp. Chưa đọc được hộp thì tạm dùng
-  // mức NAND (thấp hơn) — an toàn cho mọi hộp; đọc xong mới nới lên.
+  // Duration cap by the box's storage type. Until the box is loaded, use the
+  // (lower) NAND cap — safe for every box — and raise it afterwards.
   const [maxSeconds, setMaxSeconds] = useState(MAX_SECONDS.nand);
   useEffect(() => {
     let alive = true;
@@ -67,8 +66,8 @@ export default function SenderUI() {
     return () => { alive = false; };
   }, [boxId]);
 
-  // Ba bước cùng một route: đổi bước thì tự cuộn lên đầu, không thì bước 2 mở ra ở vị
-  // trí cuộn của lưới thẻ bước 1 và che mất tiêu đề + ô lời nhắn.
+  // Three steps share one route: scroll to the top on a step change, or step 2
+  // opens at step 1's scroll position and hides the title + caption field.
   useEffect(() => { window.scrollTo(0, 0); }, [step]);
 
   const handleTypeSelect = (selectedType) => {
@@ -93,11 +92,11 @@ export default function SenderUI() {
     setStep(3);
   };
 
-  // Rời trang khi bước 3 còn mở (nút back trình duyệt, bấm link khác): chuyển lượt gửi ra
-  // thanh nổi thay vì để nó chạy mà không ai thấy.
+  // Leaving the page while step 3 is open (browser back, another link): hand
+  // the send to the floating bar instead of letting it run unseen.
   useEffect(() => () => leave(), [leave]);
 
-  // ---------- Bước 3: popup mã hoá / màn kết quả ----------
+  // ---------- Step 3: encoding popup / result screen ----------
   const mine = job && !job.detached && job.boxId === boxId;
   if (step === 3 && mine) {
     return (
@@ -117,8 +116,8 @@ export default function SenderUI() {
     );
   }
 
-  // ---------- Bước 1: chọn loại nội dung ----------
-  // step 3 mà lượt gửi đã được bỏ/chuyển ra thanh nổi → về lưới chọn loại.
+  // ---------- Step 1: pick the content type ----------
+  // On step 3 with the send already dropped / moved to the floating bar → back to the type grid.
   if (step === 1 || step === 3) {
     return (
       <Screen>
@@ -153,14 +152,14 @@ export default function SenderUI() {
     );
   }
 
-  // ---------- Bước 2: nhập nội dung ----------
+  // ---------- Step 2: enter content ----------
   return (
     <Screen>
       <AppBar step="Bước 2/3" onBack={handleCancel} />
       <Body>
         <Header title={STEP2_TITLE[type]} to={boxName} />
 
-        {/* Màn ghi âm KHÔNG có ô nhập lời nhắn — loại voice không mang text. */}
+        {/* The recording screen has NO caption field — voice messages carry no text. */}
         {type !== 'voice' && type !== 'text' && (
           <div className="sl-field">
             <label className="sl-label" htmlFor="sl-note">Lời nhắn (tuỳ chọn)</label>
@@ -210,7 +209,7 @@ export default function SenderUI() {
 
         {type === 'static' && (
           <>
-            {/* Ảnh (tuỳ chọn) */}
+            {/* Image (optional) */}
             {!staticImageBlob ? (
               <Suspense fallback={loadingInput}>
                 <ImageInput onImageSelect={setStaticImageBlob} onCancel={handleCancel} />
@@ -225,7 +224,7 @@ export default function SenderUI() {
               </div>
             )}
 
-            {/* Nhạc nền (tuỳ chọn) */}
+            {/* Background music (optional) */}
             {!staticAudioData ? (
               <VoiceInput onRecordComplete={setStaticAudioData} onCancel={handleCancel} maxSeconds={maxSeconds} purpose="music" />
             ) : (

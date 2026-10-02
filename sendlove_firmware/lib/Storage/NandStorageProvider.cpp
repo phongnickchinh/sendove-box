@@ -5,7 +5,7 @@
 
 int8_t NandStorageProvider::parseSlotId(const char* identifier) const {
     if (!identifier || identifier[0] == '\0') return -1;
-    // Hỗ trợ cả chuỗi dạng "0", "1" hoặc "slot_0"
+    // Accepts both "0", "1" and "slot_0"
     if (strncmp(identifier, "slot_", 5) == 0) {
         return atoi(identifier + 5);
     }
@@ -24,8 +24,7 @@ void NandStorageProvider::loadNvsState() {
     _writeSlotIndex = _prefs.getChar("write_idx", 0);
     _prefs.end();
 
-    // NVS có thể còn trạng thái của bố cục 5 slot cũ: bit 3-4 và write_idx 3/4 không
-    // còn slot tương ứng. Để nguyên thì isFull() kẹt true vĩnh viễn.
+    // Drop NVS state left from the old 5-slot layout, or isFull() stays true forever.
     _unreadBitmask &= SLOT_ALL_MASK;
     if (_writeSlotIndex < 0 || _writeSlotIndex >= NAND_SLOT_COUNT) _writeSlotIndex = 0;
     _activeSlot = _writeSlotIndex;
@@ -37,16 +36,14 @@ void NandStorageProvider::saveNvsState() {
     _prefs.putUChar("unread_mask", _unreadBitmask);
     _prefs.putChar("write_idx", _writeSlotIndex);
     _prefs.end();
-    // DLOG saved every time -> dropped
 }
 
 bool NandStorageProvider::init(SemaphoreHandle_t spiMutex) {
     bool ok = _nand.init(spiMutex);
     loadNvsState();
 
-    // Doi magic NSLT -> NSL2 lam bang slot tren flash bi xoa sach, nhung
-    // unread_mask trong NVS thi khong. Neu khong don, lan boot dau sau khi nap
-    // firmware moi hop bao "co tin chua doc" tro toi slot rong -> tin nhan trang.
+    // A magic change wipes the slot table but not unread_mask in NVS: clear it too,
+    // or "unread" would point at an empty slot.
     if (ok && !_nand.isTableValid() && (_unreadBitmask != 0 || _writeSlotIndex != 0)) {
         DLOG("[NANDP] bang slot moi -> reset hang cho NVS");
         _unreadBitmask  = 0;
@@ -109,10 +106,10 @@ StorageItemInfo NandStorageProvider::getItemInfo(const char* identifier) const {
 bool NandStorageProvider::openForWrite(const char* identifier) {
     int8_t slot = parseSlotId(identifier);
     if (slot < 0 || slot >= NAND_SLOT_COUNT) {
-        slot = _writeSlotIndex; // Mặc định dùng cur_point
+        slot = _writeSlotIndex; // default: the queue cursor
     }
 
-    // Kiểm tra nếu slot tại cur_point đang chứa tin nhắn chưa đọc -> từ chối ghi (Bộ nhớ đầy)
+    // The cursor's slot is still unread: storage full
     if (_unreadBitmask & (1 << slot)) {
         DLOG("[NANDP] ERR: slot %d unread full", slot);
         return false;
@@ -122,10 +119,8 @@ bool NandStorageProvider::openForWrite(const char* identifier) {
     _writeOffset = 4;
     _slotCapacity = slotSpan(slot);
 
-    // Erase-as-you-write: chỉ erase 1 block 64KB đầu (~150-2000ms) thay vì nguyên
-    // slot ~5.3MB (15-25s block đồng bộ). Erase nguyên slot khiến socket HTTP đã
-    // mở đứng im quá lâu -> TCP Zero-Window -> CDN backoff -> download timeout
-    // giữa chừng (xác nhận qua log thực tế + review độc lập, không phải suy đoán).
+    // Erase-as-you-write: only the first 64KB block now. Erasing the whole slot
+    // (15-25s) stalls the open HTTP socket until the download times out.
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_activeSlot];
     uint32_t initialEraseLen = (_slotCapacity < 65536U) ? _slotCapacity : 65536U;
     if (!_nand.eraseRange(slotStartAddr, initialEraseLen)) {
@@ -151,10 +146,9 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
         return 0;
     }
 
-    // Erase thêm block 64KB kế tiếp khi con trỏ ghi sắp chạm vùng chưa erase. BẤT
-    // BIẾN bắt buộc: luôn erase bắt đầu từ _erasedUpToAddr, KHÔNG BAO GIỜ từ
-    // startAddr — eraseRange() với địa chỉ không align 4096 sẽ tự lùi về đầu
-    // sector chứa nó, dùng sai mốc có thể xoá đè lên dữ liệu vừa ghi trước đó.
+    // Erase the next 64KB block before the cursor reaches unerased space.
+    // INVARIANT: erase from _erasedUpToAddr, NEVER from startAddr — eraseRange()
+    // rounds an unaligned address down and would erase data just written.
     uint32_t slotEndAddr = slotStartAddr + _slotCapacity;
     while (_erasedUpToAddr < endAddr && _erasedUpToAddr < slotEndAddr) {
         uint32_t toErase = 65536U;
@@ -163,14 +157,13 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
         }
         if (!_nand.eraseRange(_erasedUpToAddr, toErase)) {
             DLOG("[NANDP] ERR: erase-ahead FAILED @ %lu", (unsigned long)_erasedUpToAddr);
-            return 0;   // NetworkManager thay written < len -> writeError -> discardWrite()
+            return 0;   // short count = write error for NetworkManager
         }
         _erasedUpToAddr += toErase;
     }
 
-    // Truoc day goi writeRaw() roi `return len` VO DIEU KIEN: mot lan lay SPI mutex
-    // that bai (timeout 1000ms khi Task_MediaPlayer priority 3 dang render standby)
-    // se tao ra file tai "thanh cong" nhung thung lo du lieu. Gio bao loi that.
+    // Report the real result, never `return len`: a failed mutex take would
+    // leave holes in a "successful" download.
     if (!_nand.writeRaw(startAddr, data, len)) {
         DLOG("[NANDP] ERR: write failed @ %lu", (unsigned long)startAddr);
         return 0;
@@ -185,13 +178,13 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
 
     DLOG("[NANDP] closeWrite slot %d", _activeSlot);
 
-    // Ghi kích thước dữ liệu (4 bytes) vào offset 0
+    // Data size (4 bytes) at offset 0
     uint32_t rawJpegSize = (_writeOffset >= 4) ? (_writeOffset - 4) : 0;
     if (!_nand.writeRaw(slotStartAddr, (const uint8_t*)&rawJpegSize, 4)) {
         DLOG("[NANDP] ERR: size header write FAILED slot %d", _activeSlot);
     }
 
-    // Kiểm tra 16 byte header container ở offset 4 (SLBX / SLOT / VJPG / VIMG)
+    // Container header at offset 4 (SLBX / SLOT / VJPG / VIMG)
     uint8_t header[16];
     _nand.readRaw(slotStartAddr + 4, header, 16);
 
@@ -205,11 +198,9 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         if (mediaType == 0x02 || totalFrames <= 1) {
             totalFrames = 1;
             _nand.setSlotInfo(_activeSlot, "VIMG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
-            // Dropped Detected SLBX image
         } else {
             if (totalFrames == 0) totalFrames = 1;
             _nand.setSlotInfo(_activeSlot, "VJPG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
-            // Dropped Detected SLBX video
         }
     } else if (memcmp(header, "SLOT", 4) == 0 || memcmp(header, "VJPG", 4) == 0 || memcmp(header, "VIMG", 4) == 0) {
         uint32_t dataSize = *(uint32_t*)(header + 4);
@@ -218,26 +209,23 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         if (dataSize == 0 || dataSize > _writeOffset) dataSize = _writeOffset;
         const char* magic = (totalFrames > 1) ? "VJPG" : "VIMG";
         _nand.setSlotInfo(_activeSlot, magic, dataSize, (fps > 0) ? fps : 10, totalFrames, maxDisplayTime);
-        // Dropped Detected pre-encoded
     } else {
         _nand.setSlotInfo(_activeSlot, "VIMG", _writeOffset, 1, 1, maxDisplayTime);
-        // Dropped Raw JPEG
     }
 
-    // 1. Đánh dấu bit thứ cur_point là chưa đọc (1)
+    // 1. Mark the slot unread
     _unreadBitmask |= (1 << _activeSlot);
 
-    // 2. Lưu lại slot và offset hiện tại để dùng cho openForAppend (ghi audio nối tiếp)
+    // 2. Remember slot + offset for openForAppend (audio)
     _lastWrittenSlot   = _activeSlot;
     _lastWrittenOffset = _writeOffset;
 
-    // 3. Dịch tiến con trỏ hàng chờ sang Slot tiếp theo
+    // 3. Advance the queue cursor
     int8_t writtenSlot = _activeSlot;
     _writeSlotIndex = (_activeSlot + 1) % NAND_SLOT_COUNT;
     _slotCapacity = 0;
 
-    // Ghi slot table vào NAND TRƯỚC khi commit unread bitmask vào NVS.
-    // Nếu bị reset giữa chừng, NAND sẽ có data hợp lệ trước khi NVS biết slot là unread.
+    // Slot table to flash BEFORE the unread bitmask to NVS (safe across a reset midway).
     _nand.writeSlotTable();
     saveNvsState();
     DLOG("[NANDP] written slot %d next %d", writtenSlot, _writeSlotIndex);
@@ -246,19 +234,13 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
 void NandStorageProvider::discardWrite() {
     if (_activeSlot >= 0 && _activeSlot < NAND_SLOT_COUNT) {
         DLOG("[NANDP] discardWrite slot %d (bo %lu byte do)", _activeSlot, (unsigned long)_writeOffset);
-        // Vung vat ly da bi erase do dang luc openForWrite(); phai xoa magic trong
-        // bang slot de isSlotValid()/findFirstValidSlot() khong nhat nham du lieu
-        // rac nay la mot item hop le.
+        // Clear the slot's magic so the partly erased area isn't taken for a valid item.
         const char emptyMagic[4] = {0, 0, 0, 0};
         _nand.setSlotInfo(_activeSlot, emptyMagic, 0, 0, 0, 0);
         _nand.writeSlotTable();
 
-        // Doi voi duong ghi "khong anh" (chi audio/text), closeWrite() da chay
-        // TRUOC de commit placeholder (can cho openForAppend() tinh offset dung)
-        // roi moi biet tai audio/text co thanh cong khong -> unread bit va
-        // _writeSlotIndex co the DA bi set/dich truoc khi discardWrite() duoc goi.
-        // Xoa bit + lui _writeSlotIndex ve dung slot nay de lan sync sau retry
-        // dung slot vua fail, khong dot them 1 slot moi. Vo hai neu bit chua tung set.
+        // The image-less path committed a placeholder before its audio download:
+        // undo the unread bit and step the cursor back so the next sync reuses this slot.
         if (_unreadBitmask & (1 << _activeSlot)) {
             _unreadBitmask &= ~(1 << _activeSlot);
             _writeSlotIndex = _activeSlot;
@@ -288,21 +270,18 @@ bool NandStorageProvider::getItemText(const char* identifier, char* outBuf, size
 bool NandStorageProvider::openForAppend(const char* identifier) {
     int8_t slot = parseSlotId(identifier);
     if (slot < 0 || slot >= NAND_SLOT_COUNT) {
-        // Fallback về slot vừa ghi
+        // Fall back to the slot just written
         slot = _lastWrittenSlot;
     }
     if (slot < 0) return false;
 
-    // Không erase lại — tiếp tục ghi từ vị trí cuối của lần ghi video.
-    // CHỈ đặt _activeSlot: _writeSlotIndex là con trỏ hàng chờ, closeWrite đã dịch
-    // nó sang slot kế. Kéo nó lùi lại đây làm isFull() thấy slot chưa đọc -> báo đầy.
+    // No re-erase: continue where the video write ended. Set ONLY _activeSlot;
+    // pulling _writeSlotIndex back would make isFull() report full.
     _activeSlot   = slot;
     _writeOffset  = _lastWrittenOffset;
     _slotCapacity = slotSpan(slot);
 
-    // Tự tính lại _erasedUpToAddr từ _writeOffset (làm tròn lên block 64KB kế
-    // tiếp) thay vì dựa vào giá trị còn sống sót từ phiên openForWrite() trước
-    // đó — tự chữa lành, đúng bất kể thứ tự gọi thực tế trong call-chain.
+    // Recompute _erasedUpToAddr from _writeOffset rather than trust the last session's value.
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_activeSlot];
     uint32_t currentPos = slotStartAddr + _writeOffset;
     _erasedUpToAddr = ((currentPos + 65535U) / 65536U) * 65536U;
@@ -316,7 +295,7 @@ bool NandStorageProvider::openForAppend(const char* identifier) {
 
 void NandStorageProvider::closeAppend() {
     if (_activeSlot < 0 || _activeSlot >= NAND_SLOT_COUNT) return;
-    if (_activeSlot != _lastWrittenSlot) return;   // không phải phiên append
+    if (_activeSlot != _lastWrittenSlot) return;   // not an append session
 
     uint32_t audioSize = (_writeOffset > _lastWrittenOffset) ? (_writeOffset - _lastWrittenOffset) : 0;
     _nand.setSlotAudioSize(_activeSlot, audioSize);
@@ -355,9 +334,8 @@ uint8_t NandStorageProvider::getUnreadCount() const {
 bool NandStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
     if (!hasUnreadMessage() || !outId || maxLen == 0) return false;
 
-    // Duyệt tìm tin chưa đọc CŨ NHẤT bắt đầu từ cur_point theo vòng tròn modulo.
-    // Nếu slot được đánh dấu unread nhưng data thực tế không đọc được (bị ngắt khi write),
-    // tự động xóa bit và bỏ qua slot đó để tránh treo vĩnh viễn.
+    // Oldest unread first, scanning from the queue cursor. An unread slot that
+    // can't be read is cleared and skipped, so the box never gets stuck on it.
     for (int i = 0; i < NAND_SLOT_COUNT; i++) {
         int8_t slot = (_writeSlotIndex + i) % NAND_SLOT_COUNT;
         if (!(_unreadBitmask & (1 << slot))) continue;
@@ -380,7 +358,7 @@ void NandStorageProvider::markAsRead(const char* identifier) {
     int8_t slot = parseSlotId(identifier);
     if (slot >= 0 && slot < NAND_SLOT_COUNT) {
         uint8_t oldUnread = _unreadBitmask;
-        _unreadBitmask &= ~(1 << slot); // Xóa bit thứ slot về 0 (đã đọc)
+        _unreadBitmask &= ~(1 << slot);
         saveNvsState();
         DLOG("[NANDP] marked slot %d READ", slot);
     }
@@ -413,7 +391,7 @@ bool NandStorageProvider::formatStorage() {
     _erasedUpToAddr = 0;
     saveNvsState();
 
-    // Reset mốc last_download_ts trong NVS về 0 để sẵn sàng tải tin nhắn mới từ đầu
+    // Reset last_download_ts so messages download from scratch
     ConfigManager cfg;
     if (cfg.init(NVS_NAMESPACE)) {
         cfg.saveLastDownloadTimestamp(0);

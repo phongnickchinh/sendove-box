@@ -9,19 +9,15 @@ import Illustration from '../components/ui/Illustration';
 import { useToast } from '../components/ui/Toast';
 
 /**
- * Màn 10 "alarm config dialog" + màn 12 "alarm config full".
- *
- * Hai luật của firmware phải hiện thẳng trên UI, không giấu:
- *   MAX_ALARMS = 10 (config.h:74) — đầy thì nút thêm phải vô hiệu, không phải
- *     để người dùng bấm rồi nhận 400.
- *   repeatable = false KHÔNG phải "không lặp lại" mà là báo thức một lần: kêu
- *     xong firmware tự set is_enable = false. Hàng vẫn nằm trong danh sách ở
- *     trạng thái tắt — nên copy phải nói rõ chứ không thì người dùng tưởng hỏng.
+ * Alarm list + alarm editor dialog. Two firmware rules the UI must show:
+ *   MAX_ALARMS = 10 — when full, the add button is disabled.
+ *   repeatable = false is a one-shot alarm: after ringing it stays in the list,
+ *   switched off — the copy must say so.
  */
 
 const MAX_ALARMS = 10;
-// Âm lượng báo thức: mặc định 80 (khớp firmware + backend). Dưới 20 có thể không nghe
-// thấy lúc đang ngủ; muốn im thì tắt báo thức.
+// Alarm volume: default 80 (matches firmware + backend). Below 20 may be
+// inaudible while asleep; to silence an alarm, turn it off instead.
 const DEFAULT_VOLUME = 80;
 const MIN_VOLUME = 20;
 const NEW_ALARM = { time: '07:30', repeatable: true, music_id: '', volume: DEFAULT_VOLUME, ramp: true };
@@ -41,11 +37,11 @@ export default function ReceiverAlarms() {
 
   const load = useCallback(async () => {
     try {
-      // Thư viện nhạc chỉ để hiện tên bài; đọc hỏng thì báo thức vẫn dùng được.
+      // The music library is only for showing track names; alarms still work if it fails to load.
       listMusic(boxId).then((r) => r.success && setMusic(r.data || [])).catch(() => {});
       const res = await getAlarms(boxId);
-      // RTDB trả theo thứ tự key (alarm_<thời điểm tạo>), không theo giờ kêu.
-      // "HH:mm" 24h so sánh chuỗi là đúng thứ tự thời gian.
+      // RTDB returns key order (alarm_<creation time>), not ring-time order.
+      // 24h "HH:mm" strings sort chronologically.
       if (res.success) setAlarms((res.data || []).slice().sort((a, b) => a.time.localeCompare(b.time)));
       setError(null);
     } catch {
@@ -59,8 +55,8 @@ export default function ReceiverAlarms() {
 
   const full = alarms.length >= MAX_ALARMS;
 
-  /* Bật/tắt ngay trên danh sách: đổi trước cho tay bấm thấy phản hồi, hỏng thì
-     tải lại từ máy chủ chứ không đoán trạng thái cũ. */
+  /* Toggle from the list: update optimistically for instant feedback; on
+     failure reload from the server instead of guessing the previous state. */
   const toggle = async (alarm) => {
     setAlarms((prev) => prev.map((a) => (a.id === alarm.id ? { ...a, is_enable: !a.is_enable } : a)));
     try {
@@ -77,20 +73,20 @@ export default function ReceiverAlarms() {
       const fields = {
         time: editing.time,
         repeatable: editing.repeatable,
-        music_id: editing.music_id || '', // "" = tiếng bíp
+        music_id: editing.music_id || '', // "" = beep
         volume: editing.volume,
         ramp: editing.ramp,
       };
       if (editing.id) {
-        // Đổi giờ một báo thức đang tắt = muốn nó kêu vào giờ mới → bật luôn.
-        // Chỉ sửa nhạc / âm lượng thì giữ nguyên trạng thái bật-tắt.
+        // Changing the time of a disabled alarm means "ring at the new time" → enable it.
+        // Editing only music / volume keeps the on-off state.
         const wake = editing.time !== editing.origTime && !editing.origEnabled;
         await updateAlarm(boxId, editing.id, wake ? { ...fields, is_enable: true } : fields);
       } else {
         await createAlarm(boxId, { ...fields, is_enable: true });
       }
       setEditing(null);
-      // a_flag: hộp chỉ đọc lại danh sách ở lần thức dậy kế tiếp.
+      // a_flag: the box re-reads the list only on its next wake-up.
       showToast('Đã lưu. Hộp nhận trong vòng 5 phút.');
       await load();
     } catch (err) {
@@ -119,7 +115,7 @@ export default function ReceiverAlarms() {
       <Body>
         <Header title="Báo thức" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
-        {/* Đếm số đã dùng — đổi sang giọng cảnh báo khi chạm trần 10 */}
+        {/* Usage counter — switches to a warning tone at the cap of 10 */}
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {full && <Icon name="alert" size={16} style={{ color: 'var(--warning-fill)' }} />}
           <span className="sl-caption" style={{ fontWeight: 500, color: full ? 'var(--warning-text)' : 'var(--neutral-500)' }}>
@@ -203,8 +199,8 @@ export default function ReceiverAlarms() {
 
         {full && <Tips>Hộp chứa được 10 báo thức. Xoá bớt một cái để có chỗ cho cái mới.</Tips>}
 
-        {/* Cách tắt khi hộp kêu — khớp firmware (config.h ALARM_SNOOZE_SEC / ALARM_RING_MAX_MS).
-            Hiện một lần ở đây thay vì lặp trong popup mỗi lần sửa. */}
+        {/* How to stop a ringing box — matches the firmware (config.h ALARM_SNOOZE_SEC /
+            ALARM_RING_MAX_MS). Shown once here instead of in every edit popup. */}
         <div className="sl-howto">
           <Icon name="tap" size={22} />
           <span><b>Chạm</b> để báo lại sau 5 phút · <b>giữ 3 giây</b> để tắt · tự tắt sau 1 phút</span>
@@ -213,8 +209,8 @@ export default function ReceiverAlarms() {
 
       {toast}
 
-      {/* Xác nhận xoá là một BƯỚC trong cùng modal, không phải modal chồng: mỗi Modal gắn
-          một listener Esc riêng, hai modal chồng nhau sẽ đóng cùng lúc. */}
+      {/* Delete confirmation is a STEP inside the same modal, not a stacked one: each
+          Modal registers its own Esc listener, so two stacked modals would close together. */}
       {editing?.confirmDelete && (
         <Modal onClose={saving ? undefined : () => setEditing({ ...editing, confirmDelete: false })}>
           <span className="sl-heading">Xoá báo thức {editing.origTime}?</span>
@@ -237,8 +233,8 @@ export default function ReceiverAlarms() {
             </button>
           </div>
 
-          {/* time input của trình duyệt trả đúng "HH:mm" 24h — khớp thẳng
-              pattern /^\d{2}:\d{2}$/ ở validation.middleware.ts:152 */}
+          {/* The browser's time input yields 24h "HH:mm" — the format
+              validation.middleware.ts requires */}
           <label className="sl-field">
             <span className="sl-label">Giờ</span>
             <input
@@ -271,7 +267,7 @@ export default function ReceiverAlarms() {
               <option value="">Tiếng bíp</option>
               {music.map((m) => <option key={m.music_id} value={m.music_id}>{m.name}</option>)}
             </select>
-            {/* Nhạc chỉ về hộp khi báo thức dùng nó; chưa kịp tải lúc tới giờ thì bíp. */}
+            {/* Music reaches the box only when an alarm uses it; if it hasn't downloaded by ring time, the box beeps. */}
             {editing.music_id && (
               <span className="sl-caption" style={{ color: 'var(--neutral-400)' }}>
                 Hộp tải bài này về ở lần đồng bộ kế tiếp. Chưa tải xong lúc tới giờ thì hộp kêu tiếng bíp.

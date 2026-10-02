@@ -39,9 +39,7 @@ class FirebaseFirmwareRepository extends firebase_base_repository_1.FirebaseBase
     constructor() {
         super('firmware');
     }
-    /**
-     * Lấy firmware mới nhất (version cao nhất)
-     */
+    /** The latest firmware (highest version). */
     async getLatest() {
         const { db } = await Promise.resolve().then(() => __importStar(require('../../firebase')));
         const snapshot = await db.ref(this.collectionPath)

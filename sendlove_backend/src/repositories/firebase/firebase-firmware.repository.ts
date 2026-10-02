@@ -7,9 +7,7 @@ export class FirebaseFirmwareRepository extends FirebaseBaseRepository<Firmware>
     super('firmware');
   }
 
-  /**
-   * Lấy firmware mới nhất (version cao nhất)
-   */
+  /** The latest firmware (highest version). */
   async getLatest(): Promise<Firmware | null> {
     const { db } = await import('../../firebase');
     const snapshot = await db.ref(this.collectionPath)

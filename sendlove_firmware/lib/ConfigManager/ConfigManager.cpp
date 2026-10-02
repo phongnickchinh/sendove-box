@@ -1,10 +1,6 @@
 #include "ConfigManager.h"
 #include "ScreenLogger.h"
 
-// ============================================================================
-// ConfigManager Implementation
-// ============================================================================
-
 bool ConfigManager::init(const char* namespaceName) {
     bool ok = _prefs.begin(namespaceName, false); // false = read-write
     if (!ok) {
@@ -125,12 +121,10 @@ size_t ConfigManager::loadAlarms(AlarmItem* alarms, size_t maxCount) {
     if (!alarms || maxCount == 0) return 0;
     uint32_t count = _prefs.getUInt(KEY_ALARM_COUNT, 0);
     if (count == 0) return 0;
-    // Blob phai dung count * sizeof(AlarmItem). Lech nghia la blob ghi boi ban
-    // firmware co AlarmItem khac kich thuoc (id[16] cu) -> doc vao se lech truong.
-    // Tra 0: AlarmClock coi nhu chua co bao thuc, lan sync dau se tai lai tu cloud.
+    // A size mismatch means another firmware's AlarmItem layout: return 0 and let
+    // the first sync download the list.
     if (_prefs.getBytesLength(KEY_ALARM_DATA) != count * sizeof(AlarmItem)) {
-        // Hạ cờ dirty cùng lúc: blob đã bỏ mà cờ còn bật thì lần sync đầu "hộp thắng",
-        // đẩy danh sách RỖNG lên đè mất toàn bộ báo thức trên cloud.
+        // Clear the dirty flag too, or the first sync would push an EMPTY list over the cloud's.
         _prefs.putBool(KEY_ALARM_DIRTY, false);
         _prefs.putUInt(KEY_ALARM_COUNT, 0);
         return 0;
@@ -157,7 +151,7 @@ void ConfigManager::loadSettings(UserSettings& out) {
 bool ConfigManager::saveSettings(const UserSettings& s) {
     bool ok = _prefs.putUChar(KEY_SET_BL, s.brightness) > 0;
     ok = (_prefs.putUChar(KEY_SET_VOL, s.volume) > 0) && ok;
-    // rev ghi SAU CÙNG: mất điện giữa chừng thì rev cũ còn đó -> lần sync sau đọc lại.
+    // rev is written LAST: after a power loss midway the old rev remains -> the next sync reads the config again.
     ok = (_prefs.putUInt(KEY_SET_REV, s.rev) > 0) && ok;
     return ok;
 }

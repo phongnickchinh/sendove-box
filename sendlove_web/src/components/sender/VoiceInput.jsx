@@ -8,14 +8,9 @@ import { Actions, Button, Tips } from '../ui/Screen';
 import RangeTrimmer from './RangeTrimmer';
 
 /**
- * Thân của "create-content-dialog for voice" (01-voice.js): thẻ nền trắng cao
- * 236, vòng tròn mic 72 nền rose/200, nhãn trạng thái + đồng hồ.
- *
- * Hai nguồn: thu trực tiếp, hoặc chọn một file âm thanh có sẵn trên máy. Cả hai
- * đi chung một đường: giải mã ra AudioBuffer → chọn đoạn (tối đa maxSeconds)
- * → cắt, mono, resample, nén đỉnh → WAV (mediaEncoder.encodeAudioSegment).
- *
- * purpose='music' là ô nhạc nền của tin tĩnh — cùng cơ chế, khác chữ.
+ * Body of the voice step. Two sources (record live, or pick a file) share one
+ * path: decode → pick a range (up to maxSeconds) → encodeAudioSegment.
+ * purpose='music' = the background-music slot of a still message.
  */
 const TEXT = {
   voice: { title: 'Lời nhắn thoại', tip: 'Loại này không kèm dòng chữ nào.' },
@@ -25,7 +20,7 @@ const TEXT = {
 const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'voice' }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [time, setTime] = useState(0);
-  const [clip, setClip] = useState(null);       // { blob, name, buffer } nguồn đã có
+  const [clip, setClip] = useState(null);       // { blob, name, buffer } the loaded source
   const [range, setRange] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -33,13 +28,12 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
   const audioRef = useRef(null);
-  // Vòng requestAnimationFrame đọc ref, không đọc state: state trong closure
-  // của drawWaveform là giá trị lúc bắt đầu thu (false), nên vòng vẽ dừng ngay.
+  // A ref, not state: the draw loop's closure would keep the stale state value.
   const isRecordingRef = useRef(false);
   const clipUrl = useObjectUrl(clip?.blob);
   const t = TEXT[purpose] || TEXT.voice;
 
-  /** Nguồn mới (bản thu hoặc file) → giải mã, đặt đoạn mặc định. */
+  /** A new source (recording or file) → decode it and set the default range. */
   const loadClip = useCallback(async (blob, name) => {
     setBusy(true);
     setError(null);
@@ -55,9 +49,7 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
     }
   }, [maxSeconds]);
 
-  // PHẢI khai báo trước mọi useEffect dùng nó trong deps: mảng deps được đọc
-  // ngay khi render, đọc một const chưa khởi tạo là ReferenceError (TDZ) —
-  // đúng lỗi "Cannot access 'p' before initialization" từng làm sập thẻ này.
+  // MUST be declared before any useEffect listing it in deps (TDZ otherwise).
   const stopRecording = useCallback(async () => {
     if (!recorderRef.current || !isRecordingRef.current) return;
     isRecordingRef.current = false;
@@ -74,13 +66,13 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
     return () => clearInterval(interval);
   }, [isRecording, maxSeconds]);
 
-  // Dừng ở effect riêng, không gọi trong updater của setTime: updater phải
-  // thuần (StrictMode gọi nó hai lần).
+  // Stop in a separate effect, not inside setTime's updater: updaters must be
+  // pure (StrictMode calls them twice).
   useEffect(() => {
     if (isRecording && time >= maxSeconds) stopRecording();
   }, [isRecording, time, maxSeconds, stopRecording]);
 
-  // Tắt mic nếu rời màn khi đang thu.
+  // Release the mic if the user leaves while recording.
   useEffect(() => () => {
     cancelAnimationFrame(animationRef.current);
     if (isRecordingRef.current) recorderRef.current?.stop();
@@ -114,7 +106,7 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
     try {
       await rec.start();
     } catch (err) {
-      // Từ chối quyền micro / không có micro / trang không phải https.
+      // Mic permission denied / no mic / page not served over https.
       setError(err?.name === 'NotAllowedError'
         ? 'Trình duyệt chưa được phép dùng micro. Bật quyền micro cho trang này rồi thử lại, hoặc chọn một file có sẵn.'
         : 'Không mở được micro. Bạn vẫn có thể chọn một file âm thanh có sẵn.');
@@ -205,7 +197,7 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
 
       {error && <div className="sl-reason">{error}</div>}
 
-      {/* Tin thoại: đồng hồ 0:00 / tối đa đã nói thay dải gợi ý. Nhạc nền (tin tĩnh) giữ nguyên. */}
+      {/* Voice message: the 0:00 / max timer replaces the hint line. Background music (still message) keeps it. */}
       {purpose !== 'voice' && (
         <Tips>
           Tối đa {maxSeconds} giây, mono. {t.tip}

@@ -1,33 +1,29 @@
-# CI/CD cho cả 3 phần: firmware ESP32-C3, backend (Firebase Functions), web (Vite).
+# CI/CD for firmware (ESP32-C3), backend (Firebase Functions) and web (Vite).
 #
-# CẦN TẠO 2 SECRET trong Settings > Secrets and variables > Actions:
-#   WEB_ENV_PRODUCTION      — chép nguyên nội dung sendlove_web/.env (8 dòng VITE_FIREBASE_*
-#                             + VITE_API_URL trỏ tới https://us-central1-iot-app-839a2.cloudfunctions.net/api).
-#                             Thiếu nó thì bản build thiếu cấu hình Firebase và trang web hỏng.
-#   FIREBASE_SERVICE_ACCOUNT — JSON service account có quyền deploy (Firebase Admin +
-#                             Cloud Functions Admin + Service Account User + Artifact Registry Writer).
-#                             KHÔNG dùng serviceAccountKey.json của backend nếu nó không đủ quyền deploy.
+# REQUIRES 2 SECRETS (Settings > Secrets and variables > Actions):
+#   WEB_ENV_PRODUCTION       — the contents of sendlove_web/.env (VITE_FIREBASE_* +
+#                              VITE_API_URL = https://us-central1-iot-app-839a2.cloudfunctions.net/api)
+#   FIREBASE_SERVICE_ACCOUNT — service account JSON with deploy rights (Firebase Admin, Cloud
+#                              Functions Admin, Service Account User, Artifact Registry Writer)
 #
-# Deploy CỐ Ý không đụng `storage`: rules Storage đang ở trạng thái đã kiểm chứng tay,
-# deploy lại từ CI mà sai thứ tự là chết đường tải media (MEMORY.md §11, §19).
-#
-# Thứ tự deploy PHẢI LÀ: database → functions → hosting (MEMORY.md §22 gotcha).
-# Flash firmware TRƯỚC khi push code nếu schema Firebase Realtime DB thay đổi,
-# tránh PUT alarm bị từ chối bởi rules mới → dirty flag không bao giờ xoá được.
+# Deploy DELIBERATELY skips `storage`: its rules are hand-verified (MEMORY.md §11, §19).
+# Deploy order MUST BE database → functions → hosting (MEMORY.md §22). When the
+# Realtime DB schema changes, flash firmware BEFORE pushing code (new rules reject old
+# firmware's alarm PUT and its dirty flag never clears, MEMORY.md §21).
 
 name: CI/CD
 
 on:
   push:
     branches: [main]
-  # Chạy CI trên PR để bắt lỗi trước khi merge vào main. Deploy chỉ chạy khi push vào main.
+  # PRs run CI only; deploy runs on push to main.
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
 
-# Hai lần push sát nhau không được deploy chồng lên nhau.
+# Never run two deploys at once.
 concurrency:
   group: cicd-${{ github.ref }}
   cancel-in-progress: false
@@ -54,8 +50,7 @@ jobs:
 
       - run: pip install --upgrade platformio
 
-      # Giá trị giả, chỉ đủ để biên dịch. File .bin sinh ra ở đây KHÔNG nạp được
-      # vào hộp thật (sai FIREBASE_HOST/BOX_ID) — nó chỉ để bắt lỗi biên dịch/link.
+      # Dummy secrets: this .bin only proves the firmware builds; do NOT flash it.
       - name: Tạo config_secrets.h từ template
         run: cp sendlove_firmware/include/config_secrets.h.example sendlove_firmware/include/config_secrets.h
 
@@ -82,8 +77,7 @@ jobs:
           cache: npm
           cache-dependency-path: sendlove_backend/package-lock.json
 
-      # `npm ci` ở đây chạy đúng npm 10 như Cloud Build. Chính bước này bắt được
-      # lỗi lock file lệch đã làm deploy functions fail ngày 2026-09-18.
+      # `npm ci` (npm 10, as in Cloud Build) catches an out-of-sync lock file.
       - run: npm ci
       - run: npm run build
       - run: npx jest --ci
@@ -106,8 +100,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
 
-      # Vite nhúng biến môi trường LÚC BUILD. .env.production.local đè .env.production
-      # đã commit, nên VITE_API_URL vẫn trỏ function thật nếu secret không có dòng đó.
+      # Vite embeds env variables AT BUILD TIME; .env.production.local overrides the
+      # committed .env.production.
       - name: Ghi .env.production.local từ secret
         env:
           WEB_ENV: ${{ secrets.WEB_ENV_PRODUCTION }}
@@ -135,11 +129,8 @@ jobs:
 
   deploy:
     name: Deploy Firebase (hosting + functions + rules)
-    # Firmware không deploy qua CI (file .bin chỉ dùng để kiểm tra build),
-    # nhưng nếu firmware fail build thì deploy cũng block lại — tránh push code
-    # web/backend mà firmware đang bị broken.
+    # Firmware isn't deployed by CI, but a failing firmware build blocks the deploy.
     needs: [firmware, backend, web]
-    # Chỉ deploy khi push vào main, không deploy khi mở PR.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
@@ -157,8 +148,7 @@ jobs:
           name: web-dist
           path: sendlove_web/dist
 
-      # predeploy của functions trong firebase.json chạy `npm run build` tại chỗ,
-      # nên cần devDependencies (typescript) của backend.
+      # The functions predeploy hook runs `npm run build`, which needs devDependencies.
       - name: Cài dependencies backend
         run: npm ci --prefix sendlove_backend
 
@@ -173,10 +163,8 @@ jobs:
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
-      # Thứ tự PHẢI LÀ: database → functions → hosting (§22 gotcha).
-      # Nếu deploy database rules trước thì firmware cũ (chưa flash) bị từ chối PUT alarm
-      # → dirty flag không bao giờ xoá → box PUT mỗi 10s thêm 1 handshake TLS (§21).
-      # firebase-tools xử lý tuần tự theo thứ tự khai báo trong --only.
+      # Order MUST BE database → functions → hosting (MEMORY.md §22): firebase-tools
+      # deploys targets in the order given to --only.
       - name: Deploy
         run: >
           npx --yes firebase-tools@15 deploy

@@ -1,16 +1,13 @@
 import { buildVlw, ensureWebFont } from './vlw';
 import { FONT_FAMILIES, VLW_KEY, charsetFor, isVlw } from '../theme/layout';
 
-/**
- * Trần bitmap MỘT glyph: VLWfont::drawChar của hộp cấp nó bằng alloca trên stack task vẽ
- * (8KB, config.h TASK_STACK_MEDIA_PLAYER). Vượt thì chặn trước khi gửi.
- */
+/** Bitmap cap for ONE glyph: the box allocates it on an 8KB task stack. */
 export const MAX_GLYPH_BYTES = 3000;
 
 /**
- * Cắt phông cho gói theme: một file cho mọi widget giờ (f_time), một cho mọi widget ngày
- * (f_date), theo họ + cỡ của widget ĐẦU TIÊN mỗi loại (theme/layout.js sharedFontIssue).
- * Trả { f_time?: {bytes, family, px}, f_date?: ... } — chỉ loại nào có widget dùng VLW.
+ * Subset the fonts of a theme package: one file per widget type (f_time,
+ * f_date), from the FIRST widget's family + size (see sharedFontIssue).
+ * Returns { f_time?: {bytes, family, px}, f_date?: ... }.
  */
 export async function buildThemeFonts(widgets) {
   const out = {};

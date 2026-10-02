@@ -1,19 +1,13 @@
 import apiClient from './client';
 
-/**
- * Các endpoint ở /boxes/:boxId. Đối chiếu sendlove_backend/src/routes/box.routes.ts.
- * Giữ đúng khuôn của message.js: nhận boxId, trả thẳng response.data.
- */
+/** Endpoints under /boxes/:boxId (box.routes.ts); each returns response.data. */
 
 export const getBoxDetails = async (boxId) => {
   const response = await apiClient.get(`/boxes/${boxId}`);
   return response.data; // { success: true, data: Box }
 };
 
-/**
- * Chỉ gửi những field thật sự đổi. Backend set config_flag để ESP32 biết
- * phải đọc lại — nên gửi thừa field cũng làm hộp thức dậy đọc lại vô ích.
- */
+/** Send only changed fields: any write sets config_flag and makes the box re-read its config. */
 export const updateBoxConfig = async (boxId, config) => {
   const response = await apiClient.put(`/boxes/${boxId}/config`, config);
   return response.data;

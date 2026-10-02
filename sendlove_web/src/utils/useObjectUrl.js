@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react';
 
 /**
- * blob → object URL, tự revoke khi blob đổi hoặc component rời màn.
- *
- * Tạo URL TRONG effect, không trong useMemo: StrictMode (dev) chạy
- * cleanup → effect lần hai, nên URL tạo bằng useMemo sẽ bị revoke ở cleanup
- * đầu mà vẫn được dùng tiếp → ảnh/video/tiếng xem trước trắng trơn.
+ * blob → object URL, revoked on change or unmount. Created INSIDE the effect,
+ * not in useMemo: StrictMode's double cleanup would revoke a memoized URL.
  */
 export default function useObjectUrl(blob) {
   const [url, setUrl] = useState(null);

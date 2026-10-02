@@ -9,9 +9,7 @@ class FirebaseRateLimitRepository {
     getKey(senderId, boxId) {
         return `${senderId}_${boxId}`;
     }
-    /**
-     * Lấy record rate limit cho cặp sender + box
-     */
+    /** Get the rate-limit record for a sender + box pair. */
     async get(senderId, boxId) {
         const key = this.getKey(senderId, boxId);
         const snapshot = await firebase_1.db.ref(`${this.basePath}/${key}`).once('value');
@@ -19,9 +17,7 @@ class FirebaseRateLimitRepository {
             return null;
         return snapshot.val();
     }
-    /**
-     * Tăng count lên 1
-     */
+    /** Increment count by 1. */
     async increment(senderId, boxId) {
         const key = this.getKey(senderId, boxId);
         const ref = firebase_1.db.ref(`${this.basePath}/${key}/count`);
@@ -29,9 +25,7 @@ class FirebaseRateLimitRepository {
             return (current || 0) + 1;
         });
     }
-    /**
-     * Reset window mới: count = 1, window_start = now
-     */
+    /** Start a new window: count = 1, window_start = now. */
     async reset(senderId, boxId) {
         const key = this.getKey(senderId, boxId);
         await firebase_1.db.ref(`${this.basePath}/${key}`).set({
@@ -40,34 +34,31 @@ class FirebaseRateLimitRepository {
         });
     }
     /**
-     * Atomic check-and-increment sử dụng Firebase transaction.
-     * Kết hợp đọc → kiểm tra → tăng count trong 1 bước duy nhất,
-     * tránh race condition khi nhiều request đồng thời.
-     *
-     * Trả về { allowed: true } nếu dưới limit, { allowed: false, remainingMs } nếu bị giới hạn.
+     * Atomic check-and-increment (Firebase transaction). Returns { allowed: true }
+     * or { allowed: false, remainingMs }.
      */
     async checkAndIncrement(senderId, boxId, maxCount, windowMs) {
         const key = this.getKey(senderId, boxId);
         const ref = firebase_1.db.ref(`${this.basePath}/${key}`);
         const now = Date.now();
         const result = await ref.transaction((current) => {
-            // Chưa có record → tạo mới, cho qua
+            // No record → create it, allow
             if (!current) {
                 return { count: 1, window_start: now };
             }
-            // Window hết hạn → reset, cho qua
+            // Window expired → reset, allow
             if (now - current.window_start > windowMs) {
                 return { count: 1, window_start: now };
             }
-            // Đã đạt giới hạn → abort transaction (return undefined)
+            // Limit reached → abort the transaction (return undefined)
             if (current.count >= maxCount) {
                 return undefined;
             }
-            // Dưới limit → tăng count
+            // Under the limit → increment
             return { count: current.count + 1, window_start: current.window_start };
         });
         if (!result.committed) {
-            // Transaction bị abort = đã đạt rate limit
+            // Aborted transaction = rate limit reached
             const snapshot = await ref.once('value');
             const data = snapshot.val();
             const remainingMs = data ? windowMs - (now - data.window_start) : 0;

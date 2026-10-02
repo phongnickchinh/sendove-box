@@ -34,8 +34,8 @@ class MessageController {
         this.getMessages = async (req, res, next) => {
             try {
                 const { boxId } = req.params;
-                // Kẹp 1..100: limit=abc ra NaN làm limitToLast() ném lỗi 500, còn limit
-                // quá lớn thì kéo cả cây messages/{boxId} về một lượt.
+                // Clamp to 1..100: limit=abc yields NaN and makes limitToLast() throw a
+                // 500, and a huge limit would pull the whole messages/{boxId} tree at once.
                 const parsed = parseInt(req.query.limit, 10);
                 const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 100) : 20;
                 const messages = await this.msgService.getMessages(boxId, limit);

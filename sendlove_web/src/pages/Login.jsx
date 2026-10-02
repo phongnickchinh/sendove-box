@@ -3,16 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { signInWithGoogle, signInWithFacebook, readRedirectError } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
 import { Screen } from '../components/ui/Screen';
+import InstallHint, { InAppBrowserWarning } from '../components/InstallHint';
 
 /**
- * Frame "login signup" trong Figma. Ảnh nền thật (anthony-melone…unsplash) nằm ở
- * src/assets/login-hero.jpg, gắn trong .sl-login-hero (sendlove.css) kèm lớp phủ tối.
- * Bố cục dùng flex căn giữa dọc thay vì toạ độ tuyệt đối của thiết kế
- * (logo y=271, card y=344…) để không vỡ trên các chiều cao màn hình khác
- * iPhone 14 Pro Max — một đơn giản hoá có chủ đích.
+ * The Figma "login signup" frame: a hero photo (.sl-login-hero) with a floating
+ * card, centered with flex instead of the design's absolute coordinates.
  */
 
-/** Logo Google — giữ nguyên 4 màu gốc, brand guideline không cho tô lại. */
+/** Google logo — keeps its 4 original colors; the brand guideline forbids recoloring. */
 function GoogleMark() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -24,7 +22,7 @@ function GoogleMark() {
   );
 }
 
-/** Logo Facebook — giữ nguyên brand guideline (chữ f trắng trên nền xanh #1877F2). */
+/** Facebook logo — per its brand guideline (white f on #1877F2 blue). */
 function FacebookMark() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -57,8 +55,8 @@ export default function Login() {
     if (user) navigate('/dashboard', { replace: true });
   }, [user, navigate]);
 
-  // Vừa quay về từ lượt đăng nhập redirect (dự phòng khi popup bị chặn):
-  // thành công thì AuthContext đã có user; lỗi thì phải hiện, không im lặng.
+  // Just back from a redirect sign-in (the popup-blocked fallback): on success
+  // AuthContext already has the user; an error must be shown, not swallowed.
   useEffect(() => {
     let alive = true;
     readRedirectError().then((err) => { if (alive && err) setError(messageOf(err)); });
@@ -69,10 +67,10 @@ export default function Login() {
     setLoading(provider);
     setError(null);
     const res = await fn();
-    if (res.redirecting) return; // trang đang chuyển sang Google/Facebook
+    if (res.redirecting) return; // the page is navigating to Google/Facebook
     if (res.error) setError(messageOf(res.error));
-    // Thành công: useEffect ở trên điều hướng khi AuthContext có user.
-    // Tự đóng cửa sổ (cancelled) hoặc lỗi: trả nút về, hết treo "Đang kết nối…".
+    // Success: the effect above navigates once AuthContext has the user.
+    // Cancelled or failed: reset the button so it doesn't stay on "connecting".
     if (res.error || res.cancelled) setLoading(null);
   };
 
@@ -89,6 +87,7 @@ export default function Login() {
           </div>
 
           {error && <div className="sl-reason">{error}</div>}
+          <InAppBrowserWarning />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <button
@@ -108,6 +107,8 @@ export default function Login() {
               {loading === 'facebook' ? 'Đang kết nối…' : 'Đăng nhập bằng Facebook'}
             </button>
           </div>
+
+          <InstallHint />
         </div>
 
         <p className="sl-login-terms">

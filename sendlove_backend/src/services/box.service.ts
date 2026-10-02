@@ -3,9 +3,8 @@ import { IUserRepository } from '../repositories/interfaces/user.repository.inte
 import { FirebaseBoxRepository } from '../repositories/firebase/firebase-box.repository';
 import { FirebaseUserRepository } from '../repositories/firebase/firebase-user.repository';
 import { AppError } from '../middleware/error-handler.middleware';
-// Import module con, KHÔNG `import * as admin` rồi `admin.database.ServerValue`: TypeScript
-// biên dịch thành __importStar, mà firebase-admin 12 không để `database` là khoá riêng của
-// module -> undefined lúc chạy ("reading 'increment'", 2026-09-25).
+// Import the submodule; do NOT use `admin.database.ServerValue` via `import * as admin`:
+// with firebase-admin 12 it is undefined at runtime.
 import { ServerValue } from 'firebase-admin/database';
 
 export class BoxService {
@@ -14,10 +13,7 @@ export class BoxService {
     private userRepo: IUserRepository = new FirebaseUserRepository()
   ) {}
 
-  /**
-   * Pairing: User nhập mã pairing code → liên kết user với box.
-   * scode bắt đầu bằng 'S', rcode bắt đầu bằng 'R'.
-   */
+  /** Pairing by code: scode starts with 'S', rcode with 'R'. */
   async pairBox(uid: string, pairingCode: string, boxName: string): Promise<{ boxId: string; role: 'sender' | 'receiver' }> {
     const isSender = pairingCode.startsWith('S');
     const codeType = isSender ? 'scode' : 'rcode';
@@ -31,7 +27,7 @@ export class BoxService {
     // Default to empty object if Firebase omitted it
     const pairing = box.pairing || {};
 
-    // Kiểm tra slot đã bị chiếm chưa
+    // The slot must be free
     if (isSender && pairing.sender_id) {
       throw new AppError(400, 'slot_full', 'Sender slot is already taken');
     }
@@ -39,7 +35,7 @@ export class BoxService {
       throw new AppError(400, 'slot_full', 'Receiver slot is already taken');
     }
 
-    // Kiểm tra user không thể vừa sender vừa receiver trên cùng 1 box
+    // A user can't be both sender and receiver of the same box
     const isAlreadyReceiver = isSender && (pairing.receiver_id === uid);
     const isAlreadySender = !isSender && (pairing.sender_id === uid);
     if (isAlreadyReceiver || isAlreadySender) {
@@ -48,25 +44,23 @@ export class BoxService {
 
     const now = Date.now();
 
-    // Cập nhật Box pairing
+    // Update the box's pairing
     const pairingUpdate = isSender
       ? { 'pairing/sender_id': uid, 'pairing/sender_paired_time': now }
       : { 'pairing/receiver_id': uid, 'pairing/receiver_paired_time': now };
 
     await this.boxRepo.update(box.id, { ...pairingUpdate, updated_at: now } as any);
 
-    // Set p_flag để ESP32 biết có thay đổi pairing
+    // Set p_flag so the ESP32 knows the pairing changed
     await this.boxRepo.updateFlags(box.id, { p_flag: true });
 
-    // Cập nhật User boxes_list
+    // Update the user's boxes_list
     await this.userRepo.linkBox(uid, box.id, { role, box_name: boxName });
 
     return { boxId: box.id, role };
   }
 
-  /**
-   * Unpair: Ngắt kết nối user khỏi box.
-   */
+  /** Unpair: detach the user from the box. */
   async unpairBox(uid: string, boxId: string): Promise<string> {
     const box = await this.boxRepo.getById(boxId);
     if (!box) throw new AppError(404, 'box_not_found', 'Box not found');
@@ -83,7 +77,7 @@ export class BoxService {
 
     const now = Date.now();
 
-    // Cập nhật Box
+    // Update the box
     const pairingUpdate = roleToUnpair === 'sender'
       ? { 'pairing/sender_id': null, 'pairing/sender_paired_time': null }
       : { 'pairing/receiver_id': null, 'pairing/receiver_paired_time': null };
@@ -93,16 +87,13 @@ export class BoxService {
     // Set p_flag
     await this.boxRepo.updateFlags(boxId, { p_flag: true });
 
-    // Cập nhật User
+    // Update the user
     await this.userRepo.unlinkBox(uid, boxId);
 
     return roleToUnpair;
   }
 
-  /**
-   * Xem chi tiết box (chỉ user đã pair mới xem được).
-   * Lọc bỏ device_secret và wifi password trước khi trả về.
-   */
+  /** Box details (paired users only), without device_secret and the Wi-Fi password. */
   async getBoxDetails(uid: string, boxId: string) {
     const box = await this.boxRepo.getById(boxId);
     if (!box) throw new AppError(404, 'box_not_found', 'Box not found');
@@ -113,7 +104,7 @@ export class BoxService {
       throw new AppError(403, 'unauthorized', 'You are not paired to this box');
     }
 
-    // Sanitize: loại bỏ sensitive fields trước khi trả về API
+    // Sanitize: strip sensitive fields before returning from the API
     const { device_secret, config, ...rest } = box;
     const safeConfig = config ? {
       ...config,
@@ -126,10 +117,8 @@ export class BoxService {
   }
 
   /**
-   * Cập nhật cấu hình WiFi cho box.
-   * pwd undefined = người dùng không đụng ô mật khẩu → GIỮ mật khẩu đã lưu, chỉ đổi ssid.
-   * (Web không bao giờ đọc lại được mật khẩu, nên trước đây mỗi lần lưu là ghi đè "".)
-   * pwd "" = mạng mở, người dùng chọn rõ ràng.
+   * Update the box's Wi-Fi config. pwd undefined = KEEP the stored password (the
+   * web can't read it back to resend it); pwd "" = an open network.
    */
   async updateWifi(uid: string, boxId: string, ssid: string, pwd?: string): Promise<void> {
     await this.getBoxDetails(uid, boxId); // Validates ownership
@@ -143,10 +132,7 @@ export class BoxService {
     await this.boxRepo.update(boxId, updates as any);
   }
 
-  /**
-   * Cập nhật led_state / display_brightness / playback_volume cho box.
-   * Chỉ các field được truyền vào mới bị ghi đè.
-   */
+  /** Update led_state / display_brightness / playback_volume (only the fields passed in). */
   async updateBoxConfig(uid: string, boxId: string, data: {
     led_state?: string;
     display_brightness?: number;
@@ -158,14 +144,13 @@ export class BoxService {
     if (data.led_state !== undefined) updates['config/led_state'] = data.led_state;
     if (data.display_brightness !== undefined) updates['config/display_brightness'] = data.display_brightness;
     if (data.playback_volume !== undefined) updates['config/playback_volume'] = data.playback_volume;
-    // Hộp ghi lại số này vào status/config_rev sau khi áp dụng xong -> web so hai số để
-    // hiện "đã áp dụng" hay "đang chờ hộp". Tăng nguyên tử phía server, hai lần lưu
-    // gần nhau không bao giờ ra cùng một rev.
+    // The box echoes this to status/config_rev once applied. Incremented atomically
+    // on the server, so two close saves never share a rev.
     updates['config/config_rev'] = ServerValue.increment(1);
 
     await this.boxRepo.update(boxId, updates as any);
 
-    // Set config_flag để ESP32 biết cần đọc lại cấu hình
+    // Set config_flag so the ESP32 re-reads its config
     await this.boxRepo.updateFlags(boxId, { config_flag: true });
   }
 }

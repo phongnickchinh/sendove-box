@@ -3,15 +3,12 @@ import Icon from '../components/ui/Icon';
 import { runSend, SendError } from '../utils/sendMessage';
 
 /**
- * Một lượt gửi tin sống lâu hơn màn gửi. Trước đây bấm "Để sau" (hoặc rời trang) thì
- * việc tải vẫn chạy nhưng không ai báo kết quả — lỗi là mất nội dung trong im lặng.
- *
+ * A send outlives the send screen, so leaving the page mid-upload still reports
+ * the result.
  * job: { id, boxId, boxName, input, phase: encoding|uploading|done|error, progress,
  *        summary: { fileName, duration }, errorText, detached }
- * detached = người dùng đã rời màn bước 3 → thanh trạng thái nổi đáy màn hình thay chỗ.
- *
- * Chỉ MỘT lượt mỗi lúc: gửi lượt thứ hai khi lượt đầu chưa xong bị chặn (start trả false).
- * Cho lượt sau đè lên lượt trước là quay lại đúng lỗi "hỏng mà không ai biết".
+ * detached = the user left the step-3 screen → the floating bottom bar takes over.
+ * ONE send at a time: a second start() while one is unfinished returns false.
  */
 const SendCtx = createContext(null);
 
@@ -35,7 +32,7 @@ export function SendProvider({ children }) {
       update({ phase: 'done', progress: 100 });
     } catch (err) {
       console.error(err);
-      // Lỗi từ backend (vd. vượt rate limit 100 tin/ngày) có message riêng.
+      // Backend errors (e.g. the 100 messages/day rate limit) carry their own message.
       update({
         phase: 'error',
         errorText: err instanceof SendError ? err.message : err.response?.data?.error?.message || null,
@@ -54,7 +51,7 @@ export function SendProvider({ children }) {
     execute({ boxId: job.boxId, boxName: job.boxName, input: job.input, detached: job.detached });
   }, [job, execute]);
 
-  /** Rời màn bước 3: đã xong thì bỏ (giải phóng blob), còn chạy / lỗi thì chuyển ra thanh nổi. */
+  /** Leaving step 3: drop a finished job (frees its blobs); a running / failed one moves to the floating bar. */
   const leave = useCallback(() => {
     setJob((j) => (!j ? j : j.phase === 'done' ? null : { ...j, detached: true }));
   }, []);
@@ -71,7 +68,7 @@ export function SendProvider({ children }) {
 
 const TYPE_LABEL = { video: 'video', image: 'ảnh', voice: 'lời nhắn thoại', text: 'dòng chữ', static: 'tin nhắn tĩnh' };
 
-/** Thanh nổi đáy màn hình cho lượt gửi đang chạy nền. Gửi xong tự ẩn sau 5 giây. */
+/** Floating bottom bar for a send running in the background. Hides itself 5 seconds after success. */
 function SendStatus({ job, onRetry, onDismiss }) {
   const done = job.phase === 'done';
   useEffect(() => {

@@ -7,7 +7,7 @@ import { validate, registerDeviceSchema, heartbeatSchema } from '../middleware/v
 export default function deviceRoutes(controller: DeviceController) {
   const router = Router();
 
-  // Registration requires provisioning key (gắn trong firmware ESP32)
+  // Registration requires the provisioning key (built into the ESP32 firmware)
   router.post('/register', requireProvisioningKey, validate(registerDeviceSchema), controller.register);
 
   // All subsequent ESP32 endpoints require the X-Device-Id and X-Device-Secret headers
@@ -16,9 +16,6 @@ export default function deviceRoutes(controller: DeviceController) {
   router.get('/poll', controller.poll);
   router.post('/heartbeat', validate(heartbeatSchema), controller.heartbeat);
 
-  // Note: /download is usually handled by returning a signed URL in /poll
-  // but if you want to proxy it through functions:
-  // router.get('/download/:mediaType', controller.downloadMedia);
 
   return router;
 }

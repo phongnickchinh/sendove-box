@@ -5,9 +5,9 @@ const express_1 = require("express");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const role_guard_middleware_1 = require("../middleware/role-guard.middleware");
 /**
- * /boxes/:boxId/music — thư viện nhạc báo thức của hộp. Chỉ người nhận (user chốt
- * 2026-09-24), giống báo thức và theme. Tải lên 2 bước: POST /upload lấy signed POST
- * policy -> web tải thẳng lên Storage -> POST /commit để backend kiểm file và ghi DB.
+ * /boxes/:boxId/music — alarm music library, receiver only (product decision).
+ * Two-step upload: POST /upload returns a signed policy, POST /commit validates
+ * the uploaded file and writes the DB.
  */
 function musicRoutes(controller) {
     const router = (0, express_1.Router)({ mergeParams: true });

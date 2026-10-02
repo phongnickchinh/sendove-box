@@ -1,10 +1,6 @@
 import React from 'react';
 
-/**
- * Bộ icon outline lấy nguyên path từ bảng IC trong figma-scripts/_prelude.js.
- * Giữ nguyên viewBox 24, stroke-width 1.75, linecap/linejoin round như thiết kế.
- * Màu thừa kế `currentColor` để đặt màu bằng CSS thay vì truyền prop.
- */
+/** Outline icon set from the Figma file (24 viewBox, 1.75 stroke). Color = currentColor. */
 const PATHS = {
   back: <path d="M15 5l-7 7 7 7" />,
   heart: (
@@ -97,14 +93,14 @@ const PATHS = {
     </>
   ),
 
-  /* --- trạng thái hộp: pin, sóng, chuông, cài đặt --- */
+  /* --- box status: battery, signal, bell, settings --- */
   battery: (
     <>
       <rect x="2" y="7" width="17" height="10" rx="2.5" />
       <path d="M21.5 10.5v3" />
     </>
   ),
-  /* Ba mức sóng dùng chung một khung 24 nên chồng lên nhau không lệch tâm. */
+  /* The three signal levels share one 24 frame, so they overlay without shifting. */
   wifi: (
     <>
       <path d="M2.5 9a14 14 0 0119 0" />
@@ -145,7 +141,7 @@ const PATHS = {
     </>
   ),
 
-  /* --- hành động --- */
+  /* --- actions --- */
   plus: (
     <>
       <path d="M12 5v14" />
@@ -173,7 +169,7 @@ const PATHS = {
     </>
   ),
 
-  /* --- đăng nhập / ghép đôi --- */
+  /* --- sign-in / pairing --- */
   key: (
     <>
       <circle cx="8" cy="14" r="4" />
@@ -194,7 +190,7 @@ const PATHS = {
     </>
   ),
 
-  /* --- giao diện màn hình hộp --- */
+  /* --- box screen theme --- */
   palette: (
     <>
       <path d="M12 3a9 9 0 000 18 2 2 0 001.6-3.2 2 2 0 011.6-3.2h1.9A4.9 4.9 0 0021 9.6C20.4 5.8 16.6 3 12 3z" />
@@ -234,6 +230,14 @@ const PATHS = {
       <path d="M4.5 19.5h15" />
     </>
   ),
+  /* The iOS Share glyph (box + up arrow) — so users recognize the right button in Safari. */
+  share: (
+    <>
+      <path d="M12 15V3.5" />
+      <path d="M8 7l4-3.5L16 7" />
+      <path d="M8 10.5H6.5A1.5 1.5 0 0 0 5 12v7a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19v-7a1.5 1.5 0 0 0-1.5-1.5H16" />
+    </>
+  ),
   alignL: (
     <>
       <path d="M4 6h16" /><path d="M4 12h9" /><path d="M4 18h13" />
@@ -250,8 +254,8 @@ const PATHS = {
     </>
   ),
 
-  /* Hộp thư — thay cho "heart" ở dòng "Love to <tên>" trong Header, đúng
-     ẩn dụ mailbox của Figma (solar:mailbox-linear) hơn là trái tim. */
+  /* Mailbox — used on the "Love to <name>" line in Header, matching Figma's
+     mailbox metaphor (solar:mailbox-linear) rather than a heart. */
   tap: (
     <>
       <path d="M9.5 11V5.5a1.5 1.5 0 013 0V11" />
@@ -312,7 +316,7 @@ export default function Icon({ name, size = 20, sw = 1.75, ...rest }) {
   );
 }
 
-/** Icon đặc cho nút play (PLAY() trong prelude) */
+/** Solid icon for the play button */
 export function PlayIcon({ size = 20, ...rest }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" {...rest}>

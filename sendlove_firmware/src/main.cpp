@@ -23,15 +23,11 @@
 #include <esp_ota_ops.h>
 #include <esp_timer.h>
 
-// ============================================================================
-// SENDLOVE BOX — Main Firmware (Phase 3A: Storage Abstraction Layer)
-// ============================================================================
-// Kiến trúc FreeRTOS Event-Driven:
-//   - Task_MediaPlayer: Decode + render video/ảnh từ IStorageProvider (NAND / SD)
-//   - Task_UIController: Đọc touch sensor + gửi event chuyển slot/item
-//   - Task_NetworkController: Phục vụ WebServer / Captive Portal
-// ============================================================================
-// TOUCH_OTA_TOGGLE: cú giữ TOUCH_OTA_HOLD_MS (6s) — bước cuối của chuỗi chạm OTA.
+// SENDLOVE BOX firmware. Event-driven FreeRTOS tasks:
+//   Task_MediaPlayer       — state machine, playback, alarms
+//   Task_UIController      — touch sensor, sleep
+//   Task_NetworkController — WebServer / captive portal
+// TOUCH_OTA_TOGGLE: a 6s hold (TOUCH_OTA_HOLD_MS), the last step of the OTA touch sequence.
 enum class SystemEvent : uint8_t { NONE, TOUCH_SHORT, TOUCH_LONG, TIMEOUT_AUTO_NEXT, TOUCH_OTA_TOGGLE };
 
 struct AppContext {
@@ -54,79 +50,50 @@ static volatile bool forceStandbyRedraw = false;
 static SemaphoreHandle_t spiMutex = nullptr;
 static QueueHandle_t eventQueue = nullptr;
 
-// Lệnh phát tin đang chờ sync xong (hàng đợi 1 chỗ: nhiều cú chạm gộp làm một, vì
-// lệnh không mang tham số gì, chỉ là "phát tin chưa đọc kế tiếp"). Task_MediaPlayer
-// bật/tắt, Task_UIController đọc để không cho ngủ lúc đang chờ.
-//
-// Vì sao phải chờ: phát tin cấp ~74KB (_jpegBuffer 32KB + JPEGDEC 17,9KB + DMA I2S
-// 24KB), phiên TLS của sync cần 35-45KB (MEMORY.md §8, §21). Chạy chồng nhau trên
-// chip một lõi thì giật, và đã thấy REBOOT thật khi chạm lúc đang sync (2026-09-24).
-// KHÔNG tính cờ này vào isPlaybackActive(): sync đang tải sẽ tự huỷ ở điểm kiểm tra
-// kế tiếp mà không bật _hasPendingMessages -> chờ xong chẳng có tin mới nào để phát.
+// A play command waiting for sync to finish (1-slot queue). Set/cleared by
+// Task_MediaPlayer; Task_UIController reads it to stay awake.
+// Why wait: playback (~74KB) plus a TLS session (35-45KB) don't fit together and
+// caused reboots (MEMORY.md §8, §21). Do NOT fold this into isPlaybackActive(): the
+// sync would abort without setting _hasPendingMessages.
 static std::atomic<bool> s_pendingPlay{false};
 
-// Báo thức đang kêu BẰNG NHẠC (đọc thẻ liên tục). Tính vào isPlaybackActive() để sync
-// dừng ở điểm kiểm tra kế tiếp và downloadFile() ngắt giữa chừng: ở 16kHz DMA chỉ đủ
-// ~96ms, thẻ bận ghi tin là nhạc rè (case bắt buộc #5). Bíp thì không đọc thẻ, không tính.
+// An alarm is ringing WITH MUSIC (continuous card reads). Counts as
+// isPlaybackActive() so sync and downloads stop: a card busy writing makes the
+// music crackle (mandatory case, MEMORY.md §28). The beep doesn't read the card.
 static std::atomic<bool> s_alarmMusicOn{false};
 
-// ============================================================================
-// Rollback sau OTA
-// ============================================================================
-// Bootloader đã bật sẵn rollback (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=1), nhưng
-// initArduino() mặc định gọi verifyOta() (weak, trả true) rồi đánh dấu bản mới HỢP LỆ
-// ngay lúc boot — lớp bảo vệ bị vô hiệu. Trả true ở đây = Arduino không tự đánh dấu,
-// firmware tự lo: sống đủ OTA_VERIFY_DELAY_MS mới xác nhận (Task_UIController).
-// Reset trước mốc đó thì bootloader thấy partition vẫn PENDING_VERIFY và tự quay về
-// bản cũ — đó là toàn bộ nhánh thất bại, không cần code gì thêm.
-//
-// PHẢI extern "C": bản weak gốc nằm trong esp32-hal-misc.c (C linkage).
-//
-// Nạp qua cáp KHÔNG đi qua đường này: boot_app0.bin ghi otadata với
-// ota_state = 0xFFFFFFFF (UNDEFINED, đã đọc byte thật 2026-09-21), không phải NEW,
-// nên bản nạp cáp không bao giờ ở trạng thái PENDING_VERIFY.
+// ---- Rollback after OTA ----
+// Returning true stops Arduino from marking the new image VALID at boot; the
+// firmware confirms it itself after OTA_VERIFY_DELAY_MS (Task_UIController). A reset
+// before that leaves it PENDING_VERIFY and the bootloader falls back to the old image.
+// MUST be extern "C": the weak original has C linkage.
 extern "C" bool verifyRollbackLater() { return true; }
 
 static volatile bool s_otaPendingVerify = false;
 
-// Lệnh bật/tắt web server OTA: +1 bật, -1 tắt, 0 không có gì. Task_MediaPlayer ghi,
-// Task_NetworkController thực thi. Mọi thao tác với WebServer PHẢI nằm ở task gọi
-// handleClient(): stopWebServer() làm `delete _webServer`, gọi từ task khác trong lúc
-// handleClient() đang chạy là use-after-free.
+// OTA web server command: +1 start, -1 stop, 0 nothing. Written by Task_MediaPlayer,
+// executed by Task_NetworkController: WebServer calls MUST stay on the task running
+// handleClient() (stopWebServer() deletes the server -> use-after-free otherwise).
 static volatile int8_t s_otaServerCmd = 0;
 static esp_timer_handle_t s_otaGuardTimer = nullptr;
 
-// Lưới an toàn cho bản mới bị TREO (không crash). Rollback chỉ xảy ra khi chip RESET,
-// mà ở cấu hình này treo KHÔNG gây reset: task WDT không canh IDLE task
-// (CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 không bật) và loopTask không đăng ký
-// (loopTaskWDTEnabled = false), nên một vòng while(1) chỉ đứng im mãi mãi.
-// esp_timer chạy ở task ưu tiên 22, vẫn bắn khi các task ứng dụng đã chết.
+// Safety net for a new image that HANGS: rollback needs a reset, and no watchdog
+// resets a hung task in this configuration. esp_timer still fires when app tasks are dead.
 static void otaGuardFire(void*) { esp_restart(); }
 
-// Serial Monitor đã được thay thế hoàn toàn bằng ScreenLogger on-screen overlay.
-// Không dng Serial.begin() để tránh block chip khi không có USB CDC.
+// No Serial: logging goes to the ScreenLogger overlay (no blocking without a USB host).
 
-// STATE_ALARM: báo thức đang kêu. Chặn vòng ngủ, nhận chạm kể cả lúc đang tải tin.
-// STATE_OTA: chế độ nạp, vào/ra bằng chuỗi chạm giữ 3s, 3s rồi 6s. Hộp CHỈ chờ và nạp: không
-// ngủ, không sync, không phát tin, KHÔNG kêu báo thức (user chốt 2026-09-21 — quên
-// thoát là mất báo thức, màn OTA có dòng nhắc).
+// STATE_ALARM: ringing; blocks sleep, accepts touches even while downloading.
+// STATE_OTA: flashing mode (3s, 3s, 6s hold sequence): no sleep, sync, playback or
+// alarms (product decision; the OTA screen reminds the user to exit).
 enum class AppState { STATE_STANDBY, STATE_VIDEO, STATE_ALARM, STATE_OTA };
 
-// Đọc/ghi từ 3 task (MediaPlayer, UIController, vòng lặp chính) nên phải atomic.
-// 18 chỗ dùng đều là so sánh/gán trực tiếp (đã grep), không chỗ nào bind qua `auto`,
-// nên operator T() / operator= ngầm phủ hết, không cần sửa chỗ nào khác.
-//
-// KHÔNG lock-free: ESP32-C3 là RV32IMC, thiếu extension 'A' cho atomic sub-word.
-// Link được là nhờ ESP-IDF cấp sẵn bản emulation (đã verify bằng nm:
-// __atomic_load_1/store_1/exchange_1 đều là 'T' trong sdk/esp32c3/lib/libnewlib.a).
-// Emulation chạy bằng cách tắt ngắt — rẻ, nhưng đừng gọi từ ISR. Hiện không chỗ nào
-// gọi từ ISR: main.cpp không có IRAM_ATTR nào, chỗ duy nhất trông giống callback
-// (setPlaybackActiveCallback) chạy trong task context.
+// Shared by 3 tasks, hence atomic. NOT lock-free on the ESP32-C3 (ESP-IDF emulates
+// it by disabling interrupts): never touch it from an ISR.
 std::atomic<AppState> currentAppState{AppState::STATE_STANDBY};
 
-// Bố cục + nền + phông màn chờ KHÔNG còn biên dịch cứng (thiết kế 2026-09-24, §28): theme
-// nằm trong phân vùng flash `theme` (ThemeStore), chép từ gói trên thẻ SD. Không có theme
-// thì LayoutEngine vẽ màn dự phòng đen chữ trắng bằng phông có sẵn của LovyanGFX.
+// The standby theme is not compiled in: it lives in the `theme` flash partition
+// (ThemeStore, see MEMORY.md §28). Without one, LayoutEngine draws a black fallback.
 
 void Task_MediaPlayer(void *pvParameters) {
   DLOG("[PLAY] task started");
@@ -153,7 +120,7 @@ void Task_MediaPlayer(void *pvParameters) {
       }
   };
 
-  // Màn chế độ OTA. Chỉ ASCII: font hiện chỉ có glyph 32-126 (xem asciiFold ở MediaPlayer).
+  // OTA mode screen. ASCII only (the font has glyphs 32-126).
   auto drawOtaScreen = []() {
       if (!appCtx.display.acquireSPI()) return;
       LGFX* tft = appCtx.display.getTFT();
@@ -178,7 +145,7 @@ void Task_MediaPlayer(void *pvParameters) {
       }
       tft->setTextColor(TFT_GREEN);
       tft->drawString(line, 120, 150);
-      // Biện pháp giảm thiểu DUY NHẤT cho đánh đổi đã chốt: quên thoát = mất báo thức.
+      // The only reminder that alarms are off in this mode.
       tft->setTextColor(TFT_RED);
       tft->drawString("BAO THUC DANG TAT", 120, 190);
       tft->setTextColor(TFT_WHITE);
@@ -187,7 +154,7 @@ void Task_MediaPlayer(void *pvParameters) {
   };
 
   auto enterOtaMode = [&drawOtaScreen, &drawToast]() {
-      // OTA qua LAN là đường DUY NHẤT: không có Wi-Fi thì dựng server cũng vô ích.
+      // OTA is LAN-only: no Wi-Fi, no server.
       if (!appCtx.network.isConnected()) {
           DLOG("[OTA] khong co Wi-Fi -> khong vao che do");
           appCtx.display.turnOn();
@@ -197,7 +164,7 @@ void Task_MediaPlayer(void *pvParameters) {
           return;
       }
       appCtx.player.stop();
-      s_otaServerCmd = 1;  // Task_NetworkController dựng server trong ≤ 50ms
+      s_otaServerCmd = 1;  // picked up by Task_NetworkController within 50ms
       currentAppState = AppState::STATE_OTA;
       appCtx.display.turnOn();
       drawOtaScreen();
@@ -205,8 +172,7 @@ void Task_MediaPlayer(void *pvParameters) {
   };
 
   auto exitOtaMode = []() {
-      // Đang nạp dở thì KHÔNG cho thoát. Task_UIController vốn đã chặn mọi cú chạm
-      // khi isUpdating(), đây chỉ là chốt thứ hai.
+      // No exit mid-flash (second latch; Task_UIController already swallows touches).
       if (appCtx.otaHandler.isUpdating()) return;
       s_otaServerCmd = -1;
       currentAppState = AppState::STATE_STANDBY;
@@ -217,19 +183,17 @@ void Task_MediaPlayer(void *pvParameters) {
 
   static constexpr const char* ALARM_HINT = "Cham: bao lai 5p - Giu: tat";
   char alarmTime[6] = "";
-  AlarmItem ringItem;            // báo thức đang kêu: nhạc, âm lượng, tăng dần
+  AlarmItem ringItem;            // the ringing alarm: music, volume, ramp
   uint32_t alarmStartMs = 0;
   uint32_t lastBeepMs = 0;
   uint32_t lastAlarmPollMs = 0;
-  // Chuỗi chạm vào/ra chế độ OTA: giữ 3s → nhả → giữ 3s → nhả → giữ 6s. Không dùng
-  // một cú giữ dài vì TTP223 tự hiệu chuẩn sau 7-8s chạm liên tục (config.h).
-  // Chỉ đếm LONG nhận được lúc đang STANDBY hoặc OTA, nên LONG thoát video (nhận lúc
-  // VIDEO) và LONG tắt báo thức (nhánh ALARM nuốt trước) không bao giờ là bước 1.
-  uint8_t  otaSeqStep = 0;      // 0 rảnh · 1 xong cú giữ thứ nhất · 2 xong cú thứ hai (đang hiện nhắc)
-  uint32_t otaSeqStep2Ms = 0;   // mốc xong cú giữ thứ hai
+  // OTA touch sequence: hold 3s, 3s, then 6s. Not one long hold: the TTP223
+  // recalibrates after 7-8s of touch. Only LONGs received in STANDBY or OTA count.
+  uint8_t  otaSeqStep = 0;      // 0 idle · 1 first hold done · 2 second hold done (prompt showing)
+  uint32_t otaSeqStep2Ms = 0;   // when the second hold completed
   uint32_t otaSeqDeadline = 0;
 
-  // Dải đáy y 200-239 (gồm cả chỗ thanh tiến trình, để vẽ lại là xoá luôn thanh cũ).
+  // Bottom strip y 200-239 (covers the progress bar area).
   auto drawOtaPrompt = []() {
       if (!appCtx.display.acquireSPI()) return;
       LGFX* tft = appCtx.display.getTFT();
@@ -250,14 +214,13 @@ void Task_MediaPlayer(void *pvParameters) {
       else if (currentAppState == AppState::STATE_OTA) drawOtaScreen();
   };
 
-  // ---- Lệnh phát đang chờ sync xong (xem s_pendingPlay) ----
+  // ---- Play command waiting for sync (see s_pendingPlay) ----
   uint32_t pendingPlaySinceMs = 0;
   uint32_t pendingPlayDeadline = 0;
-  bool     pendingSawIdle = false;     // đã thấy sync rảnh kể từ lần bận gần nhất chưa
-  uint32_t pendingIdleSinceMs = 0;     // mốc bắt đầu rảnh, xem PENDING_PLAY_SETTLE_MS
+  bool     pendingSawIdle = false;     // sync seen idle since it was last busy
+  uint32_t pendingIdleSinceMs = 0;     // see PENDING_PLAY_SETTLE_MS
 
-  // Dải đáy y 200-239, cùng chỗ với toast. Render màn chờ đè mất nó nên vòng STANDBY
-  // vẽ lại sau mỗi lần render, như drawOtaPrompt.
+  // Bottom strip; redrawn by the STANDBY loop after each render, like drawOtaPrompt.
   auto drawPendingHint = []() {
       if (!appCtx.display.acquireSPI()) return;
       LGFX* tft = appCtx.display.getTFT();
@@ -269,7 +232,7 @@ void Task_MediaPlayer(void *pvParameters) {
       appCtx.display.releaseSPI();
   };
 
-  // Hạn tính từ cú chạm ĐẦU TIÊN; chạm thêm lúc đang chờ không gia hạn.
+  // The deadline counts from the FIRST touch.
   auto armPendingPlay = [&pendingPlaySinceMs, &pendingPlayDeadline, &pendingSawIdle]() {
       if (s_pendingPlay) return;
       pendingSawIdle = false;
@@ -286,19 +249,13 @@ void Task_MediaPlayer(void *pvParameters) {
       DLOG("[PLAY] pending huy");
   };
 
-  // Phát tin chưa đọc kế tiếp từ STANDBY. fromPending = đang chạy lệnh chờ (xem nhánh
-  // hasPendingMessages() bên dưới).
+  // Play the next unread message from STANDBY. fromPending = running the queued command.
   auto startNextUnread = [&currentId, &playStartTime, &drawToast, &armPendingPlay](bool fromPending) {
       char unreadId[32] = "";
-      // Hỏi THẺ, không hỏi biến đếm RAM. getNumOfNewMsg() từng là cổng ở
-      // đây, nhưng nó chỉ được gán bên trong checkAndDownloadNewMessages()
-      // — hàm nằm SAU cổng isFull() — nên sau một lần reset trong lúc đang
-      // đầy slot, nó kẹt ở 0 trong khi cờ unread trên thẻ vẫn còn: hộp vừa
-      // báo "No new messages" lúc chạm, vừa báo "het slot" lúc sync, và
-      // slot thì chỉ được trả lại bằng cách đọc -> không có đường ra.
+      // Ask the STORAGE, not the RAM counter: after a reset while full the counter
+      // stays 0 and the box would dead-end (MEMORY.md §23).
       if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
-         // Gán VIDEO TRƯỚC playItem(): triggerWakeupSync() thấy isPlaybackActive() thì
-         // từ chối, nên không sync mới nào chen vào lúc đang cấp phát bộ đệm phát.
+         // VIDEO before playItem(): blocks a new sync while playback buffers are allocated.
          currentAppState = AppState::STATE_VIDEO;
          appCtx.display.clear();
          strncpy(currentId, unreadId, sizeof(currentId) - 1);
@@ -310,21 +267,16 @@ void Task_MediaPlayer(void *pvParameters) {
              forceStandbyRedraw = true;
          }
       } else if (appCtx.network.hasPendingMessages()) {
-         // Hết tin chưa đọc trên thẻ nhưng vòng tải trước đã phải bỏ dở
-         // vì hết slot -> vừa đọc xong là có chỗ, kéo tiếp ngay.
+         // The last download stopped for lack of slots; reading freed space, so fetch more.
          DLOG("[PLAY] no local unread, downloading...");
          appCtx.player.stop();
          drawToast("Downloading...");
          uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
          bool isCharging = appCtx.powerManager.isCharging();
          appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
-         // Tải xong tự phát, không bắt chạm lại. Chỉ chờ khi sync THẬT SỰ chạy:
-         // triggerWakeupSync() bật _isSyncing trong vùng găng trước khi trả về, bị từ
-         // chối hay tạo task lỗi thì isSyncing() = false -> chờ là quay vòng ngay.
+         // Auto-play once downloaded — but wait only if a sync really started.
          if (appCtx.network.isSyncing()) {
-             // Đang chạy từ lệnh chờ: giữ HẠN CŨ, tính từ cú chạm đầu. Mất Wi-Fi mà
-             // _hasPendingMessages còn true thì mỗi vòng sync fail lại vào đây; gia hạn
-             // mỗi lần là thử lại mãi mãi.
+             // Keep the ORIGINAL deadline: extending it on each failed sync would retry forever.
              if (fromPending) s_pendingPlay = true;
              else armPendingPlay();
          }
@@ -337,9 +289,7 @@ void Task_MediaPlayer(void *pvParameters) {
   };
 
   for (;;) {
-    // Báo thức: hỏi mỗi 500ms ở mọi trạng thái (kêu đè lên cả lúc đang xem tin),
-    // trừ khi đang kêu sẵn, đang nạp OTA, hoặc đang ở CHẾ ĐỘ OTA (user chốt tắt hẳn
-    // báo thức trong chế độ này, 2026-09-21).
+    // Alarms: polled every 500ms in every state, except while ringing or in OTA.
     if (currentAppState != AppState::STATE_ALARM && currentAppState != AppState::STATE_OTA &&
         !appCtx.otaHandler.isUpdating() &&
         millis() - lastAlarmPollMs >= 500) {
@@ -347,8 +297,7 @@ void Task_MediaPlayer(void *pvParameters) {
       if (AlarmClock::instance().pollDue(time(nullptr), alarmTime, sizeof(alarmTime), &ringItem)) {
         if (currentAppState == AppState::STATE_VIDEO) appCtx.player.stop();
         currentAppState = AppState::STATE_ALARM;
-        // Nhạc có trên thẻ thì phát nhạc, còn lại (không chọn nhạc, chưa tải xong, thẻ lỗi,
-        // file hỏng) đều về MỘT nhánh: tiếng bíp như trước.
+        // Music if it is on the card; every other case takes ONE branch: the beep.
         s_alarmMusicOn = false;
         if (ringItem.musicId[0] && MusicStore::has(ringItem.musicId)) {
           char musicPath[48];
@@ -360,13 +309,13 @@ void Task_MediaPlayer(void *pvParameters) {
             MusicStore::touch(ringItem.musicId);
           }
         }
-        // Cú chạm xếp hàng từ trước không được tắt ngay báo thức vừa kêu.
+        // A touch queued earlier must not dismiss the alarm that just started.
         xQueueReset(eventQueue);
-        // Cũng không được tự phát tin sau khi tắt báo thức.
+        // Nor may a message auto-play after the alarm is dismissed.
         s_pendingPlay = false;
-        // Thức dậy bằng timer thì màn hình còn tắt (turnOn chỉ gọi khi wake bằng chạm).
+        // After a timer wake the screen is still off.
         appCtx.display.turnOn();
-        // Độ sáng người dùng có thể thấp tới 5%: bị đánh thức thì phải nhìn thấy màn.
+        // At least ALARM_MIN_BRIGHTNESS: the user's setting may be as low as 5%.
         appCtx.display.setBacklight(Settings::alarmBacklight());
         appCtx.layoutEngine.renderAlarmScreen(&appCtx.display, alarmTime, ALARM_HINT);
         alarmStartMs = millis();
@@ -375,8 +324,7 @@ void Task_MediaPlayer(void *pvParameters) {
       }
     }
 
-    // Hết hạn chuỗi chạm OTA. Đang giữ tay thì KHÔNG huỷ dưới ngón tay người dùng:
-    // bắt đầu cú giữ cuối trước hạn là được hoàn thành.
+    // OTA sequence timeout — but a final hold already in progress may complete.
     if (otaSeqStep != 0 && (int32_t)(millis() - otaSeqDeadline) > 0 &&
         appCtx.ui.getTouchHoldMs() == 0) {
       resetOtaSeq();
@@ -384,10 +332,10 @@ void Task_MediaPlayer(void *pvParameters) {
 
     SystemEvent event = SystemEvent::NONE;
     while (xQueueReceive(eventQueue, &event, 0) == pdTRUE) {
-      // event loop — không log tại đây để tránh spam màn hình
+      // event loop — no logging here, to avoid spamming the screen
 
       if (currentAppState == AppState::STATE_ALARM) {
-        // Chạm ngắn = báo lại sau 5 phút, chạm giữ 3s = tắt hẳn.
+        // Short touch = snooze 5 minutes; 3s hold = dismiss.
         if (event == SystemEvent::TOUCH_SHORT) {
           AlarmClock::instance().snooze(time(nullptr));
           appCtx.layoutEngine.renderAlarmScreen(&appCtx.display, alarmTime, "Bao lai sau 5 phut");
@@ -397,7 +345,7 @@ void Task_MediaPlayer(void *pvParameters) {
         } else {
           continue;
         }
-        // Trả 24KB DMA của I2S: beep() cố ý không tự gỡ driver giữa các hồi bíp.
+        // Free the 24KB I2S DMA that beep() keeps between beeps.
         appCtx.player.stop();
         s_alarmMusicOn = false;
         currentAppState = AppState::STATE_STANDBY;
@@ -407,10 +355,10 @@ void Task_MediaPlayer(void *pvParameters) {
         continue;
       }
 
-      // Chạm giữ = người dùng thôi không muốn xem nữa. Vẫn đi tiếp xuống chuỗi OTA.
+      // A hold = the user is done watching. Still falls through to the OTA sequence.
       if (event == SystemEvent::TOUCH_LONG) cancelPendingPlay();
 
-      // ---- Chuỗi chạm OTA (xem otaSeqStep) ----
+      // ---- OTA touch sequence (see otaSeqStep) ----
       bool otaSeqState = (currentAppState == AppState::STATE_STANDBY ||
                           currentAppState == AppState::STATE_OTA);
       if (event == SystemEvent::TOUCH_LONG && otaSeqState) {
@@ -423,45 +371,38 @@ void Task_MediaPlayer(void *pvParameters) {
           otaSeqDeadline = millis() + OTA_SEQ_FINAL_WINDOW_MS;
           drawOtaPrompt();
         }
-        // Bước 2: đây là LONG ở giây thứ 3 của cú giữ cuối — cứ để nó giữ tiếp tới 6s.
-        // Ở STANDBY, LONG vốn là no-op; ở OTA thì mọi event đều bị bỏ qua.
+        // Step 2: the LONG at second 3 of the final hold; keep waiting for 6s.
         continue;
       }
       if (event == SystemEvent::TOUCH_OTA_TOGGLE) {
-        // Cú giữ 6s phải là lần giữ MỚI, bắt đầu SAU khi xong bước 2. Không kiểm thì ai
-        // giữ tiếp cú thứ hai tới 6s sẽ rút chuỗi còn hai bước. Cú giữ bắn event này
-        // bắt đầu lúc (now - TOUCH_OTA_HOLD_MS) — trễ hàng đợi chỉ vài ms, còn cú thứ
-        // hai thì bắt đầu trước mốc bước 2 tới 3s, nên biên phân định rất rộng.
+        // The 6s hold must have started AFTER step 2, or stretching the second hold
+        // would shorten the sequence to two steps.
         bool freshHold = (int32_t)((millis() - TOUCH_OTA_HOLD_MS) - otaSeqStep2Ms) > 0;
         if (otaSeqStep == 2 && freshHold && otaSeqState) {
-          otaSeqStep = 0;  // enter/exit tự vẽ lại màn, không cần resetOtaSeq()
+          otaSeqStep = 0;  // enter/exit redraw the screen themselves
           if (currentAppState == AppState::STATE_OTA) exitOtaMode();
           else enterOtaMode();
         }
         continue;
       }
       if (event == SystemEvent::TOUCH_SHORT && otaSeqStep == 2) {
-        resetOtaSeq();  // đang hiện nhắc: chạm ngắn là HUỶ, không phát tin
+        resetOtaSeq();  // prompt showing: a short touch cancels
         continue;
       }
       if (event == SystemEvent::TOUCH_SHORT) {
-        otaSeqStep = 0;  // bước 1 chưa hiện gì: huỷ âm thầm, chạm vẫn làm việc bình thường
+        otaSeqStep = 0;  // cancel silently; the touch still works normally
       }
-      // Chế độ OTA chỉ nhận chuỗi thoát ở trên; mọi event khác bị bỏ qua.
+      // OTA mode only accepts the exit sequence above; every other event is ignored.
       if (currentAppState == AppState::STATE_OTA) continue;
 
       if (event == SystemEvent::TOUCH_SHORT) {
         if (currentAppState == AppState::STATE_STANDBY) {
            if (appCtx.network.isDownloadingMedia()) {
-               // User chốt 2026-09-24: chạm lúc ĐANG TẢI vẫn bỏ qua như cũ, không xếp
-               // hàng. (Task_UIController vốn đã nuốt chạm lúc tải; nhánh này chỉ bắt
-               // trường hợp tải bắt đầu giữa lúc gửi và lúc nhận event.)
+               // Product decision: a touch WHILE DOWNLOADING is ignored, not queued.
                appCtx.player.stop();
                drawToast("Downloading...");
            } else if (appCtx.network.isSyncing()) {
-               // Sync chưa tải media (Wi-Fi, NTP, cờ, status, hoặc khe giữa hai tin)
-               // nhưng có thể đang giữ phiên TLS -> không phát chồng lên, xếp hàng.
-               // Thức bằng timer thì màn hình còn tắt.
+               // Sync may hold a TLS session: queue instead of playing over it.
                armPendingPlay();
                appCtx.display.turnOn();
                drawToast("Dang dong bo, se tu phat...");
@@ -475,8 +416,7 @@ void Task_MediaPlayer(void *pvParameters) {
            }
 
            char unreadId[32] = "";
-           // Cùng lý do như nhánh STANDBY ở trên: nguồn sự thật là cờ unread trên
-           // thẻ, không phải biến đếm RAM.
+           // Storage, not the RAM counter, is the source of truth.
            if (appCtx.storage && appCtx.storage->getNextUnreadIdentifier(unreadId, sizeof(unreadId))) {
                strncpy(currentId, unreadId, sizeof(currentId) - 1);
                if (appCtx.player.playItem(currentId)) {
@@ -493,7 +433,7 @@ void Task_MediaPlayer(void *pvParameters) {
                uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
                bool isCharging = appCtx.powerManager.isCharging();
                appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
-               // Tải xong tự phát tiếp, không bắt chạm lại (điều kiện như ở startNextUnread).
+               // Auto-play once downloaded (same condition as startNextUnread).
                if (appCtx.network.isSyncing()) armPendingPlay();
            } else {
                appCtx.player.stop();
@@ -520,16 +460,10 @@ void Task_MediaPlayer(void *pvParameters) {
       }
     }
 
-    // Lệnh phát đang chờ: quét mỗi vòng thay vì chờ callback, vì _isSyncing được hạ ở
-    // ~12 lối thoát khác nhau của syncWakeup(). isSyncing() gồm cả Wi-Fi, NTP, Firebase
-    // và tải media. Chế độ AP cấu hình Wi-Fi KHÔNG tính là bận (user chốt 2026-09-24):
-    // AP có thể bật vô thời hạn và không mở TLS.
-    //
-    // Nghỉ PENDING_PLAY_SETTLE_MS sau sync bằng cách ĐẾM trong vòng lặp, không chặn task.
-    // Bản trước dùng `sleep(2000)`: đó là sleep() POSIX, tính bằng GIÂY -> chặn task này
-    // ~33 phút: không phát, chạm xếp hàng không ai xử lý, thức dậy màn đen (không ai
-    // render). Kể cả vTaskDelay(2000) cũng không nên: trong 2s đó s_pendingPlay đã tắt
-    // nên hộp có thể đi ngủ hoặc một sync mới chen vào.
+    // Queued play command, polled every loop (syncWakeup() has ~12 exits, so no
+    // callback). The Wi-Fi setup AP does NOT count as busy (product decision).
+    // The PENDING_PLAY_SETTLE_MS pause is COUNTED in the loop: never block this task
+    // (and `sleep(2000)` is POSIX sleep in SECONDS).
     if (s_pendingPlay && currentAppState == AppState::STATE_STANDBY) {
       if (appCtx.network.isSyncing()) {
         pendingSawIdle = false;
@@ -551,8 +485,8 @@ void Task_MediaPlayer(void *pvParameters) {
       }
     }
 
-    // Web đổi độ sáng (task WakeSync ghi Settings): áp ngay nếu màn đang bật. Màn báo
-    // thức giữ mức sàn riêng; màn đang tắt chờ ngủ thì để turnOn() tự lấy mức mới.
+    // Brightness changed from the web: apply now if the screen is on (the alarm
+    // screen keeps its own floor).
     static uint32_t seenBrightnessEpoch = 0;
     if (seenBrightnessEpoch != Settings::brightnessEpoch.load()) {
       seenBrightnessEpoch = Settings::brightnessEpoch.load();
@@ -581,15 +515,15 @@ void Task_MediaPlayer(void *pvParameters) {
       }
     } else if (currentAppState == AppState::STATE_STANDBY) {
       uint32_t now = millis();
-      // Gói theme mới đã tải xong (WakeSync): task này là chủ duy nhất của LayoutEngine nên
-      // cài ở đây. Chờ sync xong: xoá/ghi flash đứng CPU ~2s, không để rơi giữa phiên TLS.
+      // Install a downloaded theme here (this task owns LayoutEngine), after sync ends:
+      // the flash write stalls the CPU ~2s and must not hit a TLS session.
       if (ThemeStore::installPending() && !appCtx.network.isSyncing() && !s_pendingPlay) {
         char dir[64], id[24];
         uint32_t rev = 0;
         if (ThemeStore::takeInstallRequest(dir, sizeof(dir), id, sizeof(id), &rev)) {
           drawToast("Dang ap dung giao dien...");
           ThemeStore::installFromSd(dir, id, rev);
-          appCtx.layoutEngine.loadTheme();  // hỏng thì tự về màn dự phòng
+          appCtx.layoutEngine.loadTheme();  // falls back by itself on failure
           forceStandbyRedraw = true;
           lastUserActivity = millis();
         }
@@ -600,11 +534,10 @@ void Task_MediaPlayer(void *pvParameters) {
         lastClockRender = now;
         forceStandbyRedraw = false;
         if (s_pendingPlay) drawPendingHint();
-        // Render vừa rồi có thể đè mất lời nhắc. Không vẽ lúc đang giữ tay: sẽ xoá
-        // thanh tiến trình của cú giữ cuối.
+        // Redraw the prompt after a render, but not over the hold's progress bar.
         if (otaSeqStep == 2 && appCtx.ui.getTouchHoldMs() == 0) drawOtaPrompt();
       }
-      // Nhật ký xuống thẻ theo lô, chỉ ở màn chờ (không tranh bus với lúc phát tin).
+      // Flush the log on standby only (no bus contention with playback).
       static uint32_t lastLogFlush = 0;
       if (now - lastLogFlush >= 30000) {
         lastLogFlush = now;
@@ -612,19 +545,18 @@ void Task_MediaPlayer(void *pvParameters) {
       }
       vTaskDelay(pdMS_TO_TICKS(10));
     } else if (currentAppState == AppState::STATE_ALARM) {
-      // Giữ mốc hoạt động để vòng ngủ ở Task_UIController không chen vào lúc đang kêu.
+      // Keep the box awake while ringing.
       lastUserActivity = millis();
       if (millis() - alarmStartMs >= ALARM_RING_MAX_MS) {
         DLOG("[ALM] het 1 phut -> tu tat");
         AlarmClock::instance().dismiss();
-        appCtx.player.stop();  // trả 24KB DMA của I2S
+        appCtx.player.stop();  // frees the I2S DMA
         s_alarmMusicOn = false;
         currentAppState = AppState::STATE_STANDBY;
         appCtx.display.setBacklight(Settings::currentBacklight());
         forceStandbyRedraw = true;
       } else if (s_alarmMusicOn) {
-        // Tăng dần tuyến tính trên thang âm lượng (thang này vốn theo dB): 30% -> 100%
-        // mức đã chọn trong ALARM_RAMP_MS.
+        // Ramp from ALARM_RAMP_START_PCT to 100% of the chosen level over ALARM_RAMP_MS.
         uint8_t vol = ringItem.volume;
         uint32_t t = millis() - alarmStartMs;
         if (ringItem.ramp && t < ALARM_RAMP_MS) {
@@ -632,31 +564,26 @@ void Task_MediaPlayer(void *pvParameters) {
           vol = (uint8_t)(start + (ringItem.volume - start) * t / ALARM_RAMP_MS);
         }
         appCtx.player.tickAlarmMusic(vol);
-        vTaskDelay(pdMS_TO_TICKS(20));  // DMA ~96ms @16kHz: nạp mỗi 20ms là thừa sức
+        vTaskDelay(pdMS_TO_TICKS(20));  // DMA holds ~96ms @16kHz
       } else if (lastBeepMs == 0 || millis() - lastBeepMs >= ALARM_BEEP_PERIOD_MS) {
         lastBeepMs = millis();
-        // Bíp dự phòng LUÔN ở mức 100 như trước: sóng sin của nó vốn nhỏ (đỉnh 4000/32767),
-        // nhân thêm âm lượng báo thức (mặc định 80 ≈ -8dB) là có thể không nghe thấy khi
-        // đang ngủ — mà nhánh này chạy đúng lúc nhạc đã hỏng.
-        appCtx.player.alarmBeep(100);  // block ~0.6s, chạm trong lúc đó vẫn xếp hàng
+        // The fallback beep is ALWAYS at 100: it must wake someone when the music failed.
+        appCtx.player.alarmBeep(100);  // blocks ~0.6s; touches still queue
       } else {
         vTaskDelay(pdMS_TO_TICKS(20));
       }
     } else if (currentAppState == AppState::STATE_OTA) {
-      // Vẽ lại mỗi giây để dòng tiến độ "Dang nap N%" chạy. Không vẽ khi đang giữ
-      // tay (thanh tiến trình ở dưới cần nguyên dải đáy màn hình).
+      // Redraw every second for the "Dang nap N%" line, but not while a finger is held.
       static uint32_t lastOtaRender = 0;
       if (millis() - lastOtaRender >= 1000 && appCtx.ui.getTouchHoldMs() == 0) {
         lastOtaRender = millis();
         drawOtaScreen();
-        if (otaSeqStep == 2) drawOtaPrompt();  // drawOtaScreen() vừa xoá cả màn
+        if (otaSeqStep == 2) drawOtaPrompt();  // drawOtaScreen() cleared it
       }
       vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    // Thanh tiến trình CHỈ cho cú giữ 6s cuối: đang ở bước 2 và cú giữ bắt đầu SAU
-    // mốc bước 2. Thiếu điều kiện sau, phần còn lại của cú giữ thứ hai (đã qua 3s)
-    // sẽ hiện như thể cú cuối đã được một nửa.
+    // Progress bar for the final 6s hold only: step 2, and a hold begun AFTER the step-2 mark.
     static bool holdBarShown = false;
     uint32_t holdMs = appCtx.ui.getTouchHoldMs();
     bool finalHold = (otaSeqStep == 2) && holdMs > 0 &&
@@ -670,8 +597,7 @@ void Task_MediaPlayer(void *pvParameters) {
       }
       holdBarShown = true;
     } else if (holdBarShown && holdMs == 0) {
-      // Nhả tay: nhả sớm (còn ở bước 2) thì vẽ lại lời nhắc, nó xoá luôn thanh; đã
-      // vào/ra chế độ thì vẽ lại màn hiện tại.
+      // Finger released: redraw the prompt (erases the bar) or the current screen.
       holdBarShown = false;
       if (otaSeqStep == 2) drawOtaPrompt();
       else if (currentAppState == AppState::STATE_STANDBY) forceStandbyRedraw = true;
@@ -687,12 +613,10 @@ void Task_UIController(void *pvParameters) {
   for (;;) {
     TouchEvent tEvent = appCtx.ui.getTouchEvent();
     if (tEvent != TouchEvent::NONE) {
-      // Đang nạp OTA thì chặn MỌI cú chạm, cùng cơ chế với lúc đang tải tin — kể cả
-      // chuỗi chạm để thoát: thoát giữa chừng là tắt web server khi file còn đang tới.
+      // While flashing, block EVERY touch, including the exit sequence.
       if ((appCtx.network.isDownloadingMedia() || appCtx.otaHandler.isUpdating()) &&
           currentAppState != AppState::STATE_ALARM) {
-          // Bỏ qua touch khi đang download — không log để tránh spam.
-          // Trừ lúc báo thức đang kêu: không được bắt người dùng chờ tải xong mới tắt được.
+          // Ignore touches while downloading, except to dismiss a ringing alarm.
       } else {
           SystemEvent event = (tEvent == TouchEvent::VERY_LONG_PRESS) ? SystemEvent::TOUCH_OTA_TOGGLE
                             : (tEvent == TouchEvent::LONG_PRESS)      ? SystemEvent::TOUCH_LONG
@@ -706,14 +630,12 @@ void Task_UIController(void *pvParameters) {
     uint32_t now = millis();
     static uint32_t lastIntervalSyncMs = millis();
 
-    // Trong luc sync chay ngam, day moc thoi gian theo -> chu ky duoc tinh tu luc
-    // sync KET THUC, thay vi tu luc bat dau (tai xong 30s roi sync lai ngay).
+    // The sync period counts from when a sync ENDS, not when it starts.
     if (appCtx.network.isSyncing()) {
         lastIntervalSyncMs = now;
     }
 
-    // Bản mới sau OTA đã sống đủ OTA_VERIFY_DELAY_MS -> xác nhận, huỷ lưới an toàn.
-    // Từ đây trở đi bootloader không còn quay về bản cũ nữa.
+    // The new OTA image survived OTA_VERIFY_DELAY_MS: confirm it, cancel the safety net.
     if (s_otaPendingVerify && millis() >= OTA_VERIFY_DELAY_MS) {
         esp_ota_mark_app_valid_cancel_rollback();
         if (s_otaGuardTimer != nullptr) {
@@ -725,10 +647,8 @@ void Task_UIController(void *pvParameters) {
         DLOG("[OTA] ban moi da xac nhan (%s)", FW_VERSION);
     }
 
-    // KHÔNG còn điều kiện `!isStorageFull` ở đây: đầy slot chỉ có nghĩa là khỏi
-    // tải tin, không có nghĩa là ngừng heartbeat / đọc cờ / đồng bộ báo thức.
-    // Cổng đó đã chuyển xuống đúng bước tải tin trong syncWakeup(). Đánh đổi đã
-    // biết: box đầy slot vẫn sync theo chu kỳ nên tốn pin hơn trước.
+    // Intentionally NO `!isStorageFull` here: full slots only block the download step
+    // inside syncWakeup(), not heartbeat / flags / alarm sync.
     if (now - lastIntervalSyncMs >= SYNC_INTERVAL_MS && !appCtx.network.isSyncing() && currentAppState == AppState::STATE_STANDBY) {
         lastIntervalSyncMs = now;
         uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
@@ -736,18 +656,15 @@ void Task_UIController(void *pvParameters) {
         appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
     }
 
-    // secondsToNext <= 2: sắp (hoặc đang) tới phút báo thức mà pollDue chưa kêu.
-    // Ngủ lúc này thì timer tối thiểu vẫn làm lỡ mất cả phút -> thức chờ tiếp.
+    // secondsToNext <= 2: an alarm is about to ring; sleeping now would miss it.
     if (currentAppState != AppState::STATE_VIDEO &&
         currentAppState != AppState::STATE_ALARM &&
         !appCtx.otaHandler.isUpdating() && !appCtx.network.isProvisioningActive() &&
         !appCtx.network.isSyncing() && currentAppState != AppState::STATE_OTA &&
-        // Không ngủ trong thời gian thử thách: vừa thức, lưới an toàn esp_timer (ưu
-        // tiên 22) có thể bắn TRƯỚC khi task này kịp xác nhận -> reset oan một bản tốt.
-        // INACTIVITY_SLEEP_TIMEOUT_MS cũng là 60s, tức rơi đúng cửa sổ đó.
+        // No sleep during OTA probation: on waking, the safety-net timer could fire
+        // before this task confirms and reset a good image.
         !s_otaPendingVerify &&
-        // Đang chờ phát: task này ưu tiên cao hơn Task_MediaPlayer, không chặn thì ngay
-        // lúc sync xong nó có thể cho chip ngủ trước khi lệnh chờ kịp chạy.
+        // A play command is queued: don't sleep before Task_MediaPlayer runs it.
         !s_pendingPlay &&
         (now - lastUserActivity >= activeSleepTimeoutMs) &&
         AlarmClock::instance().secondsToNext(time(nullptr)) > 2) {
@@ -764,23 +681,20 @@ void Task_UIController(void *pvParameters) {
       }
 
       DLOG("[SLP] sleep %llus", (unsigned long long)(sleepTimeUs / 1000000ULL));
-      SdLog::flush();  // hộp có thể ngủ rồi mất điện: ghi nốt nhật ký trước
+      SdLog::flush();  // power may be lost while asleep
 
-      // Dừng MediaPlayer giải phóng SPI/RAM và chuyển về Standby trước khi ngủ
+      // Stop playback before sleeping
       appCtx.player.stop();
       currentAppState = AppState::STATE_STANDBY;
-      // Không set forceStandbyRedraw ở đây để tránh race condition với Task_MediaPlayer
+      // Don't set forceStandbyRedraw here: it would race with Task_MediaPlayer
       
       appCtx.powerManager.enterLightSleep(sleepTimeUs, &appCtx.display);
 
-      // Vừa tỉnh dậy: đánh dấu để lần ensureConnected() kế tiếp ÉP tái lập
-      // association. WiFi.status() sau light sleep thường vẫn báo WL_CONNECTED
-      // dù association đã chết -> nếu tin nó thì mọi http.GET() đều trả -1.
+      // Just woke: force the next ensureConnected() to re-associate (see there).
       appCtx.network.notifyWakeFromSleep();
 
-      // Nháy đèn nền 3 lần NGAY LẬP TỨC sau khi thức dậy.
-      // Gọi ở đây (trước delay) để đảm bảo các FreeRTOS task khác chưa resume,
-      // SPI bus chưa có xung đột, GPIO an toàn để toggle.
+      // Releases the backlight GPIO hold (it blinks nothing despite the name); done
+      // before other tasks resume.
       appCtx.display.wakeupFlash();
 
       delay(200);
@@ -789,7 +703,7 @@ void Task_UIController(void *pvParameters) {
       DLOG("[SLP] wakeup=%s", causeStr);
 
       if (wakeupCause != ESP_SLEEP_WAKEUP_TIMER) {
-        // Touch Wakeup: Re-init màn hình và render Standby UI.
+        // Touch wake: re-init the display and render the standby UI.
         currentAppState = AppState::STATE_STANDBY;
         appCtx.display.turnOn();
         // currentAppState = AppState::STATE_STANDBY;
@@ -800,44 +714,30 @@ void Task_UIController(void *pvParameters) {
         lastUserActivity = millis();
         activeSleepTimeoutMs = 2000;
 
-        // Nháy đèn xanh dương (GPIO 8 - Bản SuperMini, trùng chân NAND CS) để báo hiệu wakeup ngầm.
-        // Đây là chỉ báo timer-wake DUY NHẤT còn lại: wakeupFlash() (DisplayDriver.cpp:171)
-        // giờ chỉ gọi gpio_hold_dis(), tên hàm đã lỗi thời, không nháy gì cả. User chốt giữ đèn.
-        //
-        // PHẢI giữ spiMutex suốt đoạn nháy. Comment cũ ghi "bus SPI hoàn toàn rảnh" là SAI:
-        // Task_MediaPlayer có thể đang đẩy pixel lên SCK/MOSI, mà GPIO 8 chính là CS của
-        // W25Q128. Ghim CS xuống LOW 30ms trong lúc có xung clock -> NAND chốt nhầm opcode.
-        // Giữ mutex triệt tiêu đúng cơ chế đó (CS LOW mà không có clock là vô hại).
-        // Chi phí: giữ mutex 160ms, cộng tối đa 1000ms chờ (timeout mặc định của
-        // acquireSPI) trong trường hợp xấu. Lúc vừa thức thì SPI thường rảnh.
+        // Blink the blue LED (GPIO 8, shared with NAND CS): the only timer-wake
+        // indicator (product decision). spiMutex MUST be held for the whole blink:
+        // CS low while another task clocks the bus makes the NAND latch a bogus opcode.
         if (appCtx.display.acquireSPI()) {
           pinMode(8, OUTPUT);
-          digitalWrite(8, LOW);  // Đèn sáng (Active LOW) / NAND CS ghim xuống
+          digitalWrite(8, LOW);  // LED on (active LOW) / NAND CS pulled low
           delay(30);
-          digitalWrite(8, HIGH); // Đèn tắt / NAND CS nhả ra
+          digitalWrite(8, HIGH); // LED off / NAND CS released
           delay(70);
           digitalWrite(8, LOW);
           delay(30);
           digitalWrite(8, HIGH);
           appCtx.display.releaseSPI();
         } else {
-          // Bắt buộc phải log: đèn này là chỉ báo timer-wake duy nhất, nên "không
-          // nháy mà không nói gì" sẽ bị hiểu nhầm là B1 làm hỏng đèn.
+          // Log it: a silent "no blink" would look like a broken LED.
           DLOG("[WAKE] blink skip: spi busy");
         }
       }
 
-      // Chờ 200ms cho UI và SPIBus ổn định hoàn toàn trước khi kích hoạt task đồng bộ ngầm
+      // Let the UI and SPI bus settle before the background sync
       vTaskDelay(pdMS_TO_TICKS(200));
 
-      // Thực hiện đồng bộ ngầm non-blocking sau khi thức dậy.
-      // Luôn check tin mới + tải đầy đủ vào slot trước khi cho phát — không còn
-      // nhánh "có tin local sẵn thì hoãn sync" (dễ bỏ sót tin mới trên Cloud).
-      // Luôn sync, kể cả khi đầy slot. Trước 2026-09-05 chỗ này bỏ qua toàn bộ
-      // chu kỳ khi đầy ("post-wakeup sync skip: FULL"), làm box mất báo thức và
-      // OTA cho tới khi có slot trống. Cổng "đầy" giờ nằm trong syncWakeup(),
-      // chỉ chặn đúng bước tải tin.
-      // syncWakeup() da bao gom ensureConnected() + syncNtpTime().
+      // Background sync after every wake, even with full slots (the "full" gate
+      // inside syncWakeup() blocks only the download step).
       uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
       bool isCharging = appCtx.powerManager.isCharging();
       appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);
@@ -854,14 +754,13 @@ void Task_UIController(void *pvParameters) {
 
 void Task_NetworkController(void *pvParameters) {
   for (;;) {
-    // Thực thi lệnh bật/tắt server OTA ở ĐÚNG task gọi handleClient() — xem s_otaServerCmd.
+    // OTA server start/stop runs on this task (see s_otaServerCmd).
     int8_t cmd = s_otaServerCmd;
     if (cmd != 0) {
       s_otaServerCmd = 0;
       if (cmd > 0) {
         appCtx.network.startWebServer(OTA_HOSTNAME);
-        // stopWebServer() delete + gán nullptr, nên mỗi lần vào là một WebServer mới:
-        // đăng ký route đúng một lần trên mỗi instance, không tích luỹ handler.
+        // A fresh WebServer per entry, so routes are registered once per instance.
         if (appCtx.network.getWebServer() != nullptr) {
           appCtx.otaHandler.registerRoutes(*appCtx.network.getWebServer());
         }
@@ -870,16 +769,14 @@ void Task_NetworkController(void *pvParameters) {
       }
     }
     appCtx.network.update();
-    // CÙNG task với handleClient() ở trên, nên watchdog không bao giờ chạy song
-    // song với một Update.write() đang dở — không cần khoá gì thêm.
+    // Same task as handleClient(): never parallel to an Update.write(), no lock needed.
     appCtx.otaHandler.tickWatchdog();
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
 void setup() {
-  // Dò trạng thái partition và dựng lưới an toàn ĐẦU TIÊN, trước mọi thứ có thể treo
-  // (kể cả vòng while(1) ngay dưới đây). Chỉ bản vừa nạp qua OTA mới ở PENDING_VERIFY.
+  // Arm the OTA safety net FIRST, before anything that can hang.
   {
     esp_ota_img_states_t st;
     if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &st) == ESP_OK &&
@@ -888,8 +785,7 @@ void setup() {
       const esp_timer_create_args_t args = {
           .callback = &otaGuardFire, .arg = nullptr, .dispatch_method = ESP_TIMER_TASK,
           .name = "ota_guard", .skip_unhandled_events = false};
-      // +30s sau mốc xác nhận: đủ khoảng trống để Task_UIController (tick 10ms) xác
-      // nhận trước, mà vẫn đủ ngắn để bản treo không ngồi im quá lâu.
+      // +30s past the confirmation mark, so Task_UIController confirms first.
       if (esp_timer_create(&args, &s_otaGuardTimer) == ESP_OK) {
         esp_timer_start_once(s_otaGuardTimer, (uint64_t)(OTA_VERIFY_DELAY_MS + 30000) * 1000ULL);
       }
@@ -900,24 +796,24 @@ void setup() {
   eventQueue = xQueueCreate(8, sizeof(SystemEvent));
 
   if (spiMutex == nullptr || eventQueue == nullptr) {
-    // Không có display/logger ở thời điểm này, chỉ blink đèn nền để báo lỗi.
+    // No display/logger yet at this point; just halt.
     while (1) delay(1000);
   }
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
 
   appCtx.display.init(spiMutex);
-  // Cài đặt người dùng (NVS) phải có TRƯỚC khi bật đèn nền lần đầu.
+  // Load settings BEFORE the backlight first turns on.
   Settings::begin();
   appCtx.display.setBacklight(Settings::currentBacklight());
   appCtx.display.showMessage("Booting...");
 
-  // Khởi tạo ScreenLogger sau khi display đã sẵn sàng
+  // ScreenLogger needs the display to be ready
   ScreenLogger::init(&appCtx.display);
   DLOG("[BOOT] cpu=%uMHz heap=%u", ESP.getCpuFreqMHz(), ESP.getFreeHeap());
   DLOG("[BOOT] wakeup=%d", (int)esp_sleep_get_wakeup_cause());
   // reset=1 POWERON, 3 SW, 4 INT_WDT, 5 TASK_WDT, 6 WDT, 9 BROWNOUT, 12 PANIC.
-  // Nếu dòng này lặp lại đều đặn trong log ⇒ box đang reset vòng lặp, không phải lỗi audio.
+  // Repeating regularly in the log = a reset loop.
   DLOG("[BOOT] reset=%d", (int)esp_reset_reason());
   if (s_otaPendingVerify) {
     DLOG("[OTA] ban moi dang thu thach %lus", (unsigned long)(OTA_VERIFY_DELAY_MS / 1000));
@@ -936,15 +832,11 @@ void setup() {
     strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
   }
 
-  // Log rõ nguồn credentials: trước đây chỉ in SSID nên không phân biệt được
-  // "đang dùng creds mặc định" với "đang dùng creds cũ còn sót trong NVS".
+  // Log where the credentials came from (NVS or defaults).
   DLOG("[BOOT] WiFi: %s (%s)", wifiSsid, credsFromNvs ? "NVS" : "default");
 
   if (appCtx.network.connectWiFi(wifiSsid, wifiPass) != WiFiConnectResult::CONNECTED && credsFromNvs) {
-    // Creds trong NVS (lưu từ lần provisioning trước) có thể đã cũ/sai — ví dụ
-    // đổi mật khẩu router. Trước đây hễ NVS có BẤT KỲ SSID nào thì creds mặc định
-    // trong config.h không bao giờ được thử tới, nên box đi thẳng vào AP mode dù
-    // creds mặc định vẫn dùng được. Thử nốt trước khi bỏ cuộc.
+    // NVS creds may be stale: try the config.h defaults before falling back to AP mode.
     DLOG("[BOOT] NVS creds fail -> try default");
     strncpy(wifiSsid, DEFAULT_WIFI_SSID, sizeof(wifiSsid) - 1);
     strncpy(wifiPass, DEFAULT_WIFI_PASSWORD, sizeof(wifiPass) - 1);
@@ -974,17 +866,17 @@ void setup() {
   delay(1000);
 #endif
 
-  // Cây thư mục /sys /theme /alarm, dọn file .tmp còn sót, đo dung lượng trống.
+  // Creates the /sys /theme /alarm tree, removes leftover .tmp files, measures free space.
   SdStore::begin(appCtx.storage);
-  MusicStore::load();  // bảng nhạc báo thức đã có trên thẻ (tra cứu lúc kêu, không đụng thẻ)
-  // Theme trong phân vùng flash. Trống (vd. vừa nạp cáp bảng phân vùng mới) mà thẻ còn gói
-  // đang dùng thì chép lại ngay — lúc này chưa có task nào vẽ nên an toàn.
+  MusicStore::load();  // alarm-music table, read at ring time without touching the card
+  // If the theme partition is empty but the card has the active package, restore it
+  // now (no task is drawing yet).
   if (!ThemeStore::begin()) ThemeStore::restoreFromSdIfNeeded();
   appCtx.layoutEngine.loadTheme();
 
   appCtx.player.init(appCtx.storage, &appCtx.display);
   
-  // Phát beep test loa khi khởi động
+  // Speaker test beep at boot
   appCtx.player.testAudioBeep();
   
   appCtx.ui.init(PIN_TOUCH, &appCtx.display);
@@ -994,10 +886,8 @@ void setup() {
 
   if (appCtx.network.isConnected()) {
     DLOG("[BOOT] WiFi OK -> NTP+Firebase");
-    // Web server OTA KHÔNG còn bật ở đây (2026-09-18). Nó chạy suốt đời máy cho
-    // một việc hiếm khi làm, giữ RAM của WebServer + mDNS. Từ 2026-09-21 nó chỉ
-    // dựng khi người dùng làm chuỗi chạm 3s-3s-6s vào STATE_OTA (enterOtaMode trong
-    // Task_MediaPlayer); đường kích hoạt bằng cờ cloud đã gỡ hẳn.
+    // The OTA web server is NOT started here (it would hold RAM for the whole
+    // uptime): it is created on entering STATE_OTA.
 
     appCtx.network.setOnDownloadComplete([]() {
       forceStandbyRedraw = true;
@@ -1007,7 +897,7 @@ void setup() {
       return (currentAppState == AppState::STATE_VIDEO) || s_alarmMusicOn.load();
     });
 
-    // Kích hoạt Firebase Sync ngầm ngay khi vừa nạp code/khởi động xong
+    // Start a background Firebase sync right after boot
     uint8_t batPercent = appCtx.powerManager.getBatteryPercentage();
     bool isCharging = appCtx.powerManager.isCharging();
     appCtx.network.triggerFirebaseSync(batPercent, isCharging, appCtx.storage);

@@ -5,7 +5,7 @@ import { FirebaseStorageRepository } from '../repositories/firebase/firebase-sto
 import { Message } from '../types/message.types';
 import { AppError } from '../middleware/error-handler.middleware';
 
-/** Signed URL đọc media cho web, hết hạn sau 15 phút (cùng mức /device/poll). */
+/** Signed media read URLs for the web expire after 15 minutes (same as /device/poll). */
 const MEDIA_URL_MINUTES = 15;
 
 export interface MessageMedia {
@@ -22,10 +22,7 @@ export class MessageService {
     private storageRepo: IStorageRepository = new FirebaseStorageRepository()
   ) {}
 
-  /**
-   * Bước 1: Sender yêu cầu gửi tin nhắn → backend tạo signed upload URLs.
-   * Chỉ tạo URL cho các loại file mà sender yêu cầu (tiết kiệm GCS API calls).
-   */
+  /** Step 1: create signed upload URLs, only for the file types requested. */
   async initiateMessage(boxId: string, senderId: string, requestedTypes: string[]): Promise<{
     message_id: string;
     upload_urls: Record<string, string>;
@@ -33,10 +30,10 @@ export class MessageService {
     const messageId = `msg_${Date.now()}`;
     const basePath = `media/${boxId}/${messageId}`;
 
-    // Map loại file → đường dẫn Storage, content type, giới hạn dung lượng
+    // File type → Storage path, content type, size limit
     const typeMap: Record<string, { path: string; contentType: string; maxSize: number }> = {
-      // 25MB: hộp thẻ SD cho video tới 60s × 15 fps JPEG 240×240 (~10-25KB/khung).
-      // Trần phía hộp (MAX_MEDIA_BYTES 5,5MB) còn thấp hơn — việc của firmware.
+      // 25MB: SD-card boxes take video up to 60s × 15 fps of 240×240 JPEG (~10-25KB/frame).
+      // The box-side cap (MAX_MEDIA_BYTES) may be lower — that is the firmware's concern.
       bin:            { path: `${basePath}/video.bin`,  contentType: 'application/octet-stream', maxSize: 25 * 1024 * 1024 }, // 25MB
       voice:          { path: `${basePath}/voice.wav`,  contentType: 'audio/wav',                maxSize: 2 * 1024 * 1024 },  // 2MB
       original_video: { path: `${basePath}/original.mp4`, contentType: 'video/mp4',              maxSize: 50 * 1024 * 1024 }, // 50MB
@@ -58,10 +55,7 @@ export class MessageService {
     return { message_id: messageId, upload_urls };
   }
 
-  /**
-   * Bước 2: Sender upload xong → gọi confirm để ghi record vào RTDB.
-   * Chỉ lúc này message mới thực sự "tồn tại" trên database.
-   */
+  /** Step 2: uploads done → write the record to RTDB (only now does the message exist). */
   async confirmMessage(boxId: string, senderId: string, data: {
     message_id: string;
     type: 'video' | 'image' | 'gif' | 'voice' | 'text';
@@ -143,14 +137,11 @@ export class MessageService {
     return this.msgRepo.createMessage(boxId, data.message_id, message);
   }
 
-  /**
-   * Lấy danh sách tin nhắn (cho Receiver xem lịch sử)
-   */
+  /** List messages (history). */
   async getMessages(boxId: string, limit?: number): Promise<(Message & { thumbnail?: string })[]> {
     const messages = await this.msgRepo.listMessages(boxId, limit);
-    // Ảnh thu nhỏ cho từng dòng danh sách: chỉ ký thumbnail (nhỏ, ≤ 1 MB), song song.
-    // Mỗi chữ ký là một lời gọi IAM signBlob — tối đa `limit` (≤ 100) lời gọi mỗi request.
-    // Ký hỏng thì dòng đó hiện icon như cũ, không làm hỏng cả danh sách.
+    // Sign only the thumbnails, in parallel (one IAM call each, at most `limit`).
+    // A failed signature leaves that row with its icon.
     return Promise.all(messages.map(async (msg) => {
       if (!msg.thumbnail_url) return msg;
       try {
@@ -163,11 +154,8 @@ export class MessageService {
   }
 
   /**
-   * Lấy chi tiết 1 tin nhắn, kèm signed URL đọc được cho web xem lại.
-   *
-   * Các trường *_url trong RTDB là storage path thô (confirmMessage), trình
-   * duyệt không mở được vì storage.rules chặn mọi thứ trừ box. Chỉ ký các file
-   * trình duyệt phát được — KHÔNG ký bin_url (định dạng SLBX riêng của hộp).
+   * One message's details with signed read URLs (the *_url fields are raw storage
+   * paths the browser can't open). Only browser-playable files are signed, NOT bin_url.
    */
   async getMessageDetails(boxId: string, messageId: string): Promise<Message & { media: MessageMedia }> {
     const msg = await this.msgRepo.getMessage(boxId, messageId);
@@ -189,8 +177,8 @@ export class MessageService {
         try {
           media[key] = await this.storageRepo.generateDownloadUrl(path, MEDIA_URL_MINUTES);
         } catch (error) {
-          // Một file hỏng không được làm hỏng cả popup — thiếu file nào thì
-          // web ẩn đúng phần đó.
+          // One bad file must not break the whole popup — the web hides just
+          // the missing part.
           console.error(`[MessageService] Failed to sign ${path}`, error);
         }
       })

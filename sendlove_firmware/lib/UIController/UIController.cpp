@@ -33,11 +33,9 @@ TouchEvent UIController::getTouchEvent() {
             DLOG("[UI] LONG_PRESS");
         }
 
-        // Ngưỡng thứ hai trong CÙNG một lần giữ (6s, bước cuối của chuỗi OTA).
-        // _longPressEmitted chặn mọi event sau mốc 3s cho tới khi nhả tay, nên phải
-        // kiểm riêng cờ _veryLongEmitted để bắn đúng một lần.
-        // KHÔNG đặt ngưỡng nào ≥ ~7s: TTP223 tự hiệu chuẩn sau 7-8s chạm liên tục
-        // và báo là đã nhả (xem TOUCH_OTA_HOLD_MS trong config.h).
+        // Second threshold within the SAME hold (OTA sequence), fired exactly once.
+        // NEVER set a threshold ≥ ~7s: the TTP223 recalibrates and reports a release
+        // (see TOUCH_OTA_HOLD_MS).
         if (_touchConfirmed && (now - _touchStartTime) >= TOUCH_OTA_HOLD_MS && !_veryLongEmitted) {
             _veryLongEmitted = true;
             result = TouchEvent::VERY_LONG_PRESS;

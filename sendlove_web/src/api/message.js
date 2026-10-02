@@ -12,22 +12,13 @@ export const confirmMessage = async (boxId, data) => {
 
 export const getMessages = async (boxId, limit = 20) => {
   const response = await apiClient.get(`/boxes/${boxId}/messages`, { params: { limit } });
-  // Backend thật trả data: { messages: Message[], pagination: {...} }
-  // (message.controller.ts:41) — không phải data: Message[] như comment cũ ở
-  // đây từng ghi sai. Mọi trang gọi getMessages() đều tin theo comment đó
-  // (setMessages(res.data) rồi .map trực tiếp) nên object lọt vào thẳng state,
-  // .map() ném TypeError ngay khi có phản hồi thành công đầu tiên — không lộ
-  // ra lúc backend tắt (request reject, không set) hay dữ liệu giả trong lúc
-  // dev, chỉ lộ khi có backend thật trả về đúng dạng.
-  // Bóc mảng ra ở đây, giữ nguyên hợp đồng { success, data } mà mọi nơi gọi
-  // đã tin sẵn — không phải sửa lại từng trang.
+  // The backend returns data: { messages, pagination }; callers expect data: Message[].
   return { success: response.data.success, data: response.data.data?.messages || [] };
 };
 
 export const getMessageDetails = async (boxId, messageId) => {
   const response = await apiClient.get(`/boxes/${boxId}/messages/${messageId}`);
-  // { success, data: Message & { media: { video?, image?, thumbnail?, voice?, bg_music? } } }
-  // media là signed URL đọc được 15 phút (message.service.ts getMessageDetails);
-  // các trường *_url còn lại vẫn là storage path thô, trình duyệt không mở được.
+  // data.media holds signed URLs valid for 15 minutes; the other *_url fields are
+  // raw storage paths the browser can't open.
   return response.data;
 };

@@ -1,28 +1,17 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Box ESP32 đọc media CỦA CHÍNH NÓ, không đọc được của box khác.
-    //
-    // Vì sao so sánh thẳng được, không cần bảng tra cứu: đường dẫn upload là
-    // `media/{boxId}/{messageId}/...` (sendlove_backend message.service.ts:23),
-    // và tài khoản Auth của box được tạo với `uid` đặt ĐÚNG BẰNG BOX_ID
-    // (scripts/provision_box_auth.js). Nên `request.auth.uid == boxId` là đủ.
-    //
-    // Firmware gửi header `Authorization: Firebase <idToken>` — scheme này KHÁC
-    // với `Bearer` mà Realtime Database dùng. Chỉ có hiệu lực khi firmware bật
-    // FIREBASE_USE_IDTOKEN 1; ở chế độ Database Secret box KHÔNG gửi header nào
-    // nên sẽ bị chặn ở đây.
-    //
-    // ⚠️ THỨ TỰ TRIỂN KHAI: phải flash firmware có header TRƯỚC, rồi mới deploy
-    // file này. Làm ngược lại là chết đường tải media ngay lập tức.
+    // A box reads ITS OWN media only. The box's Auth uid equals BOX_ID
+    // (scripts/provision_box_auth.js) and uploads go to media/{boxId}/..., so a
+    // direct comparison is enough. Requires firmware with FIREBASE_USE_IDTOKEN 1
+    // (it sends `Authorization: Firebase <idToken>`).
+    // ⚠️ DEPLOY ORDER: flash firmware that sends the header FIRST, then deploy this file.
     match /media/{boxId}/{allPaths=**} {
       allow read: if request.auth != null && request.auth.uid == boxId;
     }
 
-    // Còn lại chặn hết, kể cả ghi.
-    // Upload của web: server cấp signed POST policy. Download của backend
-    // (/device/poll): server cấp signed URL v4. Signed URL/POST xác thực bằng
-    // chữ ký GCS nên BYPASS toàn bộ rules ở đây — không bị ảnh hưởng.
+    // Everything else is denied. Web uploads and backend downloads use signed
+    // URLs/policies, which BYPASS these rules.
     match /{allPaths=**} {
       allow read, write: if false;
     }

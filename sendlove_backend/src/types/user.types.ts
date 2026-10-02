@@ -1,8 +1,6 @@
 import { BaseModel } from './base.types';
 
-// ==================================================
-// User — Node: users/{uid}
-// ==================================================
+// User — users/{uid}
 export interface UserBoxEntry {
   role: 'sender' | 'receiver';
   box_name: string;
@@ -16,9 +14,6 @@ export interface User extends BaseModel {
   last_login_at: number;
   is_deleted: boolean;
 
-  /**
-   * Denormalized copy: danh sách box mà user được pairing.
-   * Key = box_id, Value = { role, box_name }
-   */
+  /** Denormalized: the boxes this user is paired with, box_id → { role, box_name }. */
   boxes_list: Record<string, UserBoxEntry>;
 }

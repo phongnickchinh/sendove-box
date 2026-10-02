@@ -1,26 +1,18 @@
 #!/usr/bin/env node
 /**
- * Tạo tài khoản Firebase Auth riêng cho MỘT box, với `uid` đặt đúng bằng BOX_ID.
+ * Creates the Firebase Auth account of ONE box, with `uid` equal to BOX_ID
+ * (database.rules.json grants access with `auth.uid === $box_id`). Run OFFLINE
+ * at flashing time; the box never calls it.
  *
- * Vì sao uid phải trùng BOX_ID: `database.rules.json` cấp quyền bằng biểu thức
- * `auth.uid === $box_id`. Đặt uid trùng BOX_ID thì không cần bảng tra cứu
- * uid -> box nào cả, rule đọc thẳng được.
+ * Prerequisites: Email/Password sign-in enabled in the Firebase Console, and
+ * `sendlove_backend/serviceAccountKey.json` (gitignored).
  *
- * Chạy OFFLINE lúc sản xuất/nạp firmware, KHÔNG phải dịch vụ chạy nền — box
- * không bao giờ gọi tới script này. Đây chính là lý do hướng "direct RTDB"
- * không cần backend lúc runtime.
- *
- * Yêu cầu trước khi chạy:
- *   1. Firebase Console > Authentication > Sign-in method > bật **Email/Password**
- *      (hiện đang tắt: REST trả về PASSWORD_LOGIN_DISABLED).
- *   2. `sendlove_backend/serviceAccountKey.json` tồn tại (đã có sẵn, đã gitignore).
- *
- * Dùng:
+ * Usage:
  *   node scripts/provision_box_auth.js ESP32_A1B2C3D4E5F6
  *   node scripts/provision_box_auth.js ESP32_A1B2C3D4E5F6 --reset-password
  *
- * In ra đoạn C++ để dán vào `sendlove_firmware/include/config_secrets.h`.
- * Mật khẩu chỉ hiện ĐÚNG MỘT LẦN lúc tạo — Firebase không cho đọc lại.
+ * Prints the snippet for `sendlove_firmware/include/config_secrets.h`. The
+ * password is shown EXACTLY ONCE: Firebase can't read it back.
  */
 
 const admin = require('firebase-admin');
@@ -35,12 +27,11 @@ if (!boxId) {
   process.exit(1);
 }
 
-// Firebase Auth bắt buộc định dạng email hợp lệ nhưng không kiểm tra gửi được hay
-// không. `.invalid` là TLD dành riêng theo RFC 2606 — chắc chắn không bao giờ
-// trùng domain thật của ai.
+// Firebase Auth requires a well-formed email but never checks deliverability.
+// `.invalid` is a reserved TLD (RFC 2606) — it can never collide with a real domain.
 const email = `${boxId.toLowerCase()}@box.sendlove.invalid`;
 
-// 32 hex = 128 bit. Mật khẩu này không bao giờ người dùng gõ tay, nên dài tuỳ ý.
+// 32 hex chars = 128 bits. Nobody ever types this password, so length is free.
 const password = crypto.randomBytes(16).toString('hex');
 
 const serviceAccount = require(path.join(__dirname, '..', 'serviceAccountKey.json'));

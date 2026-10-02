@@ -48,18 +48,18 @@ void DisplayDriver::showWrappedText(const char *asciiText, int32_t x, int32_t y,
   if (asciiText == nullptr || asciiText[0] == '\0' || w <= 0 || h <= 0) return;
   if (!acquireSPI()) return;
 
-  // Phông có sẵn của LovyanGFX (ChakraPetch biên dịch cứng đã gỡ 2026-09-24, §28).
+  // A LovyanGFX built-in font (no compiled-in custom fonts, see MEMORY.md §28).
   _tft.setFont(&fonts::FreeSansBold9pt7b);
   _tft.setTextColor(color);
   _tft.setTextDatum(lgfx::top_center);
 
-  // yAdvance của FreeSansBold9pt7b = 22; dùng nguyên làm line height.
+  // FreeSansBold9pt7b's yAdvance = 22; used as the line height.
   const int32_t lineHeight = 22;
   int32_t maxLines = h / lineHeight;
   if (maxLines < 1) maxLines = 1;
   if (maxLines > 16) maxLines = 16;
 
-  // Bản copy cục bộ vì strtok() sửa thẳng vào buffer.
+  // A local copy, because strtok() modifies its buffer.
   char buf[300];
   strncpy(buf, asciiText, sizeof(buf) - 1);
   buf[sizeof(buf) - 1] = '\0';
@@ -93,7 +93,7 @@ void DisplayDriver::showWrappedText(const char *asciiText, int32_t x, int32_t y,
     lines[lineCount][sizeof(lines[0]) - 1] = '\0';
     lineCount++;
   }
-  // Còn từ chưa xếp hết -> bị cắt do quá dài, đánh dấu bằng "..." ở dòng cuối.
+  // Words left over -> the text was cut for length; mark it with "..." on the last line.
   if (word != nullptr && lineCount > 0) {
     size_t len = strlen(lines[lineCount - 1]);
     if (len > sizeof(lines[0]) - 4) len = sizeof(lines[0]) - 4;
@@ -117,7 +117,7 @@ void DisplayDriver::setBacklight(uint8_t percent) {
 
 void DisplayDriver::turnOff() {
   setBacklight(0);
-  delay(10); // Đợi 10ms để PWM áp dụng mức 0
+  delay(10); // wait 10ms for the PWM to settle at 0
 
   if (acquireSPI()) {
     _tft.fillScreen(TFT_BLACK);
@@ -125,17 +125,17 @@ void DisplayDriver::turnOff() {
     releaseSPI();
   }
 
-  // Ép chân BLK ở mức LOW trong suốt light sleep để đèn nền tắt hẳn.
+  // Hold BLK LOW throughout light sleep so the backlight stays fully off.
   pinMode(PIN_TFT_BLK, OUTPUT);
   digitalWrite(PIN_TFT_BLK, LOW);
   
-  // Chỉ cần gpio_hold_en() là đủ để giữ trạng thái Pad qua light sleep.
+  // gpio_hold_en() alone keeps the pad state through light sleep.
   gpio_hold_en((gpio_num_t)PIN_TFT_BLK);
   _isSleeping = true;
 }
 
 void DisplayDriver::wakeupFlash() {
-  // Nhả chốt hold phần cứng sau khi thức dậy
+  // Release the hardware hold after waking
   gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
 }
 
@@ -145,18 +145,18 @@ void DisplayDriver::turnOn() {
     return;
   }
 
-  // Đảm bảo nhả chốt GPIO BLK 
+  // Make sure the BLK GPIO hold is released
   gpio_hold_dis((gpio_num_t)PIN_TFT_BLK);
 
   if (xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(3000)) == pdTRUE) {
-    // Không gọi _tft.init() vì có thể làm hỏng trạng thái SPI chung
+    // Don't call _tft.init(): it could corrupt the shared SPI state
     _tft.wakeup();
     _tft.setRotation(0);
-    _tft.setSwapBytes(true); // Bắt buộc — tránh đảo màu RGB565 sau wakeup
+    _tft.setSwapBytes(true); // required — prevents swapped RGB565 colors after wake-up
     _tft.fillScreen(TFT_BLACK);
     xSemaphoreGive(_spiMutex);
 
-    // Bật lại LEDC PWM hoàn toàn độc lập
+    // Re-enable the LEDC PWM independently
     LEDC_SETUP();
     setBacklight(Settings::currentBacklight());
     _isSleeping = false;

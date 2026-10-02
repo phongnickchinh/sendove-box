@@ -12,25 +12,12 @@ import {
 } from '../theme/layout';
 
 /**
- * Màn 20 "theme editor".
- *
- * Bố cục: màn xem trước GHIM ở đầu (sticky) — chạm để chọn, kéo để dời widget — và bảng
- * thuộc tính nằm ngay dưới nó. Trước đây bảng thuộc tính là popup che mất màn xem trước,
- * nên sửa vị trí mà không thấy kết quả.
- *
- * Mỗi ô trong bảng thuộc tính chỉ có mặt nếu LayoutEngine.cpp THẬT SỰ đọc
- * trường đó cho loại widget này (WIDGET_TYPES trong theme/layout.js):
- *   font    -> họ phông web (cắt thành VLW khi gửi) hoặc phông có sẵn trong firmware
- *   format  -> clock_date: LayoutEngine::formatDate (+ locale vi/en)
- *   color   -> hexToColor, bắt buộc đúng 7 ký tự #RRGGBB
- *   align   -> drawTextWidget: center / right / còn lại = trái
- *   x,y,w,h -> drawBackgroundPatch xoá đúng ô w×h trước khi vẽ
- *
- * CỐ Ý KHÔNG CÓ: widget ảnh (firmware không vẽ), màu cho pin (drawBatteryIcon bỏ qua
- * cfg.color).
- *
- * Bản nháp nhận từ ThemePicker qua location.state; mở thẳng URL thì tự đọc
- * bản đã lưu, không có thì dùng bố cục mặc định của firmware.
+ * Theme editor: a sticky preview (tap to select, drag to move) above the
+ * property panel. A field appears only if the firmware ACTUALLY reads it for
+ * that widget type (WIDGET_TYPES in theme/layout.js) — hence no image widgets
+ * and no battery color.
+ * The draft comes from ThemePicker through location.state; opened by URL, it
+ * loads the saved theme or the default layout.
  */
 export default function ThemeEditor() {
   const { boxId } = useParams();
@@ -44,15 +31,15 @@ export default function ThemeEditor() {
   const [adding, setAdding] = useState(false);
   const [bgBusy, setBgBusy] = useState(false);
   const [bgError, setBgError] = useState(null);
-  const [touched, setTouched] = useState(false); // có thay đổi chưa đưa sang bước lưu
+  const [touched, setTouched] = useState(false); // has changes not yet taken to the save step
   const [confirmLeave, setConfirmLeave] = useState(false);
 
-  // Nạp các họ phông để xem trước đúng hình chữ (web cắt đúng các phông này thành VLW).
+  // Load the font families so the preview shows the real glyphs (the same fonts are subset to VLW).
   useEffect(() => {
     FONT_FAMILIES.forEach((f) => ensureWebFont(f.family, f.weight).catch(() => {}));
   }, []);
 
-  // Mở thẳng /theme/edit (không qua picker): nạp bản đã lưu nếu có.
+  // Opened directly at /theme/edit (not via the picker): load the saved theme if any.
   useEffect(() => {
     if (state) return undefined;
     let alive = true;
@@ -116,8 +103,8 @@ export default function ThemeEditor() {
   const goSend = () => navigate(`/box/${boxId}/receiver/theme/send`, { state: { name, widgets, bg } });
   const goBack = () => navigate(`/box/${boxId}/receiver/theme`);
 
-  /* Ô số: cho phép xoá trắng khi đang gõ (trước đây ô trống lập tức thành 0). Ô trống thì
-     widgetProblem báo lỗi cho tới khi gõ lại số. */
+  /* Number fields may be cleared while typing (instead of snapping to 0). An
+     empty field makes widgetProblem report an error until a number is entered. */
   const numField = (k) => (
     <label key={k} className="sl-editor__num">
       <span className="sl-caption">{k.toUpperCase()}</span>
@@ -130,7 +117,7 @@ export default function ThemeEditor() {
     </label>
   );
 
-  /* Nút dời 1px — kéo bằng ngón tay khó chính xác tới từng điểm ảnh. */
+  /* 1px nudge buttons — finger dragging isn't pixel-accurate. */
   const nudge = (dx, dy) => {
     const clamp = (v, max) => Math.max(0, Math.min(max, v));
     patch({
@@ -145,7 +132,7 @@ export default function ThemeEditor() {
       <Body>
         <Header title="Sửa giao diện" to={name} />
 
-        {/* --- màn xem trước, ghim đầu trang khi cuộn bảng thuộc tính --- */}
+        {/* --- preview, pinned to the top while the property panel scrolls --- */}
         <div className="sl-editor__stage">
           <div className="sl-editor__screen">
             <BoxScreen
@@ -175,7 +162,7 @@ export default function ThemeEditor() {
           </div>
         </div>
 
-        {/* --- bảng thuộc tính của widget đang chọn --- */}
+        {/* --- property panel of the selected widget --- */}
         {sel && meta ? (
           <div className="sl-card sl-editor__panel">
             <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
@@ -190,7 +177,7 @@ export default function ThemeEditor() {
               </button>
             </div>
 
-            {/* Vị trí + kích thước: ô số và nút dời 1px */}
+            {/* Position + size: number fields and 1px nudge buttons */}
             <div className="sl-field">
               <span className="sl-label">Vị trí và kích thước</span>
               <div className="sl-editor__pos">
@@ -343,7 +330,7 @@ export default function ThemeEditor() {
           </span>
         )}
 
-        {/* --- ảnh nền --- */}
+        {/* --- background image --- */}
         <div className="sl-listcard">
           <Icon name="image" size={20} style={{ color: 'var(--chip-fg)' }} />
           <div className="sl-listcard__mid">

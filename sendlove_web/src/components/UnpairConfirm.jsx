@@ -6,12 +6,9 @@ import Icon from './ui/Icon';
 import { Button, CircleIcon, Modal } from './ui/Screen';
 
 /**
- * Popup xác nhận huỷ ghép đôi (màn 14), dùng chung cho người gửi và người nhận.
- *
- * DELETE /boxes/:boxId/unpair không có role guard và chỉ gỡ ĐÚNG người gọi
- * (box.service.ts unpairBox): xoá slot pairing của vai đó + boxes_list của họ.
- * Không xoá tin nhắn, báo thức hay cài đặt, không đụng tới người còn lại —
- * nên nội dung dưới đây chỉ nói những gì thật sự xảy ra.
+ * Unpair confirmation popup, shared by sender and receiver. Unpairing removes
+ * ONLY the caller: no messages, alarms or settings are deleted and the other
+ * person is untouched — the copy below must say only that.
  */
 const EFFECTS = {
   sender: [
@@ -60,7 +57,7 @@ export default function UnpairConfirm({ boxId, role, onClose, onError }) {
         ))}
       </div>
 
-      {/* Ghép lại phải có mã trên hộp (pairingCode /^[SR][A-Z0-9]{6,9}$/) */}
+      {/* Re-pairing needs the code shown on the box (pairingCode /^[SR][A-Z0-9]{6,9}$/) */}
       <span className="sl-caption" style={{ textAlign: 'center', color: 'var(--neutral-400)' }}>
         Muốn dùng lại thì cần mã ghép đôi hiện trên màn hình hộp.
       </span>

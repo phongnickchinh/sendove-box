@@ -1,6 +1,6 @@
 /**
- * Định dạng tin nhắn dùng chung cho lịch sử người gửi, danh sách người nhận và
- * popup chi tiết — trước đây mỗi trang tự chép một bản timeAgo/nhãn riêng.
+ * Message formatting shared by the sender history, the receiver list and the
+ * detail popup.
  */
 
 const MINUTE = 60 * 1000;
@@ -24,7 +24,7 @@ export const fullDate = (ts) => {
   return `${day.charAt(0).toUpperCase()}${day.slice(1)} · ${clock(ts)}`;
 };
 
-/** Nhãn ngày: hôm nay / hôm qua / ngày tháng. */
+/** Day label: today / yesterday / a date. */
 export function dayLabel(ts) {
   const d = new Date(ts);
   const today = new Date();
@@ -37,13 +37,12 @@ export function dayLabel(ts) {
 }
 
 /**
- * "Tin nhắn tĩnh" được gửi dưới type 'image' (backend không có enum riêng —
- * SenderUI processAndUpload). Nhận ra nó vì nó không bao giờ có ảnh gốc
- * (image_url): chỉ có thumbnail/bin nếu kèm ảnh, bg_music nếu kèm nhạc.
+ * A "still message" is sent as type 'image' (no separate backend enum); it is
+ * recognizable by never having an original image (image_url).
  */
 export const isStatic = (msg) => msg.type === 'image' && !msg.image_url;
 
-/** Khoá bộ lọc của một tin — dùng cho chip lọc ở lịch sử. */
+/** A message's filter key — used by the history filter chips. */
 export function kindOf(msg) {
   if (isStatic(msg)) return 'static';
   if (msg.type === 'gif') return 'image';

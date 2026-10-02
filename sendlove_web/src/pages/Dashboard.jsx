@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { logOut } from '../api/auth';
 import { getBoxDetails } from '../api/box';
 import Icon from '../components/ui/Icon';
+import InstallHint from '../components/InstallHint';
 import { Screen, AppBar, Body, Button, CircleIcon } from '../components/ui/Screen';
 import { lastSeenMs, syncTone } from '../utils/boxStatus';
 import { timeAgo } from '../utils/messageFormat';
@@ -18,10 +19,7 @@ const TONE_DOT = {
   unknown: 'var(--neutral-400)',
 };
 
-/**
- * Hàng trạng thái dưới tên hộp: chấm màu + lần đồng bộ gần nhất, rồi % pin.
- * Suy từ last_seen chứ không từ status.online (hộp ngủ gần như suốt).
- */
+/** Status row under the box name, derived from last_seen (not status.online: the box mostly sleeps). */
 function BoxStatusRow({ status }) {
   if (status === undefined) {
     return <div className="sl-boxcard__status"><span className="sl-boxcard__statusitem">Đang đọc…</span></div>;
@@ -44,7 +42,7 @@ function BoxStatusRow({ status }) {
   );
 }
 
-/** Ảnh đại diện 44px viền, hoặc chữ cái đầu tên nếu không có ảnh. */
+/** 44px bordered avatar, or the name's initial when there is no photo. */
 function Avatar({ user }) {
   if (user?.photoURL) return <span className="sl-avatar"><img src={user.photoURL} alt="" /></span>;
   const initial = (user?.displayName || '?').trim().charAt(0).toUpperCase();
@@ -70,7 +68,7 @@ export default function Dashboard() {
   const boxes = Object.entries(profile?.boxes_list || {});
   const boxIds = boxes.map(([id]) => id).join(',');
 
-  // boxId → status (undefined = đang đọc, null = không đọc được)
+  // boxId → status (undefined = loading, null = failed to load)
   const [statuses, setStatuses] = useState({});
   useEffect(() => {
     if (!boxIds) return undefined;
@@ -93,8 +91,7 @@ export default function Dashboard() {
       <AppBar
         title={`Chào, ${firstName}!`}
         subtitle="Chọn hộp và gửi tin nhắn"
-        /* Chuông thông báo đã ẩn tới khi có nguồn thông báo thật (trước đây
-           luôn hiện "Chưa có thông báo nào"). Code cũ còn trong git. */
+        /* The notification bell stays hidden until there is a real notification source. */
         right={
           <button
             type="button" onClick={() => setAccountOpen((v) => !v)}
@@ -118,8 +115,8 @@ export default function Dashboard() {
         ) : boxes.length === 0 ? (
           <>
             <span className="sl-section-label">Hộp của bạn</span>
-            {/* Màu caramel-700 xác nhận từ Figma (#83513E) — riêng câu này,
-                không dùng màu neutral-500 mặc định của .sl-body. */}
+            {/* caramel-700 per Figma (#83513E) — this sentence only, not
+                .sl-body's default neutral-500. */}
             <p className="sl-body" style={{ margin: 0, color: 'var(--caramel-700)' }}>
               Kết nối một hộp mới để bắt đầu gửi tin nhắn.
             </p>
@@ -137,7 +134,7 @@ export default function Dashboard() {
                     className={`sl-boxcard sl-boxcard--${role}`}
                     onClick={() => navigate(`/box/${boxId}/${role}`)}
                   >
-                    {/* Nhóm trái: avatar + tên + hàng trạng thái. */}
+                    {/* Left group: avatar + name + status row. */}
                     <div className="sl-boxcard__left">
                       <span className={`sl-boxcard__avatar sl-boxcard__avatar--${role}`}>
                         <Icon name={role === 'sender' ? 'chat' : 'mailbox'} size={24} />
@@ -146,14 +143,13 @@ export default function Dashboard() {
                         <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.3, color: 'var(--caramel-800)' }}>
                           {box.box_name}
                         </span>
-                        {/* Trạng thái thật, đọc riêng từng hộp (GET /boxes/:id — người
-                            dùng thường chỉ có 1-3 hộp). Trước đây viết cứng "Online /
-                            100%" cho mọi hộp — đúng loại dữ liệu giả không được hiện. */}
+                        {/* Real status, fetched per box (GET /boxes/:id — users
+                            usually have 1-3 boxes). Never show placeholder values here. */}
                         <BoxStatusRow status={statuses[boxId]} />
                       </div>
                     </div>
 
-                    {/* Nhóm phải: pill vai trò + chevron GỘP CHUNG, neo phải. */}
+                    {/* Right group: role pill + chevron as ONE block, pushed right. */}
                     <div className="sl-boxcard__right">
                       <span className={`sl-rolepill sl-rolepill--${role}`}>
                         {ROLE_LABEL[box.role] || ROLE_LABEL.receiver}
@@ -171,11 +167,13 @@ export default function Dashboard() {
           <span className="sl-addbox__dot"><Icon name="plus" size={24} /></span>
           <span className="sl-addbox__label">Hộp mới</span>
         </button>
+
+        <InstallHint card />
       </Body>
 
       {accountOpen && (
         <div className="sl-popover-anchor" onClick={() => setAccountOpen(false)}>
-          {/* Mục "Cài đặt" (mờ, chưa có trang đích) đã ẩn tới khi có trang thật. */}
+          {/* The "Settings" entry stays hidden until its page exists. */}
           <div className="sl-popover" onClick={(e) => e.stopPropagation()}>
               <div className="sl-popover__row">
                 <Icon name="palette" size={21} style={{ flex: '0 0 auto' }} />

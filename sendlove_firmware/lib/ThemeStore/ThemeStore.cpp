@@ -18,7 +18,7 @@ constexpr size_t MAX_ASSETS = 4;
 
 struct AssetEntry {
     char name[8];
-    uint32_t off;  // tính từ đầu phân vùng
+    uint32_t off;  // from the start of the partition
     uint32_t len;
 };
 
@@ -31,7 +31,7 @@ struct Header {
     uint32_t payloadCrc;
     uint32_t count;
     AssetEntry assets[MAX_ASSETS];
-    uint32_t headerCrc;  // crc của mọi byte phía trước trường này
+    uint32_t headerCrc;  // crc of every byte before this field
 };
 
 struct AssetFile {
@@ -71,7 +71,7 @@ uint32_t headerCrcOf(const Header& h) {
     return SdStore::crc32Update(0, (const uint8_t*)&h, offsetof(Header, headerCrc));
 }
 
-// mmap cả phân vùng rồi kiểm. Kiểm crc payload qua con trỏ mmap (~160KB, vài chục ms).
+// mmap the whole partition, then validate. The payload crc is checked through the mmap pointer (~160KB, tens of ms).
 bool mapAndValidate() {
     unmap();
     if (!s_part) return false;
@@ -137,7 +137,7 @@ bool installFromSd(const char* dir, const char* id, uint32_t rev) {
     h.rev = rev;
     strncpy(h.themeId, id, sizeof(h.themeId) - 1);
 
-    // Đo trước: gói phải vừa phân vùng và đủ asset bắt buộc, không thì KHÔNG đụng flash.
+    // Measure first: the package must fit the partition and have the required assets, or flash is NOT touched.
     char paths[MAX_ASSETS][96];
     uint32_t off = PAYLOAD_OFF;
     for (size_t i = 0; i < MAX_ASSETS; i++) {
@@ -155,7 +155,7 @@ bool installFromSd(const char* dir, const char* id, uint32_t rev) {
         strncpy(e.name, FILES[i].name, sizeof(e.name));
         e.off = off;
         e.len = (uint32_t)sz;
-        off += ((uint32_t)sz + 3u) & ~3u;  // căn 4 byte: bg đọc như mảng uint16_t
+        off += ((uint32_t)sz + 3u) & ~3u;  // 4-byte aligned: bg is read as a uint16_t array
     }
     h.payloadLen = off - PAYLOAD_OFF;
     if (off > s_part->size) {
@@ -167,7 +167,7 @@ bool installFromSd(const char* dir, const char* id, uint32_t rev) {
     if (!buf) return false;
 
     DLOG("[THM] cai %s rev %lu (%lu B)", id, (unsigned long)rev, (unsigned long)h.payloadLen);
-    unmap();  // con trỏ asset cũ chết từ đây
+    unmap();  // old asset pointers are dead from here on
     bool ok = esp_partition_erase_range(s_part, 0, (off + 4095u) & ~4095u) == ESP_OK;
 
     uint32_t crc = 0;
@@ -186,7 +186,7 @@ bool installFromSd(const char* dir, const char* id, uint32_t rev) {
             crc = SdStore::crc32Update(crc, buf, n);
             pos += n;
         }
-        // Byte đệm căn 4 cũng nằm trong payload (flash vừa xoá = 0xFF) -> tính vào crc.
+        // The 4-byte alignment padding is part of the payload too (freshly erased flash = 0xFF) -> include it in the crc.
         uint32_t pad = (((e.len + 3u) & ~3u) - e.len);
         if (ok && pad) {
             memset(buf, 0xFF, pad);
@@ -198,7 +198,7 @@ bool installFromSd(const char* dir, const char* id, uint32_t rev) {
     if (ok) {
         h.payloadCrc = crc;
         h.headerCrc = headerCrcOf(h);
-        ok = esp_partition_write(s_part, 0, &h, sizeof(h)) == ESP_OK;  // CUỐI CÙNG
+        ok = esp_partition_write(s_part, 0, &h, sizeof(h)) == ESP_OK;  // written LAST
     }
     bool mapped = mapAndValidate();
     if (!ok || !mapped) {
@@ -206,7 +206,7 @@ bool installFromSd(const char* dir, const char* id, uint32_t rev) {
         return false;
     }
 
-    // Ghi nhớ gói đang dùng: boot mà flash trống thì cài lại từ đây (restoreFromSdIfNeeded).
+    // Remember the active package: a boot with empty flash reinstalls from it (restoreFromSdIfNeeded).
     JsonDocument doc;
     doc["dir"] = dir;
     doc["id"] = id;

@@ -23,141 +23,110 @@ static constexpr uint8_t PIN_NAND_CS = 8;
 // --- Touch Sensor (TTP223) --------------------------------------------------
 static constexpr uint8_t PIN_TOUCH = 10; // Active HIGH (INPUT_PULLDOWN)
 
-// --- Chân dự trữ, chưa nối trên bo ---
-// PIN_LED (LED nhịp thở), PIN_BATTERY_ADC + bộ chia áp cho đo pin.
-// Chân I2S đã nối thật, xem khối I2S Audio ở cuối file.
+// Not wired yet: PIN_LED (breathing LED), PIN_BATTERY_ADC + divider.
 
 // Timing & Power Constants
 static constexpr uint64_t SLEEP_TIMER_US = 5ULL * 60 * 1000000;
 static constexpr uint32_t INACTIVITY_SLEEP_TIMEOUT_MS = 60000; // TODO: Increase to 60000-300000 for production
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
-// Chạm ngắn lúc đang sync: lệnh phát tin được giữ chờ tối đa bấy nhiêu ms, sync xong
-// là tự phát (không bắt chạm lại). Quá hạn thì huỷ. User chốt 60s 2026-09-24.
+// A touch during a sync queues the play command for at most this long (product decision).
 static constexpr uint32_t PENDING_PLAY_MAX_WAIT_MS = 60000;
-// Sync xong phải RẢNH liên tục bấy nhiêu ms thì lệnh chờ mới phát, cho chip nghỉ sau sync
-// (ý user 2026-09-24). Đếm không chặn trong vòng lặp: sync chạy lại thì đếm từ đầu.
+// Idle time required after a sync before the queued command plays (product decision).
 static constexpr uint32_t PENDING_PLAY_SETTLE_MS = 10000;
 
 // Display Backlight
 static constexpr uint8_t BACKLIGHT_DAY_PERCENT = 100;
 
-// Cài đặt người dùng (web: PUT /boxes/:id/config -> config_flag). Lưu NVS nên vẫn có hiệu
-// lực khi thẻ SD hỏng. User chốt 2026-09-24: âm lượng mặc định 100 = bằng mức phát trước
-// đây, cập nhật firmware không làm hộp nhỏ đi. Quyết định "KHÔNG giảm đèn nền" ở MEMORY.md
-// §4 là chặn firmware TỰ giảm sáng, không áp cho cài đặt do người dùng chọn (§28).
+// User settings from the web, stored in NVS (they survive a faulty SD card).
+// Default volume 100 = the level the box always used (product decision). The "do NOT
+// dim the backlight" rule (MEMORY.md §4) doesn't apply to a user-chosen level (§28).
 static constexpr uint8_t SETTINGS_DEFAULT_BRIGHTNESS = 100;
 static constexpr uint8_t SETTINGS_DEFAULT_VOLUME = 100;
-// Sàn độ sáng: kéo về 0 thì màn đen hẳn, người dùng tưởng hộp hỏng.
+// Brightness floor: at 0 the screen is black and the box looks dead.
 static constexpr uint8_t SETTINGS_MIN_BRIGHTNESS = 5;
-// Màn báo thức luôn sáng ít nhất bấy nhiêu, dù cài đặt thấp hơn.
+// Minimum brightness of the alarm screen.
 static constexpr uint8_t ALARM_MIN_BRIGHTNESS = 60;
-// Chân SD_MODE của MAX98357A (BOM.md: GPIO20, HIGH = phát, LOW = shutdown). -1 = bo hiện
-// tại chưa nối (breadboard nối cứng SD_MODE) -> firmware không đụng chân nào. Đổi thành 20
-// khi lên PCB. Âm lượng 0 thì tắt ampli luôn.
+// MAX98357A SD_MODE pin (HIGH = play, LOW = shutdown; used at volume 0).
+// -1 = not wired (breadboard). Set to 20 on the PCB (BOM.md).
 static constexpr int8_t PIN_AMP_SD = -1;
 
 // Media Playback
 static constexpr uint8_t TARGET_FPS = 15;
 static constexpr uint32_t FRAME_DURATION_MS = 1000 / TARGET_FPS;
-// static constexpr uint16_t I2S_SAMPLE_RATE       = 16000;
-// static constexpr uint8_t  I2S_BITS_PER_SAMPLE   = 16;
 
 // NAND Slot Config
 static constexpr uint8_t NAND_SLOT_COUNT = 3;
 static constexpr uint32_t NAND_SLOT_ADDRS[NAND_SLOT_COUNT] = {
     0x010000, 0x560000, 0xAB0000};
 
-// Tran kich thuoc mot lan tai media. Khoang cach 2 slot dau la
-// 0x560000-0x010000 = 0x550000 = 5.570.560 byte, nen 5.500.000 nam vua duoi
-// mot slot.
-// Day KHONG phai lop chan tran bo nho — writeChunk() da chan o _slotCapacity
-// tu truoc. Day la thoat som + log ro ly do: truoc do mot URL tra ve stream
-// vo tan (hoac Content-Length noi doi) khien box tai vai phut roi moi chet o
-// cho khac, khong ai biet vi sao.
+// Size cap for one media download: an early exit with a clear log for an endless
+// stream or a lying Content-Length. On SD it is the only cap; on NAND writeChunk()
+// also stops at the slot capacity (5,570,560 bytes).
 static constexpr uint32_t MAX_MEDIA_BYTES = 25500000;
 
-// Firebase Configuration (Lưu trong config_secrets.h để chống lộ API trên Git)
+// Firebase configuration (kept in config_secrets.h so keys never reach Git)
 #include "config_secrets.h"
 
 static constexpr uint32_t FIREBASE_TIMEOUT_MS = 10000;
 
-// Nhịp sync khi hộp đang thức. Mỗi chu kỳ tốn 3 lần bắt tay TLS (~40KB heap mỗi
-// lần) kể cả khi không có tin mới, nên 10s cũ vừa tốn pin vừa ép heap liên tục
-// (MEMORY.md §21). User chốt 20s 2026-09-18: tin tới chậm hơn tối đa 10 giây.
+// Sync period while awake. Each cycle costs 3 TLS handshakes (~40KB of heap each),
+// see MEMORY.md §21. Product decision: 20s.
 static constexpr uint32_t SYNC_INTERVAL_MS = 20000;
 static constexpr const char *NVS_KEY_LAST_DOWNLOAD_TS = "last_dl_ts";
 static constexpr uint8_t MAX_ALARMS = 10;
 
-// Báo thức đang kêu (user chốt 2026-09-18): chạm ngắn = báo lại sau 5 phút,
-// chạm giữ = tắt, không ai chạm thì tự tắt sau 1 phút. Bíp mỗi giây một hồi.
+// Ringing alarm (product decision): touch = snooze 5 min, hold = dismiss, stops after 1 min.
 static constexpr uint32_t ALARM_SNOOZE_SEC = 5 * 60;
 static constexpr uint32_t ALARM_RING_MAX_MS = 60000;
 static constexpr uint32_t ALARM_BEEP_PERIOD_MS = 1000;
 
-// Nhạc báo thức (thiết kế 2026-09-24, MEMORY.md §28). User chốt: 10 bài mỗi hộp, mỗi bài
-// 5-60s, 16kHz mono (mở lại "giữ 8kHz" RIÊNG cho nhạc báo thức). 60s × 16000 × 2 byte =
-// 1.920.000 + 54 byte header -> trần 2MB, KHÔNG dùng AUDIO_MAX_PCM_BYTES (600KB của tin nhắn).
+// Alarm music (MEMORY.md §28, product decision): 10 tracks, 5-60s, 16 kHz mono (the
+// 8 kHz rule is lifted for alarm music ONLY). 60s × 16000 × 2 B fits the 2MB cap;
+// do NOT use AUDIO_MAX_PCM_BYTES (the message limit) here.
 static constexpr size_t   ALARM_MUSIC_MAX_TRACKS = 10;
 static constexpr uint32_t ALARM_MUSIC_MAX_BYTES  = 2000000;
-// Mỗi chu kỳ sync tải tối đa bấy nhiêu bài: một chu kỳ quá dài làm lệnh phát tin đang chờ
-// (§27) hết hạn 60s.
+// Per sync cycle; a longer cycle would outlast a queued play command (§27).
 static constexpr uint8_t  ALARM_MUSIC_PER_SYNC   = 2;
-// Tăng dần: bắt đầu ở 30% mức đã chọn (thang âm lượng vốn đã theo dB), đủ mức sau 20s.
+// Ramp: from 30% of the chosen level to full over 20s.
 static constexpr uint32_t ALARM_RAMP_MS          = 20000;
 static constexpr uint8_t  ALARM_RAMP_START_PCT   = 30;
 
-// Bat xac thuc chung chi TLS cho moi ket noi Firebase (thay cho setInsecure()).
-// Root CA nam o include/firebase_root_ca.h.
-// Dat ve 0 = quay lai setInsecure() — DUONG LUI KHAN CAP, chi dung khi da xac
-// dinh loi la o tang TLS (doc dong log "[NET] tls: ..."). Chay o che do 0 nghia
-// la box lai ho MITM: bat ky ai trong cung mang doc/sua duoc tin nhan va lay
-// duoc FIREBASE_AUTH_SECRET.
+// 1 = verify the TLS certificate on every Firebase connection (root CAs in
+// firebase_root_ca.h). 0 = setInsecure(): EMERGENCY FALLBACK only, open to MITM.
 #define FIREBASE_TLS_VERIFY 1
 
-// Xac thuc voi Firebase bang idToken rieng cua box (Firebase Auth) thay vi
-// Database Secret quyen admin.
-//   1 = signInWithPassword -> idToken (han 1h) -> header Authorization: Bearer,
-//       refresh token luu NVS. Rules `auth.uid === $box_id` moi co hieu luc.
-//   0 = quay lai `?auth=<FIREBASE_AUTH_SECRET>` (DUONG LUI).
-// Dat 1 CHI KHI da du 3 dieu kien, neu khong box se mat ket noi hoan toan:
-//   (a) Firebase Console > Authentication > bat Email/Password
-//   (b) da chay `node scripts/provision_box_auth.js <BOX_ID>` va dien
-//       BOX_AUTH_EMAIL/BOX_AUTH_PASSWORD vao config_secrets.h
-//   (c) da deploy database.rules.json len dung instance `iot-app-839a2`
+// 1 = authenticate with the box's own idToken (the `auth.uid === $box_id` rules apply);
+// 0 = fall back to the admin Database Secret.
+// Set 1 ONLY when all three hold, or the box loses its connection entirely:
+//   (a) Email/Password sign-in is enabled in the Firebase Console
+//   (b) scripts/provision_box_auth.js was run and BOX_AUTH_* are in config_secrets.h
+//   (c) database.rules.json is deployed
 #define FIREBASE_USE_IDTOKEN 1
 
-// Trong idToken JWT cua Firebase (~900-1100 byte). De du bien 1400.
+// A Firebase idToken JWT is ~900-1100 bytes. 1400 leaves margin.
 static constexpr size_t FIREBASE_ID_TOKEN_MAX_LEN = 1400;
 static constexpr size_t FIREBASE_REFRESH_TOKEN_MAX_LEN = 400;
 
-// URL dai nhat la cua messages: base ~160 byte (host + /messages/<BOX_ID>.json
-// + orderBy + startAt) cong "&auth=" (6) cong idToken.
-//   Do that 2026-09-05 voi token 945 byte -> URL 1105 byte.
-//   Xau nhat theo FIREBASE_ID_TOKEN_MAX_LEN = 1400 -> 1566 byte. Bien 226 byte.
-// Do RTDB CHI nhan token qua query (xem MEMORY.md muc 17), khong cach nao tranh.
-// Buffer nay la THANH VIEN cua NetworkManager, khong phai bien cuc bo: dat
-// tren stack thi moi ham ton them ~1.8KB trong khi TASK_STACK_NETWORK chi 6144.
+// Longest URL (messages): ~160-byte base + "&auth=" + idToken, 1566 bytes worst
+// case. The token must go in the query (MEMORY.md §17). The buffer is a NetworkManager
+// member, not a local: TASK_STACK_NETWORK is only 6144.
 static constexpr size_t FIREBASE_URL_MAX_LEN = 1792;
 
 // OTA Configuration
 static constexpr const char *OTA_HOSTNAME = "sendlovebox";
 static constexpr const char *FW_VERSION = "0.1.1";
-// Chuỗi chạm vào/ra chế độ OTA (user chốt 2026-09-21): giữ 3s → nhả → giữ 3s → nhả
-// (hiện nhắc "giữ thêm 6s") → giữ TOUCH_OTA_HOLD_MS. Không dùng một cú giữ dài duy nhất
-// vì TTP223 TỰ HIỆU CHUẨN sau 7-8s chạm liên tục và từ đó báo là đã nhả dù tay vẫn đặt
-// (đo trên hộp: nhả ở 7700-7800ms; diễn đàn Arduino xác nhận trên hàng trăm con chip).
-// 6s cách mốc đó ~1,7s. ĐỪNG nâng lên gần 7s.
+// OTA touch sequence (product decision): hold 3s, hold 3s, then hold
+// TOUCH_OTA_HOLD_MS. The TTP223 recalibrates after ~7.7s of continuous touch and
+// reports a release: do NOT raise the 6s toward 7s.
 static constexpr uint32_t TOUCH_OTA_HOLD_MS = 6000;
-// Cú giữ 3s thứ hai phải tới trong bấy nhiêu ms kể từ cú thứ nhất.
+// The second 3s hold must arrive within this many ms of the first.
 static constexpr uint32_t OTA_SEQ_STEP_WINDOW_MS = 6000;
-// Từ lúc hiện nhắc, phải BẮT ĐẦU cú giữ 6s trong bấy nhiêu ms (đang giữ thì không huỷ).
+// The 6s hold must START within this many ms of the prompt.
 static constexpr uint32_t OTA_SEQ_FINAL_WINDOW_MS = 12000;
-// Đang nạp mà quá bấy nhiêu ms không nhận thêm chunk nào -> Update.abort(). Không
-// có chốt này, TCP đứt giữa chừng làm cờ _isUpdating kẹt true vĩnh viễn: hộp không
-// bao giờ ngủ và không bao giờ kêu báo thức nữa cho tới khi rút điện.
+// No new chunk for this long while flashing -> Update.abort(); otherwise a dropped
+// connection leaves the box stuck in "updating" (no sleep, no alarms).
 static constexpr uint32_t OTA_STALL_TIMEOUT_MS = 30000;
-// Bản mới phải sống bấy nhiêu ms kể từ boot mới được đánh dấu hợp lệ. Reset trước
-// mốc này (crash, WDT, brownout) thì bootloader tự quay về bản cũ (main.cpp).
+// A new image is marked valid after surviving this long; a reset before = rollback.
 static constexpr uint32_t OTA_VERIFY_DELAY_MS = 60000;
 
 // Wi-Fi & NTP Configuration (Fallback credentials if NVS is empty)
@@ -165,23 +134,19 @@ static constexpr size_t WIFI_SSID_MAX_LEN = 33;  // 32 chars + null terminator
 static constexpr size_t WIFI_PASS_MAX_LEN = 65;  // 64 chars + null terminator
 static constexpr const char *DEFAULT_WIFI_SSID = "@Ruijie-s4617";
 static constexpr const char *DEFAULT_WIFI_PASSWORD = "56Daiyen";
-// static constexpr const char *DEFAULT_WIFI_SSID = "@Ruijie-s4617";
-// static constexpr const char *DEFAULT_WIFI_PASSWORD = "56Daiyen";
 
 static constexpr const char *NTP_SERVER_1 = "time.google.com";
 static constexpr const char *NTP_SERVER_2 = "asia.pool.ntp.org";
 static constexpr const char *NTP_SERVER_3 = "pool.ntp.org";
 static constexpr const char *TIMEZONE_ENV = "ICT-7";
 
-// FreeRTOS Task Priorities & Stack Sizes (PowerManager không có task riêng)
+// FreeRTOS task priorities & stack sizes (PowerManager has no task of its own)
 static constexpr UBaseType_t TASK_PRIORITY_MEDIA_PLAYER = 3;
 static constexpr UBaseType_t TASK_PRIORITY_NETWORK = 2;
 static constexpr UBaseType_t TASK_PRIORITY_UI_CONTROLLER = 5;
 
-// 8192 từ 2026-09-24: phông VLW của theme (LovyanGFX VLWfont::drawChar) cấp bitmap từng
-// glyph bằng alloca(w*h) TRÊN STACK task này — giờ cỡ 48-56px là 2-3KB mỗi glyph. §24 dặn
-// không nâng khi chưa đo; đây là nhu cầu mới có số cụ thể, và LayoutEngine in
-// "[LAY] stack con N B" sau lần vẽ đầu có VLW để đo trên máy thật.
+// 8192: VLW fonts alloca() each glyph bitmap on this task's stack (2-3KB for a
+// 48-56px digit). LayoutEngine logs "[LAY] stack con N B" to measure it (MEMORY.md §24).
 static constexpr uint32_t TASK_STACK_MEDIA_PLAYER = 8192;
 static constexpr uint32_t TASK_STACK_NETWORK = 6144;
 static constexpr uint32_t TASK_STACK_UI_CONTROLLER = 4096;
@@ -194,70 +159,47 @@ static constexpr const char *NVS_NAMESPACE = "sendlove";
 #define STORAGE_TYPE_SD 1
 #define ACTIVE_STORAGE_TYPE STORAGE_TYPE_SD
 
-// Bật tạm thời để xóa sạch dữ liệu trên NOR/W25Q128 lúc boot kế tiếp.
-// Sau khi nạp xong và xác nhận dữ liệu đã được xóa, đổi về 0 rồi build lại.
+// 1 = wipe the W25Q128 on the next boot; set back to 0 afterwards.
 #define ERASE_NOR_ON_BOOT 0
 
-// ============================================================
 // I2S Audio (MAX98357A)
-// ============================================================
 static constexpr uint8_t PIN_I2S_BCLK = 0;
 static constexpr uint8_t PIN_I2S_LRC  = 1;
 static constexpr uint8_t PIN_I2S_DOUT = 2;
-static constexpr uint32_t AUDIO_SAMPLE_RATE    = 8000;  // Hz — mặc định khi header AUDC hỏng
-// Trần an toàn cho pcmSize đọc từ header AUDC: 16kHz mono 16-bit × 18s.
-// Video bị web cắt ở 15s, audio cũng phải bị cắt theo — đây chỉ là chốt chặn cuối.
+static constexpr uint32_t AUDIO_SAMPLE_RATE    = 8000;  // Hz — default when the AUDC header is bad
+// Safety cap for the AUDC header's pcmSize: 16 kHz mono 16-bit × 18s.
 static constexpr uint32_t AUDIO_MAX_PCM_BYTES  = 600000;
-// 256 bytes mono = 128 samples = 16ms @ 8000Hz.
-// Oversample x4 Stereo = 512 samples = 2048 bytes = ĐÚNG 1 DMA BUFFER.
-// Tiết kiệm 12KB static RAM trong AudioPlayer, giúp DMA fit chuẩn 100% không dư rác.
+// 256 bytes mono = 128 samples; oversampled x4 to stereo = EXACTLY 1 DMA buffer.
 static constexpr uint32_t AUDIO_PCM_CHUNK_SIZE = 256;
-// Cỡ ĐỌC, tách khỏi cỡ giãn mẫu ở trên. 256 là con số chỉnh cho NAND đọc thô
-// tính bằng micro-giây; trên thẻ SD mỗi lượt đọc là một lần lấy spiMutex + NOP
-// hack + fread xuyên VFS/FATFS. File 16kHz ở 15fps cần ~2134 B audio mỗi frame
-// => 9 lượt như vậy mỗi frame. Gộp thành 1024 B/lượt còn 3, chỉ tốn thêm 768 B
-// (_stereo giữ nguyên 2048 B; tăng thẳng AUDIO_PCM_CHUNK_SIZE thì tốn ~7 KB).
+// READ size, separate from the chunk above: SD reads are expensive (mutex + VFS), so
+// batching to 1024 B cuts 9 reads per video frame to 3 for 768 B more RAM.
 static constexpr uint32_t AUDIO_READ_CHUNK_SIZE = 1024;
 static constexpr uint8_t  AUDIO_DMA_BUF_COUNT  = 12;   // 12 × 512 samples = 192ms @ 32kHz (24KB DMA RAM)
 static constexpr uint16_t AUDIO_DMA_BUF_LEN    = 512;   // samples per DMA buffer
-// BCLK ở 8kHz mono (~256kHz) quá thấp cho MAX98357A -> rè liên tục. Test tay
-// (2026-09-01): cùng tone phát sạch ở 44.1kHz, rè ở 8kHz -> không phải do
-// đảo chân I2S. Fix: I2S vẫn mở ở AUDIO_OVERSAMPLE x tốc độ file, mỗi mẫu file
-// lặp lại AUDIO_OVERSAMPLE lần khi ghi ra DMA (AudioPlayer::fillChunk) để giữ
-// đúng cao độ. File PCM trên NAND vẫn 8kHz, không đổi.
+// BCLK at 8 kHz is too low for the MAX98357A (constant crackle), so I2S runs at
+// AUDIO_OVERSAMPLE x the file rate, interpolating between samples (AudioPlayer::fillChunk).
 static constexpr uint8_t  AUDIO_OVERSAMPLE     = 4;
 
-// ============================================================
-// SD Card Storage (chỉ có tác dụng khi ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD)
-// ============================================================
-// Module SD THAY THẾ chip W25Q128 trên đúng bộ chân cũ (SCK 4 / MOSI 6 / MISO 5),
-// dùng lại luôn CS = GPIO 8. Hai chip không bao giờ cùng nằm trên bo.
+// SD card storage (ACTIVE_STORAGE_TYPE == STORAGE_TYPE_SD). The SD module REPLACES
+// the W25Q128 on the same pins and CS (GPIO 8); the two are never fitted together.
 static constexpr uint8_t PIN_SD_CS = PIN_NAND_CS;
 
-// 20 slot tin nhắn trên thẻ (NAND chỉ có NAND_SLOT_COUNT = 3 vì bị giới hạn 16MB).
-// Bản SD dùng 1 byte cờ unread cho mỗi slot trong manifest, KHÔNG dùng bitmask
-// uint8_t như NandStorageProvider, nên không bị trần 8 slot.
+// The manifest keeps one unread byte per slot (no 8-slot bitmask limit as on NAND).
 static constexpr uint8_t SD_SLOT_COUNT = 20;
 
-// SD.begin() mặc định 4MHz — quá chậm cho video 15fps (đọc 1 frame JPEG ~15KB
-// đã ăn hết ngân sách 66ms). Thư viện tự hạ về 400kHz trong lúc init rồi mới
-// dùng con số này. Hạ xuống 10MHz nếu breadboard sinh "Read short"/"Bad jpegSize".
+// The 4MHz default is too slow for 15fps video. 10MHz for the breadboard: "Read
+// short" / "Bad jpegSize" are the symptoms of a bus running too fast.
 static constexpr uint32_t SD_SPI_FREQ_HZ = 10000000;
 
 static constexpr const char *SD_MEDIA_DIR = "/media";
 static constexpr const char *SD_MANIFEST_PATH = "/media/index.bin";
 
-// Trần caption lưu trong file sidecar — bằng SLOT_TEXT_MAX_LEN của bản NAND
-// để hai bản hiển thị giống hệt nhau.
+// Caption cap; equals the NAND build's SLOT_TEXT_MAX_LEN.
 static constexpr uint16_t SD_TEXT_MAX_LEN = 256;
 
-// MODE SPI DÙNG CHUNG CHO CẢ BUS (LovyanGFX + storage) — BẮT BUỘC MODE3.
-// ST7789 không có chân CS: đã thử thực tế 2026-09-17, chạy MODE0 thì màn hình
-// đen hoàn toàn. Mọi chủ bus khác cũng phải MODE3, vì đổi CPOL giữa hai chủ bus
-// làm SCK nhảy mức lúc idle -> 1 sườn lên giả -> ST7789 lệch khung byte
-// (MEMORY.md mục 2). Thư viện SD gốc hardcode MODE0 nên đã chép vào lib/SD và
-// đổi sang MODE3 (lib/SD/src/sd_diskio.cpp, struct AcquireSPI) — hằng số này
-// không điều khiển được thư viện đó, sửa thì sửa cả hai chỗ.
+// ONE SPI mode for the whole bus — MODE3 IS MANDATORY: the CS-less ST7789 stays
+// black in MODE0 and loses byte framing if masters switch CPOL (MEMORY.md §2).
+// lib/SD is a copy patched to MODE3 (sd_diskio.cpp); change both places together.
 static constexpr uint8_t SPI_BUS_MODE = 3;
 
 #endif // CONFIG_H

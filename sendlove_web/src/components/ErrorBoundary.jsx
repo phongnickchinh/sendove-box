@@ -1,14 +1,7 @@
 import React from 'react';
 import { Screen, Body, Actions, Button, CircleIcon } from './ui/Screen';
 
-/**
- * Lưới an toàn cuối cùng khi một trang ném lỗi lúc render.
- *
- * Trước đây là chữ đỏ tiếng Anh "Something went wrong" kèm stack trace và
- * không có lối ra — người dùng chỉ còn cách tự tải lại. Giờ nói tiếng Việt,
- * đúng phong cách, có hai lối thoát; chi tiết kỹ thuật gập lại để còn chụp
- * gửi khi báo lỗi.
- */
+/** Last safety net when a page throws during render; technical details stay collapsed for bug reports. */
 export class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);

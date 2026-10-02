@@ -32,8 +32,8 @@ void OtaHandler::handleBegin(WebServer& server) {
 
     if (md5.length() == 32) Update.setMD5(md5.c_str());
 
-    // Mốc cho watchdog bắt đầu từ lúc begin, không phải từ chunk đầu: client
-    // gọi begin xong rồi chết luôn thì cũng phải được dọn.
+    // The watchdog clock starts at begin, not at the first chunk: a client that
+    // calls begin and then dies must be cleaned up too.
     _lastChunkMs = millis();
     _isUpdating = true;
     sendJson(server, 200, "{\"ready\":true}");
@@ -96,8 +96,8 @@ void OtaHandler::tickWatchdog() {
     if (!_isUpdating) return;
     if (millis() - _lastChunkMs < OTA_STALL_TIMEOUT_MS) return;
 
-    // Huỷ an toàn: Update.write() chỉ ghi vào partition KHÔNG chạy, và otadata chỉ
-    // đổi khi Update.end(true) thành công -> bỏ dở ở đây thì bản đang chạy vẫn nguyên.
+    // Aborting is safe: Update.write() only writes the NON-running partition, and
+    // otadata changes only when Update.end(true) succeeds -> the running image is intact.
     Update.abort();
     _isUpdating = false;
     DLOG("[OTA] huy: %lus khong co chunk nao", (unsigned long)(OTA_STALL_TIMEOUT_MS / 1000));

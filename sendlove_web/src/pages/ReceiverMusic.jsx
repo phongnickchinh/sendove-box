@@ -8,14 +8,9 @@ import { Screen, AppBar, Body, Header, Button, Modal } from '../components/ui/Sc
 import Illustration from '../components/ui/Illustration';
 
 /**
- * Thư viện nhạc báo thức của hộp (thiết kế 2026-09-24, firmware MEMORY.md §28).
- *
- * Luật hộp phải hiện thẳng trên UI:
- *   10 bài mỗi hộp, mỗi bài 5–60 giây (hộp kêu tối đa 1 phút rồi tự tắt, bài ngắn hơn
- *   thì phát lặp). Nhạc chỉ tải về hộp khi có báo thức dùng nó; tải một lần rồi giữ trên
- *   thẻ nhớ, chọn lại không phải tải nữa.
- *   Giải mã + cắt + đổi sang 16 kHz mono làm NGAY TRÊN TRÌNH DUYỆT (quy tắc "giải mã ở
- *   client"), backend chỉ kiểm file.
+ * The box's alarm music library (firmware MEMORY.md §28). Rules the UI states:
+ * 10 tracks per box, 5–60 seconds each; a track downloads to the box only when an
+ * alarm uses it. Decoding and conversion to 16 kHz mono happen IN THE BROWSER.
  */
 
 const MAX_TRACKS = 10;
@@ -32,11 +27,11 @@ export default function ReceiverMusic() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
-  const [adding, setAdding] = useState(null);    // null | { musicId?, name? } — thêm mới hoặc thay file
+  const [adding, setAdding] = useState(null);    // null | { musicId?, name? } — add new or replace a file
   const [renaming, setRenaming] = useState(null); // null | { id, name }
   const [deleting, setDeleting] = useState(null); // null | track
   const [busy, setBusy] = useState(false);
-  const [playing, setPlaying] = useState(null); // track đang mở popup nghe
+  const [playing, setPlaying] = useState(null); // the track open in the player popup
 
   const load = useCallback(async () => {
     try {
@@ -189,10 +184,7 @@ export default function ReceiverMusic() {
   );
 }
 
-/**
- * Popup nghe thử một bài trong thư viện: tên bài, thanh tiến độ, phát/tạm dừng, dừng.
- * Đóng popup (nút, Esc, chạm nền) là dừng hẳn và thu hồi object URL.
- */
+/** Player popup for a library track. Closing it stops playback and revokes the object URL. */
 function MusicPlayer({ boxId, track, onClose }) {
   const [state, setState] = useState('loading'); // loading | ready | error
   const [paused, setPaused] = useState(true);
@@ -217,7 +209,7 @@ function MusicPlayer({ boxId, track, onClose }) {
         a.onended = () => { setPaused(true); setPos(0); };
         audioRef.current = a;
         setState('ready');
-        a.play().catch(() => {}); // trình duyệt chặn tự phát thì người dùng bấm nút phát
+        a.play().catch(() => {}); // if the browser blocks autoplay, the user taps play
       } catch {
         if (alive) setState('error');
       }
@@ -286,10 +278,7 @@ function MusicPlayer({ boxId, track, onClose }) {
   );
 }
 
-/**
- * Chọn file → giải mã → chọn đoạn (bắt đầu + độ dài 5–60s) → nghe thử → mã hoá 16 kHz +
- * AUDC → tải lên. initial.musicId có = thay nội dung bài đó.
- */
+/** Pick a file → choose a 5–60s segment → preview → encode → upload. initial.musicId = replace that track. */
 function AddMusicModal({ boxId, initial, onClose, onSaved }) {
   const [decoded, setDecoded] = useState(null);
   const [fileName, setFileName] = useState('');
@@ -307,7 +296,8 @@ function AddMusicModal({ boxId, initial, onClose, onSaved }) {
     const file = e.target.files?.[0];
     if (!file) return;
     setError(null);
-    // Chặn TRƯỚC khi giải mã: decodeAudioData bung cả bài ra RAM (case bắt buộc #11).
+    // Reject BEFORE decoding: decodeAudioData expands the whole track into RAM
+    // (mandatory case, firmware MEMORY.md §28).
     if (file.size > ALARM_MUSIC.MAX_FILE_BYTES) {
       setError('File lớn hơn 15 MB. Hãy chọn file ngắn hơn hoặc nén lại.');
       return;

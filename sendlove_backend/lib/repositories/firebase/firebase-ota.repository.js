@@ -7,9 +7,7 @@ class FirebaseOtaRepository extends firebase_base_repository_1.FirebaseBaseRepos
     constructor() {
         super('ota_tasks');
     }
-    /**
-     * Cập nhật trạng thái OTA task
-     */
+    /** Update an OTA task's status. */
     async updateOtaStatus(taskId, status, extras) {
         const updateData = {
             status,
@@ -18,9 +16,7 @@ class FirebaseOtaRepository extends firebase_base_repository_1.FirebaseBaseRepos
         };
         await firebase_1.db.ref(`${this.collectionPath}/${taskId}`).update(updateData);
     }
-    /**
-     * Tìm OTA task đang pending cho box cụ thể
-     */
+    /** Find the pending OTA task for a box. */
     async findPendingByBoxId(boxId) {
         const snapshot = await firebase_1.db.ref(this.collectionPath)
             .orderByChild('box_id')

@@ -76,7 +76,7 @@ def save(im, name):
 
 VIEW = (2, 26, 1313, 813)
 
-# ---------------------------------------------------------------- H01 so do file
+# ---------------------------------------------------------------- H01 file diagram
 def h01():
     W, Hh = 1400, 660
     im = Image.new("RGB", (W, Hh), (248, 247, 244)); d = ImageDraw.Draw(im)
@@ -105,7 +105,7 @@ def h01():
     d.text((30, 612), "File > Save As sang tên khác trước.", fill=RED, font=F(24, True))
     save(im, "H01_so_do_file.png")
 
-# ---------------------------------------------------------------- H02 giao dien
+# ---------------------------------------------------------------- H02 interface
 def h02():
     im = raw("01_giao_dien"); d = ImageDraw.Draw(im)
     rect(d, VIEW, YEL, 5); badge(d, (60, 790), "1", 24)
@@ -136,7 +136,7 @@ def h03():
         arrow(d, (b[0], ly), (px + 26, py), YEL, 4)
     save(im, "H03_gizmo.png")
 
-# ---------------------------------------------------------------- H04 chuot
+# ---------------------------------------------------------------- H04 mouse
 def h04():
     W, Hh = 1400, 560
     im = Image.new("RGB", (W, Hh), (248, 247, 244)); d = ImageDraw.Draw(im)
@@ -166,7 +166,7 @@ def h05():
     rect(d, (1186, 29, 1306, 48)); badge(d, (1170, 38), "5", 16)
     save(im, "H05_prefs_input.png")
 
-# ---------------------------------------------------------------- H06 lac -> Home
+# ---------------------------------------------------------------- H06 lost view -> Home
 def h06():
     a = crop(raw("02_lac"), VIEW); b = crop(raw("03_frame_all"), VIEW)
     save(side_by_side([a, b], ["Lạc góc nhìn: chỉ thấy một mảng", "Bấm phím Home → thấy lại cả mô hình"], h=430), "H06_lac_home.png")
@@ -184,12 +184,12 @@ def h07():
     label(d, (650, 70), "Sidebar (N) = bảng số đo", 24, anchor="lm")
     save(im, "H07_menu_view.png")
 
-# ---------------------------------------------------------------- H08 goc chuan
+# ---------------------------------------------------------------- H08 standard views
 def h08():
     ims = [crop(raw(n), (200, 60, 1113, 813)) for n in ("05_front", "05_right", "05_top")]
     save(side_by_side(ims, ["Phím 1: nhìn trước", "Phím 3: nhìn bên phải", "Phím 7: nhìn từ trên"], h=420), "H08_goc_chuan.png")
 
-# ---------------------------------------------------------------- H09 an hien
+# ---------------------------------------------------------------- H09 hide / show
 def h09():
     s = 2.2; off = (1316, 26)
     o = crop(raw("06_an_than"), (1316, 26, 1598, 182), s); d = ImageDraw.Draw(o)
@@ -214,7 +214,7 @@ def h10():
     dd.text((10, hdr.height + 92), "(khung dây / đặc / vật liệu / render)", fill=WHITE, font=F(20))
     save(side_by_side([hdr2, v], ["Nút trên thanh tiêu đề", "Bật X-ray: vỏ trong suốt"], h=460), "H10_xray.png")
 
-# ---------------------------------------------------------------- H11 bang N
+# ---------------------------------------------------------------- H11 N panel
 def h11():
     s = 1.5; off = (740, 26)
     im = crop(raw("08_bang_n"), (740, 26, 1313, 520), s); d = ImageDraw.Draw(im)
@@ -240,7 +240,7 @@ def h12():
     d.line(((560 - off[0]) * s, (277 - off[1]) * s, (745 - off[0]) * s, (277 - off[1]) * s), fill=RED, width=4)
     save(im, "H12c_menu_text.png")
 
-# ---------------------------------------------------------------- truoc / sau
+# ---------------------------------------------------------------- before / after
 def pair(k, view, cap_a, cap_b, name):
     a = Image.open(os.path.join(VAR, "goc", f"shape_{view}.png")).convert("RGB")
     b = Image.open(os.path.join(VAR, k, f"shape_{view}.png")).convert("RGB")
@@ -255,7 +255,7 @@ def pairs():
     pair("taper0", "front", "Hiện tại: W = 45.35, TAPER = 3.45", "Đổi: W = 48.0, TAPER = 0.0 (thân thẳng)", "P6_W_TAPER.png")
     pair("L72", "side", "Hiện tại: L = 62.0", "Đổi: L = 72.0 (thân dài)", "P7_L.png")
 
-# ---------------------------------------------------------------- khac chu
+# ---------------------------------------------------------------- engraving text
 def h13():
     # menu File > Export > STL, Save As
     s = 1.3
@@ -263,7 +263,7 @@ def h13():
     for box in ((28, 153, 225, 173), (28, 307, 225, 327), (262, 426, 500, 446)):
         rect(d, box, s=s)
     save(im, "H13_menu_file.png")
-    # them chu + bang thong so chu
+    # add text + the text properties panel
     v = crop(raw("11_chu_them"), (2, 26, 1313, 813)); dv = ImageDraw.Draw(v)
     rect(dv, (258, 2, 286, 22), off=(0, 0))
     label(dv, (300, 40), "Add > Text (Shift+A)", 26)
@@ -282,7 +282,7 @@ def h13():
     for box in ((1320, 434, 1343, 456), (1318, 255, 1590, 275), (1498, 318, 1590, 338), (1398, 368, 1590, 388)):
         rect(dp, box, s=s, off=off)
     save(side_by_side([v, p], ["Tấm đáy đã khắc chữ (chữ đã ẩn)", "Modifier Boolean > Difference\n> Object = chữ"], h=500), "H16_boolean.png")
-    # xuat STL
+    # export STL
     im = raw("14_xuat_stl"); d = ImageDraw.Draw(im)
     rect(d, (924, 150, 1010, 168)); rect(d, (924, 194, 1000, 212), YEL); rect(d, (790, 568, 916, 590)); rect(d, (4, 568, 520, 590))
     label(d, (560, 250), "Selection Only: ĐÁNH DẤU\n(chỉ xuất vật đang chọn)", 22)

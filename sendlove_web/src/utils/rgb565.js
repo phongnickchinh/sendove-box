@@ -1,12 +1,9 @@
 import { SCREEN, BG_BYTES } from '../theme/layout';
 
 /**
- * Ảnh bất kỳ → nền màn chờ của hộp: cắt vuông giữa, thu về 240×240, lượng tử
- * RGB565 (5-6-5 bit) little-endian — đúng định dạng mảng StandbyBackground[]
- * của firmware, hộp không cần bộ giải mã ảnh.
- *
- * previewUrl vẽ lại từ CHÍNH các giá trị 565 đã lượng tử, nên xem trước thấy
- * luôn dải màu bị bậc thang như trên hộp, không đẹp hơn thực tế.
+ * Any image → the box's standby background: center-crop, scale to 240×240,
+ * quantize to little-endian RGB565 (drawn directly by the firmware).
+ * previewUrl is redrawn from the quantized values, so it shows the box's banding.
  */
 export async function imageToRgb565(file) {
   const bitmap = await createImageBitmap(file);
@@ -21,7 +18,7 @@ export async function imageToRgb565(file) {
   const img = ctx.getImageData(0, 0, SCREEN, SCREEN);
   const bytes = rgbaToRgb565(img.data);
 
-  // Vẽ ngược lại từ 565 để xem trước đúng những gì hộp sẽ hiện.
+  // Draw back from 565 so the preview shows exactly what the box will.
   const px = img.data;
   for (let i = 0, j = 0; j < bytes.length; i += 4, j += 2) {
     const v = bytes[j] | (bytes[j + 1] << 8);
@@ -34,7 +31,7 @@ export async function imageToRgb565(file) {
   return { bytes, previewUrl: canvas.toDataURL('image/png') };
 }
 
-/** RGBA (Uint8ClampedArray) → RGB565 little-endian, 2 byte mỗi điểm ảnh. Thuần, test được. */
+/** RGBA (Uint8ClampedArray) → little-endian RGB565, 2 bytes per pixel. Pure, testable. */
 export function rgbaToRgb565(rgba) {
   const out = new Uint8Array((rgba.length / 4) * 2);
   for (let i = 0, j = 0; i < rgba.length; i += 4, j += 2) {
@@ -45,7 +42,7 @@ export function rgbaToRgb565(rgba) {
   return out;
 }
 
-/** RGB565 LE (đúng bytes gửi xuống hộp) → ImageData 240×240 để vẽ xem trước. */
+/** RGB565 LE (the exact bytes sent to the box) → 240×240 ImageData for the preview. */
 export function rgb565ToImageData(bytes) {
   const img = new ImageData(SCREEN, SCREEN);
   const px = img.data;
@@ -59,10 +56,7 @@ export function rgb565ToImageData(bytes) {
   return img;
 }
 
-/**
- * Nền mặc định của hộp (xuất từ StandbyBackground[] cũ của firmware, 2026-09-24): firmware
- * không còn nền biên dịch sẵn, nên "Mặc định" cũng là một ảnh nền web gửi xuống như mọi theme.
- */
+/** The default background: the firmware compiles none in, so the web sends it like any other. */
 export async function loadDefaultBackground(url) {
   const res = await fetch(url);
   const bytes = new Uint8Array(await res.arrayBuffer());

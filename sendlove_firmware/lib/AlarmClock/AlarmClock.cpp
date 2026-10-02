@@ -2,8 +2,7 @@
 #include "ScreenLogger.h"
 #include <time.h>
 
-// Giống MIN_VALID_EPOCH trong NetworkManager.cpp (2020-09-13). Dưới mốc này RTC
-// chưa từng được set -> giờ địa phương là rác, không được kêu theo nó.
+// Same as MIN_VALID_EPOCH in NetworkManager.cpp: below it the RTC is unset.
 static constexpr time_t ALARM_MIN_VALID_EPOCH = 1600000000;
 
 AlarmClock& AlarmClock::instance() {
@@ -28,8 +27,7 @@ void AlarmClock::begin() {
         _dirty = cfg.loadAlarmDirty();
         cfg.end();
     }
-    // Sửa đổi chưa đẩy từ lần chạy trước (vd. sửa trên portal rồi lưu Wi-Fi ->
-    // restart): rev lệch pushedRev để lần sync đầu đẩy lên.
+    // Unpushed edits from the previous run: make rev differ so the first sync pushes.
     _rev = _dirty ? 1 : 0;
     _pushedRev = 0;
     DLOG("[ALM] %u alarms, dirty=%d", (unsigned)_count, _dirty ? 1 : 0);
@@ -103,14 +101,13 @@ bool AlarmClock::upsert(const char* id, const char* time, bool enable, bool repe
         if (_count >= MAX_ALARMS) { unlock(); return false; }
         idx = (int)_count;
         AlarmItem fresh;
-        // Cùng dạng id backend sinh ("alarm_<ms>") khi đồng hồ hợp lệ. Ở AP mode
-        // cold boot chưa có giờ thì lấy số ngẫu nhiên — chỉ cần duy nhất.
+        // The backend's id shape ("alarm_<ms>"); a random number when there is no time yet.
         time_t now = ::time(nullptr);
         do {
             if (now >= ALARM_MIN_VALID_EPOCH) {
                 snprintf(fresh.id, sizeof(fresh.id), "alarm_%llu",
                          (unsigned long long)now * 1000ULL + (millis() % 1000));
-                now++;  // trùng (hai lần bấm cùng giây) thì thử mốc kế
+                now++;  // collision (two taps within a second): try the next value
             } else {
                 snprintf(fresh.id, sizeof(fresh.id), "alarm_r%08lx", (unsigned long)esp_random());
             }
@@ -189,15 +186,15 @@ bool AlarmClock::pollDue(time_t now, char* outTime, size_t len, AlarmItem* outIt
         if (!_items[i].isEnable || strcmp(_items[i].time, hhmm) != 0) continue;
 
         _lastFiredMinute = minuteKey;
-        _snoozeUntil = 0;  // báo thức mới đè snooze cũ
-        strncpy(_snoozeTime, hhmm, sizeof(_snoozeTime));  // nhãn nếu người dùng snooze
-        _snoozeItem = _items[i];                          // snooze kêu lại đúng nhạc này
+        _snoozeUntil = 0;  // a new alarm overrides a pending snooze
+        strncpy(_snoozeTime, hhmm, sizeof(_snoozeTime));  // label in case the user snoozes
+        _snoozeItem = _items[i];                          // a snooze rings again with this same music
         if (outItem) *outItem = _items[i];
-        // Hai báo thức cùng phút: lấy cái đầu danh sách. Không phải case bắt buộc (§28).
+        // Two alarms in the same minute: the first in the list wins. Not a mandatory case (MEMORY.md §28).
         bool repeatable = _items[i].repeatable;
         if (!repeatable) {
-            // Tắt ngay lúc bắt đầu kêu (không đợi dismiss): mất điện giữa chừng
-            // cũng không kêu lại vào ngày mai. Snooze vẫn chạy vì nó không đọc isEnable.
+            // Turned off when it STARTS ringing, so a power loss can't make it ring
+            // again tomorrow. Snooze doesn't read isEnable.
             _items[i].isEnable = false;
             markDirtyLocked();
             saveLocked();
@@ -214,7 +211,7 @@ bool AlarmClock::pollDue(time_t now, char* outTime, size_t len, AlarmItem* outIt
 
 void AlarmClock::snooze(time_t now) {
     lock();
-    // Nhãn _snoozeTime đã được pollDue() đặt lúc bắt đầu kêu.
+    // pollDue() already set the _snoozeTime label when ringing started.
     _snoozeUntil = now + ALARM_SNOOZE_SEC;
     unlock();
     DLOG("[ALM] snooze %us", (unsigned)ALARM_SNOOZE_SEC);
@@ -231,7 +228,7 @@ void AlarmClock::dismiss() {
 size_t AlarmClock::musicInUse(time_t now, char (*outIds)[24], size_t maxCount) {
     struct Cand {
         const char* id;
-        uint32_t key;  // giây tới lần kêu; báo thức tắt / chưa có giờ = rất lớn
+        uint32_t key;  // seconds until it rings; disabled alarm / no clock yet = very large
     };
     Cand c[MAX_ALARMS];
     size_t n = 0;
@@ -256,7 +253,7 @@ size_t AlarmClock::musicInUse(time_t now, char (*outIds)[24], size_t maxCount) {
         }
         c[n++] = {_items[i].musicId, key};
     }
-    // Sắp xếp chèn (≤ 10 phần tử).
+    // Insertion sort (≤ 10 items).
     for (size_t i = 1; i < n; i++) {
         Cand v = c[i];
         size_t j = i;
@@ -303,15 +300,13 @@ uint32_t AlarmClock::secondsToNext(time_t now) {
                          + ((t[3] - '0') * 10 + (t[4] - '0')) * 60;
         int32_t diff = alarmSec - curSec;
 
-        // Đang ở đúng phút báo thức mà pollDue() chưa kịp chạy (vd. vừa thức dậy
-        // sớm vài ms). Trả 0 để vòng ngủ KHÔNG ngủ tiếp -> không bỏ lỡ báo thức.
+        // In the alarm minute but pollDue() hasn't run yet: 0 keeps the box awake.
         if (diff <= 0 && diff > -60 && !firedThisMinute) {
             best = 0;
             break;
         }
         if (diff <= 0) {
-            // Đã qua trong ngày. Báo thức một lần vẫn bật (chưa kêu được vì hộp tắt
-            // nguồn lúc đó) cũng chờ tới hôm sau — pollDue kêu nó rồi tự tắt.
+            // Already passed today: wait for tomorrow (a missed one-shot alarm too).
             diff += 86400;
         }
         if ((uint32_t)diff < best) best = (uint32_t)diff;

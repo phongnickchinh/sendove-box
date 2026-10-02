@@ -5,67 +5,57 @@
 #include "ConfigManager.h"
 #include "config.h"
 
-// ============================================================================
-// AlarmClock — danh sách báo thức trong hộp + quyết định lúc nào kêu
-// ============================================================================
-// Ba nơi cùng đụng vào danh sách, ở ba task khác nhau:
-//   - NetworkManager (task WakeSync): tải từ cloud / đẩy lên cloud
-//   - Captive portal (task NetworkController): thêm / sửa / xoá khi hộp ở AP mode
-//   - Task_MediaPlayer + vòng ngủ (UIController): hỏi "tới giờ kêu chưa"
-// nên mọi hàm public đều lấy mutex nội bộ. Bản RAM là nguồn đọc; NVS chỉ ghi khi đổi.
+// AlarmClock — the alarm list + the decision of when to ring. Used from three
+// tasks (sync, portal, player/sleep loop), so every public method takes the
+// internal mutex. RAM is the read source; NVS is written only on change.
 //
-// Luật đồng bộ hai chiều (user chốt 2026-09-18, prototype):
-//   - Sửa TRONG HỘP (portal, hoặc báo thức một lần tự tắt sau khi kêu) -> bật cờ
-//     dirty (NVS). Lần sync kế tiếp ĐẨY CẢ DANH SÁCH lên cloud, ghi đè bản cloud.
-//   - Còn dirty thì KHÔNG nhận danh sách từ cloud (hộp thắng). Hết dirty thì cloud
-//     là nguồn chuẩn, a_flag bật -> tải về thay toàn bộ.
-//   Không merge từng báo thức: không có đồng hồ tin cậy ở AP mode để so updated_at.
-// ============================================================================
+// Two-way sync (product decision): an edit ON THE BOX sets the dirty flag and the
+// next sync PUSHES THE WHOLE LIST (box wins, cloud list not accepted while dirty).
+// Once clean, the cloud is authoritative. No per-alarm merge: AP mode has no
+// trustworthy clock.
 
 class AlarmClock {
 public:
     static AlarmClock& instance();
 
-    /// Tạo mutex + nạp danh sách từ NVS. Gọi một lần trong setup(), trước khi tạo task.
+    /// Create the mutex + load the list from NVS. Call once in setup(), before creating tasks.
     void begin();
 
-    /// Chép danh sách hiện tại ra ngoài. Trả số phần tử.
+    /// Copy the current list out. Returns the item count.
     size_t list(AlarmItem* out, size_t maxCount);
 
-    /// Cloud -> hộp. Trả false và KHÔNG ghi gì nếu hộp đang có sửa đổi chưa đẩy.
+    /// Cloud -> box. Returns false and writes NOTHING if the box has unpushed edits.
     bool replaceFromCloud(const AlarmItem* items, size_t count);
 
-    /// Portal: id rỗng = thêm mới (id sinh trong outId). Trả false nếu giờ sai định
-    /// dạng, id không tồn tại, hoặc đã đủ MAX_ALARMS.
+    /// Portal: an empty id = add (the generated id goes to outId). Returns false on
+    /// a malformed time, an unknown id, or when MAX_ALARMS is reached.
     bool upsert(const char* id, const char* time, bool enable, bool repeatable,
                 char* outId = nullptr, size_t outLen = 0);
     bool remove(const char* id);
 
-    /// Có sửa đổi chưa đẩy lên cloud không. `rev` dùng cho markPushed().
+    /// Whether there are edits not yet pushed to the cloud. `rev` is for markPushed().
     bool isDirty(uint32_t* rev);
-    /// Gọi sau khi PUT lên cloud thành công với snapshot lấy ở `rev`. Nếu trong lúc
-    /// đẩy lại có sửa đổi mới thì giữ nguyên dirty để lần sau đẩy tiếp.
+    /// After a successful PUT of the snapshot taken at `rev`; stays dirty if an
+    /// edit arrived meanwhile.
     void markPushed(uint32_t rev);
 
-    /// Gọi định kỳ (~500ms). true = bắt đầu kêu ngay, outTime nhận "HH:MM", outItem (nếu
-    /// có) nhận bản sao báo thức đang kêu (nhạc, âm lượng, tăng dần). Báo lại 5 phút trả
-    /// đúng báo thức đã snooze. Báo thức một lần bị tắt (dirty) NGAY lúc bắt đầu kêu.
+    /// Poll (~500ms). true = start ringing now; outTime gets "HH:MM", outItem a copy
+    /// of the alarm. A one-shot alarm is turned off (dirty) the moment it rings.
     bool pollDue(time_t now, char* outTime, size_t len, AlarmItem* outItem = nullptr);
 
-    /// Các music_id mà báo thức đang dùng, không trùng, xếp theo báo thức sắp kêu nhất
-    /// trước (ưu tiên tải). Báo thức đang tắt xếp sau cùng. Trả số id đã ghi.
+    /// Distinct music_ids in use, soonest alarm first (download priority). Returns the count.
     size_t musicInUse(time_t now, char (*outIds)[24], size_t maxCount);
 
-    /// Người dùng chạm ngắn khi đang kêu: kêu lại sau ALARM_SNOOZE_SEC.
+    /// Short touch while ringing: ring again after ALARM_SNOOZE_SEC.
     void snooze(time_t now);
-    /// Chạm giữ / hết ALARM_RING_MAX_MS: tắt hẳn, huỷ snooze đang chờ.
+    /// Hold / ALARM_RING_MAX_MS elapsed: stop for good and cancel a pending snooze.
     void dismiss();
 
-    /// Số giây tới lần kêu kế tiếp (tính cả snooze). 0 = đang tới hạn mà chưa kêu.
-    /// 0xFFFFFFFF = không có gì để kêu, hoặc đồng hồ chưa hợp lệ.
+    /// Seconds to the next ring (snooze included). 0 = due but not ringing yet.
+    /// 0xFFFFFFFF = nothing to ring, or the clock isn't valid yet.
     uint32_t secondsToNext(time_t now);
 
-    /// "HH:MM" đúng 24h. Dùng chung cho portal và cloud.
+    /// A real 24h "HH:MM". Shared by the portal and the cloud path.
     static bool isValidTime(const char* t);
 
 private:
@@ -75,18 +65,18 @@ private:
     AlarmItem _items[MAX_ALARMS];
     size_t    _count = 0;
 
-    uint32_t _rev = 0;        // tăng mỗi lần sửa trong hộp
-    uint32_t _pushedRev = 0;  // rev đã đẩy xong
+    uint32_t _rev = 0;        // bumped on every edit made on the box
+    uint32_t _pushedRev = 0;  // the rev already pushed
     bool     _dirty = false;
 
-    time_t   _lastFiredMinute = 0;  // chống kêu lại trong cùng một phút
+    time_t   _lastFiredMinute = 0;  // prevents ringing twice within one minute
     time_t   _snoozeUntil = 0;
     char     _snoozeTime[6] = "";
-    AlarmItem _snoozeItem;          // báo thức đang snooze: kêu lại đúng nhạc + âm lượng
+    AlarmItem _snoozeItem;          // the snoozed alarm: rings again with the same music + volume
 
     void lock();
     void unlock();
-    void saveLocked();          // ghi danh sách + cờ dirty xuống NVS
+    void saveLocked();          // writes the list + the dirty flag to NVS
     void markDirtyLocked();
     int  findLocked(const char* id);
 };

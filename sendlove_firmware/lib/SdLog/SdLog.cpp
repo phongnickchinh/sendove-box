@@ -9,7 +9,7 @@ namespace SdLog {
 
 namespace {
 
-// 32 dòng × 64 ký tự = 2KB RAM. Dòng DLOG vốn đã bị cắt theo bề ngang màn hình.
+// 32 lines × 64 chars = 2KB of RAM. DLOG lines are already cut to the screen width.
 constexpr size_t LINES = 32;
 constexpr size_t COLS = 64;
 constexpr uint32_t ROTATE_BYTES = 64 * 1024;
@@ -17,13 +17,13 @@ constexpr const char* LOG0 = "/sys/log/log0.txt";
 constexpr const char* LOG1 = "/sys/log/log1.txt";
 
 char s_ring[LINES][COLS];
-uint32_t s_written = 0;  // tổng số dòng đã add()
-uint32_t s_flushed = 0;  // tổng số dòng đã ghi thẻ
-bool s_newError = true;  // true lúc boot: lần đẩy đầu mang theo [BOOT] reset=
+uint32_t s_written = 0;  // total lines add()ed
+uint32_t s_flushed = 0;  // total lines written to the card
+bool s_newError = true;  // true at boot: the first push carries [BOOT] reset=
 portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
 bool isErrorLine(const char* s) {
-    // "reset=" chỉ đáng đẩy khi không phải bật nguồn (1) / reset mềm (3).
+    // "reset=" is only worth pushing when it isn't a power-on (1) / software reset (3).
     const char* r = strstr(s, "reset=");
     if (r) return !(r[6] == '1' && r[7] == '\0') && !(r[6] == '3' && r[7] == '\0');
     return strstr(s, "ERR") || strstr(s, "FAIL") || strstr(s, "fail");
@@ -46,19 +46,19 @@ void add(const char* line) {
 void flush() {
     SDCardManager* card = SdStore::card();
     if (!card) return;
-    // Hai task có thể cùng gọi (vòng STANDBY và trước khi ngủ): một bên làm là đủ.
+    // Two tasks may call this at once (the STANDBY loop and pre-sleep): one doing it is enough.
     static std::atomic<bool> busy{false};
     if (busy.exchange(true)) return;
     struct Release { ~Release() { busy = false; } } release;
 
-    // Chụp các dòng chưa ghi ra buffer tạm rồi mới đụng thẻ (không giữ critical lâu).
-    // Buffer trên heap: 2KB trên stack là quá nửa stack Task_UIController (4KB).
+    // Snapshot the unwritten lines first (short critical section). Heap buffer: 2KB
+    // would be half of Task_UIController's stack.
     char* buf = (char*)malloc(LINES * (COLS + 1));
     if (!buf) return;
     size_t len = 0;
     portENTER_CRITICAL(&s_mux);
     uint32_t from = s_flushed;
-    if (s_written - from > LINES) from = s_written - LINES;  // tràn vòng: bỏ dòng cũ nhất
+    if (s_written - from > LINES) from = s_written - LINES;  // ring overflow: drop the oldest lines
     for (uint32_t i = from; i < s_written; i++) {
         const char* l = s_ring[i % LINES];
         size_t n = strnlen(l, COLS);
@@ -78,8 +78,7 @@ void flush() {
         card->deleteFile(LOG1);
         card->renameFile(LOG0, LOG1);
     }
-    // KHÔNG dùng openGenWrite: handle đó của WakeSync, mở ở đây sẽ đóng mất file nhạc/theme
-    // đang tải dở (log thật: "ghi the FAIL" ngay sau "tai", 2026-09-24).
+    // Do NOT use openGenWrite: it would close the file WakeSync is downloading.
     if (card->appendFile(LOG0, (const uint8_t*)buf, len) == (int32_t)len) s_flushed = upTo;
     free(buf);
 }

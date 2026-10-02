@@ -2499,3 +2499,79 @@ dần.** Số ở trên đã lỗi thời:
 -11,2 → -7,3 dB, năng lượng dải 2 kHz -20,6 → -15,1 dB. Bíp: RMS -3,2 dB, dồn hết vào một tần số.
 **Giới hạn vật lý:** nhạc chỉ bằng được sin toàn thang khi bị nén thành gần như sóng vuông (méo
 nặng). Khoảng cách còn lại ~4 dB RMS, ~11 dB ở dải 2 kHz.
+
+## 31. Dọn dẹp: comment chuyển sang tiếng Anh, gom file rác (2026-10-02, nhánh `chore/cleanup`)
+
+**Làm gì.** Toàn bộ comment trong `src/`, `include/`, `lib/**` (kể cả ghi chú vá `SPI_MODE3` của
+ta trong `lib/SD/src/sd_diskio.cpp`; phần còn lại của `lib/SD` là thư viện ngoài, không đụng),
+`platformio.ini`, `partitions_ota.csv`, `ota_upload.py` được rút gọn và dịch sang tiếng Anh.
+**Không đổi dòng code nào**, không đổi chuỗi log / chuỗi hiển thị / thông báo `#error` / nội dung
+trang portal trong `captive_portal_html.h`. Không refactor firmware. (Đúng cho lượt một và hai;
+lượt ba có gộp code trong `NetworkManager.cpp`, xem bên dưới.)
+
+Vài comment vốn đã sai so với code thì sửa lại cho đúng luôn (chỉ sửa chữ, không sửa code):
+`MAX_MEDIA_BYTES` (comment còn nói 5,5 MB trong khi giá trị là 25,5 MB), `SD_SPI_FREQ_HZ`
+("hạ xuống 10MHz nếu…" trong khi đã là 10MHz), biên độ bíp "4000" (thật là 32000), `prefill()`
+"nạp 2 buffer" (thật là nạp đầy DMA), `probe()` "dùng cardType()" (thật là mở file đọc 1 byte),
+stack MediaPlayer "đã hạ 8192→6144" (thật là 8192), `main.cpp` "nháy đèn nền báo lỗi" (thật là
+đứng yên `while(1)`), `NetworkManager.cpp` "mỗi chu kỳ 10s" (chu kỳ sync giờ là 20s).
+
+**Xác minh.** Từng file: bỏ comment bằng `g++ -fpreprocessed -dD -E -P` rồi so với bản ở HEAD,
+phải trùng khít (đã thử chèn một dòng code giả để chắc là phép so bắt được). `pio run` thành công
+sau khi dịch và sau khi gom file. **Chưa nạp máy thật** — không cần, vì mã sau tiền xử lý y nguyên.
+
+**Hệ quả cần biết.**
+- Số dòng trong file tài liệu này (vd. `NetworkManager.cpp:172-176`, `AudioPlayer.cpp:216-227`)
+  **đã lệch** vì comment ngắn đi. Tìm theo tên hàm, đừng tin số dòng cũ.
+- Comment lịch sử kiểu "trước ngày X làm thế này" đã bỏ khỏi code; lý do thiết kế vẫn giữ trong
+  comment và phần lịch sử nằm ở file này (các mục được dẫn bằng "see MEMORY.md §N").
+- `src/main.cpp.bak` (mục "Rác cần dọn" ở trên) đã **xoá**. `src/audio_data.h`, `upload_audio.py`,
+  `test.raw`, `wokwi.toml`, `ChakraPetch-*.ttf`, `image/`, `scratch/`, `implementation_plan.md`,
+  `FIREBASE_ANONYMOUS_AUTH.md` chuyển sang thư mục `trash can wait for user bring to throw away/`
+  ở gốc repo (xem `INDEX.md` trong đó). Các file `*.d` ở gốc firmware và bản trùng
+  `ota_architecture_design.md` đã xoá (bản thật ở `docs/`).
+- `codebase_review.md`, `code_review_2_9_gemini_38.md`, `fix_download_timeout_plan.md`,
+  `SHOULD_READ.md` **giữ nguyên chỗ cũ** vì file này và `sendlove_kicad/BOM.md` còn dẫn tới.
+
+**Lượt hai cùng ngày — rút gọn comment (user: "mới dịch, chưa rút gọn").** Comment firmware từ
+2.307 xuống 1.390 dòng: bỏ comment lặp lại dòng code bên dưới, code cũ bị comment lại (kể cả
+SSID/mật khẩu Wi-Fi mặc định cũ trong `config.h`), khung tiêu đề; mặc định một dòng, chỉ giữ lý
+do không hiển nhiên, cảnh báo "do NOT", con số cần thiết và tham chiếu `§N`. Phần diễn giải dài
+(số đo, lịch sử, phương án đã loại) **chỉ còn ở file này** — comment trong code giờ dẫn về đây.
+Xác minh như trên (so sau khi bỏ comment + `pio run`), số dòng lại lệch thêm một lần nữa.
+Comment của `addStorageAuthHeader()` từng ghi "chưa verify được" đã sửa theo §19 (đã đo thật).
+
+**Lượt ba cùng ngày — user duyệt 4 việc còn treo.**
+- Thư mục `trash can wait for user bring to throw away/` đã **xoá hẳn** (commit `7c78067`). Cần lại
+  file nào: `git checkout 28ff9b9 -- "trash can wait for user bring to throw away/<đường dẫn>"`.
+- `compile_commands.json` và `.firebase/` không còn được track (đã vào `.gitignore`). clangd cần
+  file này thì sinh lại bằng `pio run -t compiledb`.
+- Backend gỡ `@ffmpeg-installer/ffmpeg`, `fluent-ffmpeg`, `sharp` (không ai import).
+- **Gộp code lặp trong `NetworkManager.cpp`** — thay đổi code firmware đầu tiên của đợt này, **đã
+  biên dịch (`pio run`), CHƯA nạp máy thật**:
+  - `messageTimestamp()` đọc `timestamp` (số / số thực / chuỗi số), dùng cho `std::sort`;
+    `messageTimestampOrNow()` thêm bước lùi về giờ NTP hoặc `millis()` khi thiếu, dùng cho vòng đếm
+    và vòng tải. Bước lùi **cố ý không** nằm trong hàm mà comparator gọi (đúng như code cũ).
+  - `resolveMediaUrl()` (giữ nguyên URL `http…`, bỏ `gs://bucket/`, bỏ `/` đầu) dùng cho media và
+    voice; `storageDownloadUrl()` (mã hoá `/` → `%2F` + tiền tố bucket + `?alt=media`) dùng thêm cho
+    `downloadFile()`. `downloadFile()` **không** đi qua bước chuẩn hoá, như trước.
+  - Xác minh: test trên máy tính so đoạn cũ với hàm mới bằng ArduinoJson thật, 20 dạng `timestamp`
+    × 4 mốc đồng hồ, không lệch; firmware nhỏ đi khoảng 1 KB; một agent review đối chiếu từng
+    chỗ gọi với code cũ (kể cả `WString.cpp` và ArduinoJson 7.4.3) và kết luận tương đương. Cần thử trên hộp: một tin video kèm
+    voice, một tin tĩnh có nhạc nền, và một lần tải theme hoặc nhạc báo thức (đi qua đủ 3 chỗ dựng
+    URL và cả hai vòng lặp `timestamp`).
+- **Gotcha phát hiện khi review — `lib_deps` không ghim phiên bản LovyanGFX** (`^1.1.12`). Một lần
+  cài mới (worktree này, và cả CI) kéo về **1.2.31**: image `firmware.bin` thành 1.931.472 byte,
+  **lớn hơn phân vùng app** 1.900.544 byte, trong khi `pio run` vẫn báo SUCCESS "95,4%" (nó đếm
+  section của ELF, không đếm image). Bản 1.2.31 link thêm `fs_bitstream_rle` (~227 KB) và bảng
+  firmware cảm ứng GSL (~100 KB). Với **1.2.26** (bản đang nằm trong `.pio/libdeps` của checkout
+  chính, cũng là bản §28 đã đối chiếu) image là 1.383.216 byte, Flash 68,7%. **Đừng nạp bản build
+  từ một lần cài thư viện mới** cho tới khi ghim `lovyan03/LovyanGFX@1.2.26` trong `platformio.ini`
+  — việc ghim chưa làm, chờ user quyết.
+
+**Còn lại, chưa làm (cần user quyết).** `dumpHexBytes()` trong `MediaPlayer.cpp` là hàm rỗng.
+
+> Ghi chú cũ của lượt một, giữ lại làm lịch sử (hai việc đầu **đã làm ở lượt ba**):
+> `checkAndDownloadNewMessages()` lặp đoạn đọc `timestamp` 4 lần; đoạn đổi đường dẫn Storage → URL
+> lặp ở 3 hàm (`downloadFile`, `downloadVoiceSegment`, `checkAndDownloadNewMessages`);
+> `dumpHexBytes()` là hàm rỗng.

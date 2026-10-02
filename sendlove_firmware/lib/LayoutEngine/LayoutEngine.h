@@ -24,29 +24,24 @@ struct WidgetConfig {
     int16_t h;
     uint16_t color;
     String align;
-    String font;    // "f_time"/"f_date" = phông VLW trong gói theme; "Font7"/"Font2" = có sẵn
+    String font;    // "f_time"/"f_date" = VLW fonts in the theme package; "Font7"/"Font2" = built-in
     String format;  // clock_date: "WD, DD.MM" | "DD/MM/YYYY" | "WD DD.MM"
     String locale;  // clock_date: "vi" | "en"
 };
 
-/// Dynamic UI layout engine for rendering JSON-configured widgets
-///
-/// Nền, phông và bố cục KHÔNG còn biên dịch cứng (thiết kế 2026-09-24, MEMORY.md §28):
-/// loadTheme() lấy từ ThemeStore (phân vùng flash `theme`, qua mmap). Không có theme thì
-/// vẽ màn dự phòng: nền đen, giờ phông 7 đoạn, ngày ASCII không dấu, chữ trắng.
-/// Chỉ Task_MediaPlayer gọi các hàm của lớp này (một chủ sở hữu, không cần mutex).
+/// Renders the standby screen from the JSON theme in ThemeStore (MEMORY.md §28),
+/// or a black fallback without one. Task_MediaPlayer only (single owner, no mutex).
 class LayoutEngine {
 public:
     LayoutEngine() = default;
 
-    /// Nạp theme đang có trong ThemeStore (hoặc dự phòng). Gọi lại sau mỗi lần cài theme.
-    /// false = đang ở màn dự phòng.
+    /// Load the theme in ThemeStore; call again after each install. false = fallback.
     bool loadTheme();
 
     /// Render standby UI screen widgets
     void renderStandbyScreen(DisplayDriver* display, NetworkManager* network, bool fullRedraw = false);
 
-    /// Man hinh bao thuc dang keu: gio lon o giua + dong goi y thao tac (ASCII)
+    /// The ringing-alarm screen: large time in the middle + a hint line (ASCII)
     void renderAlarmScreen(DisplayDriver* display, const char* timeStr, const char* hint);
 
     /// Invalidate cached widget state to force full redraw of all widgets
@@ -59,15 +54,14 @@ private:
     std::vector<WidgetConfig> _widgets;
     bool _fallback = true;
 
-    // Asset theme trong flash (mmap). nullptr = không có -> nền đen / phông có sẵn.
+    // Theme assets in flash (mmap). nullptr = absent -> black background / built-in fonts.
     const uint16_t* _bg = nullptr;
-    // Phông VLW đọc thẳng từ con trỏ flash. Wrapper phải sống cùng phông: VLWfont đọc
-    // glyph qua nó MỖI LẦN VẼ, không chỉ lúc nạp.
+    // VLW fonts read from flash; the wrappers must outlive the fonts (read on EVERY draw).
     lgfx::PointerWrapper _pwTime, _pwDate;
     lgfx::VLWfont _vlwTime, _vlwDate;
     bool _hasVlwTime = false;
     bool _hasVlwDate = false;
-    UBaseType_t _stackMin = 0xFFFFFFFF;  // mức stack còn lại thấp nhất đã in (xem render)
+    UBaseType_t _stackMin = 0xFFFFFFFF;  // lowest remaining stack printed so far (see render)
 
     // Cache variables for Dirty Flag optimization
     char _lastTimeStr[16] = "";
@@ -82,10 +76,10 @@ private:
     bool parseWidgets(const char* json, size_t len);
     void useFallbackWidgets();
     void unloadFonts();
-    /// Phông cho widget: VLW nếu gói có, không thì phông có sẵn theo loại widget.
+    /// A widget's font: VLW if the package has it, otherwise the built-in font for its type.
     const lgfx::IFont* fontFor(const WidgetConfig& cfg) const;
     bool isVlw(const lgfx::IFont* f) const { return f == &_vlwTime || f == &_vlwDate; }
-    /// Ngày theo format/locale. unicode = false -> tên thứ ASCII (phông có sẵn không có dấu).
+    /// The date per format/locale. unicode = false -> ASCII weekday names (built-in fonts have no diacritics).
     void formatDate(const WidgetConfig& cfg, bool unicode, char* out, size_t len) const;
 
     void drawTextWidget(LGFX* canvas, const WidgetConfig& cfg, const char* text, int32_t defaultW, int32_t defaultH, const lgfx::IFont* font = nullptr);

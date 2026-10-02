@@ -12,7 +12,7 @@ import { Screen, AppBar, Body, Actions, Header, Button, Tips } from '../componen
 import { clock, dayLabel, kindOf, timeAgo } from '../utils/messageFormat';
 import { lastSeenMs, syncTone } from '../utils/boxStatus';
 
-/** Cùng bảng màu chấm trạng thái với thẻ hộp ở Dashboard. */
+/** Same status-dot palette as the Dashboard box cards. */
 const TONE_DOT = {
   ok: 'var(--success-fill)',
   late: 'var(--warning-fill)',
@@ -21,19 +21,14 @@ const TONE_DOT = {
 };
 
 /**
- * Màn 06 "content-history-below-part" — lịch sử tin đã gửi của một hộp.
- *
- * KHÔNG có badge "đã nhận / đã xem": Message không có trường trạng thái —
- * message.types.ts ghi rõ "Sender không được biết trạng thái tin nhắn", ESP32
- * chỉ so timestamp với last_download_ts nội bộ của nó. Thứ người gửi thật sự
- * biết được là lần hộp thức dậy gần nhất, nên đó là thứ hiện lên.
- *
- * Phân trang: backend chỉ có ?limit (N tin mới nhất, tối đa 100), không có
- * con trỏ — "Xem thêm" là tải lại với limit lớn hơn.
+ * Sent-message history of one box. There is NO "delivered / seen" badge:
+ * messages have no status field by design; the box's last wake-up is shown
+ * instead. Pagination: ?limit only (max 100), so "Load more" refetches with a
+ * larger limit.
  */
 
 const PAGE = 20;
-const MAX_LIMIT = 100; // kẹp ở message.controller.ts getMessages
+const MAX_LIMIT = 100; // clamped in message.controller.ts getMessages
 
 const FILTERS = [
   { key: 'all', label: 'Tất cả' },
@@ -58,7 +53,7 @@ export default function SenderDashboard() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmUnpair, setConfirmUnpair] = useState(false);
 
-  // Trạng thái hộp chỉ cần đọc một lần, không tải lại mỗi lần "Xem thêm".
+  // Box status is read once, not on every "Load more".
   useEffect(() => {
     let alive = true;
     getBoxDetails(boxId)
@@ -81,10 +76,10 @@ export default function SenderDashboard() {
     return () => { alive = false; };
   }, [boxId, limit]);
 
-  // Mới nhất lên trước, rồi gom theo ngày để chèn nhãn.
+  // Newest first, then grouped by day to insert the day labels.
   const sorted = [...messages].sort((a, b) => b.timestamp - a.timestamp);
   const shown = filter === 'all' ? sorted : sorted.filter((m) => kindOf(m) === filter);
-  // Trả về đủ số đã xin thì có thể còn tin cũ hơn chưa tải.
+  // A full page back means there may be older messages not loaded yet.
   const mayHaveMore = messages.length >= limit && limit < MAX_LIMIT;
   const firstLoad = loading && messages.length === 0;
   let lastDay = null;

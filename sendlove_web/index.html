@@ -1,19 +1,27 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: without it, env(safe-area-inset-*) in tokens.css is always 0. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Sendlove Box - Gửi yêu thương qua những thông điệp nhỏ bé. Kết nối với Hộp quà thông minh để ghi âm, gửi video và tin nhắn đặc biệt." />
-    <meta name="theme-color" content="#ff758c" />
+    <!-- Status bar color = the light page background (caramel-50). ThemeContext updates it for dark mode. -->
+    <meta name="theme-color" content="#FDF8F3" />
+    <!-- Add to home screen (PWA). iPhone ignores manifest icons and needs its own apple-touch-icon. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Sendlove" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta property="og:title" content="Sendlove Box" />
     <meta property="og:description" content="Gửi yêu thương qua những thông điệp nhỏ bé. Kết nối với Hộp quà thông minh." />
     <meta property="og:type" content="website" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Dancing Script CHỈ dùng cho logo "SendloveBox" ở màn đăng nhập — xác nhận từ
-         Figma (login-signup.json): fontFamily "Dancing Script", không phải Quicksand.
-         Mọi chữ khác trong app đều Quicksand. -->
+    <!-- Dancing Script is used ONLY for the "SendloveBox" logo on the login screen
+         (per Figma). All other text in the app is Quicksand. -->
     <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
     <title>Sendlove Box — Gửi yêu thương qua Hộp quà thông minh</title>
   </head>

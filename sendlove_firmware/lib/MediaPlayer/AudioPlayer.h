@@ -6,92 +6,80 @@
 #include "IStorageProvider.h"
 #include "config.h"
 
-// ============================================================================
-// AudioPlayer — Phát PCM raw 16-bit Mono qua I2S DMA (MAX98357A)
-// ============================================================================
-// Thiết kế: Non-blocking tick-based.
-// Mỗi frame video, gọi tick() 1 lần để nạp thêm dữ liệu vào DMA buffer.
-// I2S DMA tự phát liên tục trên phần cứng, không block CPU.
-// ============================================================================
+// AudioPlayer — 16-bit mono PCM over I2S DMA (MAX98357A). Non-blocking: call
+// tick() regularly to top up the DMA buffer.
 
 class AudioPlayer {
 public:
-    /// Khởi tạo I2S driver với các hằng số từ config.h
+    /// Install the I2S driver with the constants from config.h
     bool init();
 
-    /// Dừng I2S và giải phóng driver
+    /// Stop I2S and uninstall the driver
     void stop();
 
-    /// Phát một đoạn bip ngắn để test loa khi boot
+    /// Short beep to test the speaker at boot
     void testBeep();
 
-    /// Bíp sin ~1.6kHz dài durationMs, BLOCK tới khi phát xong (+200ms xả DMA).
-    /// Chỉ gọi khi không phát tin (dùng chung I2S với tick()).
+    /// A ~1.6kHz beep; BLOCKS for durationMs + 200ms. Only call while not playing.
     void beep(uint32_t durationMs);
 
-    /// Tìm AUDC header trong storage bắt đầu từ byte thứ videoDataSize.
-    /// appendedSize = số byte audio bảng slot ghi nhận (gồm cả header AUDC), 0 = không rõ.
-    /// Trả về true nếu tìm thấy audio hợp lệ.
+    /// Look for the AUDC header at byte videoDataSize. appendedSize = audio bytes
+    /// per the slot table (0 = unknown). true = valid audio found.
     bool loadFromStorage(IStorageProvider* storage, uint32_t videoDataSize, uint32_t appendedSize = 0);
 
-    /// Nhạc báo thức: file độc lập trên thẻ (AUDC + WAV + PCM), giữ handle đọc ngẫu nhiên
-    /// của SDCardManager tới stop(). loop = hết bài quay lại đầu.
+    /// Alarm music: a standalone file on the card (AUDC + WAV + PCM); holds
+    /// SDCardManager's random-read handle until stop(). loop = restart at the end.
     bool loadFromFile(class SDCardManager* card, const char* path, bool loop);
 
-    /// Xoa DMA roi nap day truoc khi phat (goi ca luc bat dau lan khi loop).
+    /// Clear the DMA and fill it before playing (also called at each loop restart).
     void prefill();
 
-    /// Gọi mỗi frame để refill I2S DMA buffer. Non-blocking.
+    /// Call every frame to refill the I2S DMA buffer. Non-blocking.
     void tick();
 
     bool hasAudio()     const { return _hasAudio; }
     bool isInitialized() const { return _initialized; }
 
-    /// Âm lượng 0..100 (Settings::volumeGainQ15). Đổi giữa lúc đang phát thì hệ số
-    /// trượt dần trong vài chục ms (không "bụp"). 100 = đi đúng đường cũ, không nhân.
-    /// immediate = true: nhảy thẳng tới mức mới (đầu bài, chưa có mẫu nào ra loa).
+    /// Volume 0..100; 100 = the unscaled path. Mid-playback the gain slides (no
+    /// pop); immediate = jump to the level (start of a track).
     void setVolume(uint8_t vol, bool immediate = false);
 
 private:
     // 10 bytes: "AUDC" (4) + sampleRate uint16 (2) + pcmSize uint32 (4)
     static constexpr size_t AUDC_HEADER_SIZE = 10;
-    // Header RIFF/WAVE chuẩn 44 byte do mediaEncoder.js sinh ra
+    // Standard 44-byte RIFF/WAVE header produced by mediaEncoder.js
     static constexpr size_t WAV_HEADER_SIZE = 44;
 
     IStorageProvider* _storage      = nullptr;
-    class SDCardManager* _card      = nullptr;  // nguồn file (nhạc báo thức), thay cho _storage
+    class SDCardManager* _card      = nullptr;  // file source (alarm music), used instead of _storage
     bool              _loop         = false;
     bool              _hasAudio     = false;
     bool              _initialized  = false;
 
-    uint32_t _audioPcmOffset = 0; // Offset tuyệt đối trong slot: sau video + 10 bytes AUDC header
-    uint32_t _audioPcmSize   = 0; // Tổng bytes PCM
-    uint32_t _audioCursor    = 0; // Bytes đã đưa vào DMA
-    uint32_t _sampleRate     = AUDIO_SAMPLE_RATE; // Đọc từ header AUDC, không hardcode
+    uint32_t _audioPcmOffset = 0; // absolute offset in the slot: after the video + the 10-byte AUDC header
+    uint32_t _audioPcmSize   = 0; // total PCM bytes
+    uint32_t _audioCursor    = 0; // bytes already fed to the DMA
+    uint32_t _sampleRate     = AUDIO_SAMPLE_RATE; // read from the AUDC header, not hardcoded
 
-    // Hệ số âm lượng Q15. 32768 = đúng bằng đường cũ (bỏ qua phép nhân).
-    int32_t _gain       = 32768;  // đang dùng
-    int32_t _gainTarget = 32768;  // đích; fillChunk() trượt _gain tới đây
-    bool    _muted      = false;  // âm lượng 0: tắt ampli (PIN_AMP_SD) nếu có nối
+    // Q15 volume gain. 32768 = the unscaled path (the multiply is skipped).
+    int32_t _gain       = 32768;  // in use
+    int32_t _gainTarget = 32768;  // target; fillChunk() slides _gain toward it
+    bool    _muted      = false;  // volume 0: shut the amp down (PIN_AMP_SD) if wired
 
-    /// Bật/tắt ampli qua SD_MODE. Không làm gì nếu PIN_AMP_SD < 0.
+    /// Switch the amp through SD_MODE. No-op if PIN_AMP_SD < 0.
     void setAmp(bool on);
 
-    /// Đọc tại offset tuyệt đối từ nguồn hiện tại (slot tin nhắn hoặc file nhạc).
+    /// Read at an absolute offset from the current source (message slot or music file).
     int readSrc(uint32_t offset, uint8_t* buf, uint32_t len);
-    /// Dò header AUDC tại audioStartOffset (+ WAV nếu có), chốt _audioPcmOffset/_Size.
+    /// Parse the AUDC header at audioStartOffset (+ WAV if present) and set _audioPcmOffset/_Size.
     bool parseAudc(uint32_t audioStartOffset, uint32_t appendedSize, uint32_t maxPcm);
 
-    // Buffer đọc PCM từ storage. Cỡ ĐỌC (AUDIO_READ_CHUNK_SIZE) tách khỏi cỡ
-    // giãn mẫu (AUDIO_PCM_CHUNK_SIZE) vì trên thẻ SD mỗi lượt đọc là một fread
-    // xuyên VFS/FATFS — xem config.h.
+    // PCM read buffer (read size vs oversampling chunk: see config.h).
     uint8_t _chunk[AUDIO_READ_CHUNK_SIZE];
-    // Mono -> Stereo (x2) rồi lặp mỗi mẫu AUDIO_OVERSAMPLE lần (I2S mở ở tốc độ
-    // file x AUDIO_OVERSAMPLE, xem config.h) để BCLK đủ cao cho MAX98357A.
+    // Mono -> stereo, oversampled x AUDIO_OVERSAMPLE (see config.h).
     int16_t _stereo[AUDIO_PCM_CHUNK_SIZE / 2 * 2 * AUDIO_OVERSAMPLE];
 
-    /// Đọc 1 chunk PCM từ NAND và ghi vào I2S (Mono → Stereo expand)
-    /// Tra ve true neu DMA nhan het chunk (con cho, nen nap tiep).
+    /// Read one PCM chunk and write it to I2S. true = the DMA took it all (keep filling).
     bool fillChunk();
 };
 

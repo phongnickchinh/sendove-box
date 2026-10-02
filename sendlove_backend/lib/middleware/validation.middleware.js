@@ -2,11 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.heartbeatSchema = exports.registerDeviceSchema = exports.updateAlarmSchema = exports.createAlarmSchema = exports.updateProfileSchema = exports.confirmMessageSchema = exports.initiateMessageSchema = exports.updateBoxConfigSchema = exports.updateWifiSchema = exports.pairBoxSchema = exports.validate = void 0;
 const error_handler_middleware_1 = require("./error-handler.middleware");
-/**
- * Validation middleware factory.
- * Chỉ các field có trong schema mới được giữ lại trong req.body (whitelist).
- * Các field không khai báo sẽ bị lọc bỏ → chống mass-assignment.
- */
+/** Validation middleware factory. Whitelist: fields not in the schema are dropped from req.body. */
 const validate = (schema) => {
     return (req, _res, next) => {
         const errors = [];
@@ -72,15 +68,13 @@ const validate = (schema) => {
         if (errors.length > 0) {
             return next(new error_handler_middleware_1.AppError(400, 'validation_error', errors.join('; ')));
         }
-        // Replace body with sanitized version — chỉ whitelisted fields đi qua
+        // Replace body with the sanitized version — only whitelisted fields pass
         req.body = sanitized;
         next();
     };
 };
 exports.validate = validate;
-// ==========================================
-// Predefined Validation Schemas
-// ==========================================
+// ---- Predefined validation schemas ----
 /** POST /boxes/pair */
 exports.pairBoxSchema = {
     pairingCode: { type: 'string', required: true, pattern: /^[SR][A-Z0-9]{6,9}$/ },
@@ -112,23 +106,19 @@ exports.confirmMessageSchema = {
     height: { type: 'number', min: 1, max: 320 },
     uploaded_files: { type: 'array', itemType: 'string' },
 };
-/** PATCH /users/me — chỉ cho phép sửa display_name và avatar_url */
+/** PATCH /users/me — only display_name and avatar_url are editable */
 exports.updateProfileSchema = {
     display_name: { type: 'string', minLength: 1, maxLength: 50 },
     avatar_url: { type: 'string', maxLength: 2048 },
 };
-/**
- * "HH:mm" 24h thật sự. Pattern cũ /^\d{2}:\d{2}$/ nhận cả "99:99": firmware
- * (AlarmClock::isValidTime) bỏ qua báo thức đó mà web vẫn hiện là đang bật.
- * Trùng regex với database.rules.json (nhánh box ghi alarm_list).
- */
+/** A real 24h "HH:mm" (no "99:99", which the firmware would skip). Same regex as database.rules.json. */
 const ALARM_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** POST /boxes/:boxId/alarms */
 exports.createAlarmSchema = {
     time: { type: 'string', required: true, pattern: ALARM_TIME_PATTERN },
     is_enable: { type: 'boolean', required: true },
     repeatable: { type: 'boolean', required: true },
-    // "" = không nhạc (tiếng bíp). < 24 ký tự: buffer musicId[24] của firmware.
+    // "" = no music (beep). < 24 chars: the firmware's musicId[24] buffer.
     music_id: { type: 'string', maxLength: 23 },
     volume: { type: 'number', min: 0, max: 100 },
     ramp: { type: 'boolean' },

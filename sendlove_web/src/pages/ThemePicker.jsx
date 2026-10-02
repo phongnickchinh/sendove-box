@@ -11,26 +11,21 @@ import { loadDefaultBackground } from '../utils/rgb565';
 import { ensureWebFont } from '../utils/vlw';
 
 /**
- * Màn 19 "theme picker".
- *
- * Nguồn: GET /boxes/:boxId/theme (bản đã lưu trên tài khoản, có thể null) +
- * các mẫu dựng sẵn trong theme/layout.js. Chọn một dòng thì xem trước đổi
- * theo — mọi mẫu đều là bố cục thật nên xem trước được.
- *
- * "Bản nháp" đi sang editor/send qua location.state:
+ * Theme picker: the saved theme (may be null) + the presets in theme/layout.js.
+ * The draft travels to the editor/send pages through location.state:
  *   { name, widgets, bg: null | { path, url } | { bytes, previewUrl } }
  */
 export default function ThemePicker() {
   const { boxId } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const [saved, setSaved] = useState(undefined); // undefined = đang tải, null = chưa lưu
+  const [saved, setSaved] = useState(undefined); // undefined = loading, null = nothing saved
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
   const [defaultBg, setDefaultBg] = useState(null);
   const [boxThemeRev, setBoxThemeRev] = useState(undefined);
 
-  // Nền mặc định + phông để xem trước mẫu; status.theme_rev = bản hộp đang hiển thị.
+  // Default background + fonts for previewing presets; status.theme_rev = the revision the box is showing.
   useEffect(() => {
     loadDefaultBackground(DEFAULT_BG_URL).then(setDefaultBg).catch(() => {});
     FONT_FAMILIES.forEach((f) => ensureWebFont(f.family, f.weight).catch(() => {}));
@@ -71,7 +66,7 @@ export default function ThemePicker() {
       <Body>
         <Header title="Giao diện màn hình hộp" to={profile?.boxes_list?.[boxId]?.box_name || `Hộp ${boxId}`} />
 
-        {/* Hộp tải gói theme về thẻ nhớ rồi chép sang bộ nhớ trong; status.theme_rev = bản đang hiện. */}
+        {/* The box downloads the theme package to the card, then copies it to flash; status.theme_rev = the one on screen. */}
         {saved && saved.rev ? (
           <div className="sl-note">
             <Icon name="sync" size={16} />
@@ -137,7 +132,7 @@ export default function ThemePicker() {
         )}
 
         <Actions>
-          {/* Giao diện đã lưu: việc chính là sửa nó. Mẫu có sẵn: việc chính là dùng luôn. */}
+          {/* Saved theme: the primary action is editing it. Preset: the primary action is using it as-is. */}
           {selected === 'saved' ? (
             <Button kind="pri" disabled={!draft}
               onClick={() => navigate(`/box/${boxId}/receiver/theme/edit`, { state: draft })}>

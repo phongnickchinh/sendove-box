@@ -2,10 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from './error-handler.middleware';
 
 /**
- * Middleware xác thực thiết bị mới đăng ký bằng provisioning key.
- * ESP32 firmware phải gắn key này vào header 'X-Provisioning-Key' khi gọi /device/register.
- *
- * Key được cấu hình qua biến môi trường DEVICE_PROVISIONING_KEY.
+ * Authenticates a registering device: the 'X-Provisioning-Key' header on
+ * /device/register must match the DEVICE_PROVISIONING_KEY env variable.
  */
 export const requireProvisioningKey = (req: Request, _res: Response, next: NextFunction) => {
   const key = req.headers['x-provisioning-key'] as string;

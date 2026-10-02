@@ -4,16 +4,9 @@
 #include <Arduino.h>
 #include <WebServer.h>
 
-// ============================================================================
-// OtaHandler — OTA Firmware Update qua mạng LAN
-// ============================================================================
-// Cung cấp 2 HTTP endpoints cho OTA push từ PC/Web Client:
-//   POST /api/ota/begin  — Chuẩn bị flash partition (size + MD5)
-//   POST /api/ota/upload — Nhận firmware binary (multipart chunked)
-//
-// Sử dụng <Update.h> có sẵn của ESP-IDF/Arduino.
-// Flag isUpdating() cho phép các task khác tạm dừng khi OTA đang chạy.
-// ============================================================================
+// OtaHandler — OTA firmware update over the LAN:
+//   POST /api/ota/begin  — prepare the flash partition (size + MD5)
+//   POST /api/ota/upload — receive the firmware binary (multipart)
 
 class OtaHandler {
 public:
@@ -23,12 +16,11 @@ public:
     /// Check if OTA update is currently in progress
     bool isUpdating() const { return _isUpdating; }
 
-    /// Gọi đều đặn từ vòng lặp. Đang nạp mà quá OTA_STALL_TIMEOUT_MS không có chunk
-    /// nào thì huỷ phiên: TCP đứt giữa chừng không phải lúc nào cũng sinh ra
-    /// UPLOAD_FILE_ABORTED, và thiếu chốt này thì _isUpdating kẹt true vĩnh viễn.
+    /// Call regularly: aborts a flash that got no chunk for OTA_STALL_TIMEOUT_MS,
+    /// so a dropped connection can't leave _isUpdating stuck.
     void tickWatchdog();
 
-    /// 0-100, cho màn hình chế độ OTA. 0 khi chưa nạp.
+    /// 0-100, for the OTA mode screen. 0 when not flashing.
     uint8_t progressPercent() const;
 
 private:

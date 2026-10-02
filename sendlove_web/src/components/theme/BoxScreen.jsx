@@ -5,15 +5,13 @@ import { parseVlw, drawVlwText } from '../../utils/vlw';
 import { rgb565ToImageData } from '../../utils/rgb565';
 
 /**
- * Màu của MÀN HỘP THẬT — cố định, KHÔNG theo theme web. Dùng var(--caramel-*)
- * thì ở dark mode nền xem trước thành nâu/rượu vang tối, còn chữ giờ vẫn
- * #000000 theo theme của hộp → biến mất. Màn hộp là vật thật, một màu duy nhất.
- * Không có ảnh nền thì hộp tô ĐEN (firmware không còn nền dựng sẵn từ 2026-09-24).
+ * Colors of the PHYSICAL box screen: fixed, NOT following the web theme. Without
+ * a background image the box fills BLACK.
  */
 const NO_BG = '#000000';
 const BOX_INK = '#83513E';
 
-/** Chữ của widget như trên hộp: VLW -> họ + cỡ đã cắt; phông có sẵn -> xấp xỉ monospace. */
+/** A widget's text as on the box: VLW → the subsetted family + size; built-in font → a monospace approximation. */
 function textStyle(w) {
   if (isVlw(w)) return { fontFamily: `"${w.family}", var(--font)`, fontSize: w.px, fontWeight: 600 };
   return w.type === 'clock_time'
@@ -23,18 +21,12 @@ function textStyle(w) {
 
 const textOf = (w) => (w.type === 'clock_date' ? formatDate(w) : w.sample);
 
-/**
- * Màn hình thật của hộp, vẽ 1:1 ở 240 × 240 để x/y/w/h trong theme đọc thẳng
- * được trên hình, không phải quy đổi.
- *
- * background: ảnh nền đã lượng tử RGB565 (utils/rgb565.js).
- */
+/** The box's screen, drawn 1:1 at 240 × 240. background = the RGB565-quantized image (utils/rgb565.js). */
 export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showBoxes, background }) {
   const screenRef = useRef(null);
   const drag = useRef(null); // { id, px, py, x, y, maxX, maxY, k }
 
-  /* Kéo widget: toạ độ con trỏ đổi về đơn vị 240 của hộp (màn xem trước có thể bị
-     co nhỏ hơn 240 trên điện thoại hẹp), làm tròn nguyên và kẹp trong màn. */
+  /* Dragging: pointer coordinates → the box's 240 units, rounded and clamped. */
   const startDrag = (e, w) => {
     onSelect?.(w.id);
     if (!onMove) return;
@@ -68,7 +60,7 @@ export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showB
         background: background ? `center / cover no-repeat url(${background})` : NO_BG,
         alignSelf: 'center',
         flex: '0 0 auto',
-        // Không có dòng này thì trên điện thoại kéo ngón tay là cuộn trang, không phải dời widget.
+        // Without this, dragging a finger on a phone scrolls the page instead of moving the widget.
         touchAction: onMove ? 'none' : undefined,
       }}
     >
@@ -80,9 +72,8 @@ export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showB
           justifyContent: w.align === 'center' ? 'center' : w.align === 'right' ? 'flex-end' : 'flex-start',
         };
 
-        /* Khung widget = đúng ô w×h mà drawBackgroundPatch sẽ xoá, không phải
-           viền trang trí. Vẽ nó ra là cách duy nhất để thấy ô quá nhỏ TRƯỚC khi
-           hộp bị dính chữ cũ. */
+        /* The outline is the exact w×h box the firmware clears: it reveals a
+           too-small box before the device shows stale text. */
         const box = showBoxes
           ? {
               borderRadius: 4,
@@ -93,7 +84,7 @@ export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showB
 
         let inner;
         if (w.type === 'battery_icon') {
-          // Ảnh pin nhiều màu của firmware — màu cố định, không theo cfg.color.
+          // The firmware's multi-color battery image — fixed colors, ignores cfg.color.
           inner = <Icon name="battery" size={16} style={{ color: '#3D2A20' }} />;
         } else if (w.type === 'wifi_icon') {
           inner = <Icon name="wifi" size={18} style={{ color: w.color }} />;
@@ -123,9 +114,9 @@ export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showB
 }
 
 /**
- * Xem trước ĐÚNG như hộp (đề xuất #10): vẽ bằng chính bytes sẽ gửi — nền RGB565 và file
- * phông VLW vừa cắt, alpha 0/255 như LovyanGFX. Ký tự thiếu trong phông hiện ô trống, y
- * như hộp. Widget pin/Wi-Fi chỉ đánh dấu vị trí.
+ * A preview that matches the box EXACTLY (firmware MEMORY.md §29, proposal #10):
+ * drawn from the very bytes to be sent (RGB565 background + subsetted VLW fonts).
+ * Battery/Wi-Fi widgets only mark their position.
  */
 export function ExactPreview({ widgets, fonts, bgBytes }) {
   const ref = useRef(null);
@@ -167,10 +158,7 @@ export function ExactPreview({ widgets, fonts, bgBytes }) {
   );
 }
 
-/**
- * Ảnh thu nhỏ THẬT của một giao diện: chính BoxScreen (nền + chữ + phông) thu 240 xuống
- * size bằng CSS zoom — thay cho các khối nâu trừu tượng trước đây.
- */
+/** A real thumbnail of a theme: BoxScreen scaled from 240 down to `size`. */
 export function MiniScreen({ widgets, background, size = 56 }) {
   return (
     <span style={{ flex: '0 0 auto', width: size, height: size, borderRadius: 8, overflow: 'hidden', display: 'block' }}>

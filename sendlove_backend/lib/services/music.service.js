@@ -7,11 +7,11 @@ const error_handler_middleware_1 = require("../middleware/error-handler.middlewa
 const music_types_1 = require("../types/music.types");
 const crc32_1 = require("../utils/crc32");
 Object.defineProperty(exports, "crc32", { enumerable: true, get: function () { return crc32_1.crc32; } });
-// Thay cho thư viện giả (2 bài cứng) trước 2026-09-24. Thiết kế: MEMORY.md §28.
+// Design: firmware MEMORY.md §28.
 const ID_PATTERN = /^mus_\d{10,16}$/;
 /**
- * Kiểm file đúng định dạng hộp phát được: "AUDC" + u16 tần số (LE) + u32 cỡ PCM, rồi
- * RIFF/WAVE 44 byte (AudioPlayer::parseAudc). Sai là hộp im -> chặn ngay ở đây.
+ * Checks the box's format: "AUDC" + u16 sample rate (LE) + u32 PCM size, then a
+ * 44-byte RIFF/WAVE header. A bad file would leave the box silent.
  */
 function checkAudcFile(buf) {
     if (buf.length < 54 || buf.toString('ascii', 0, 4) !== 'AUDC') {
@@ -38,9 +38,8 @@ class MusicService {
         return ID_PATTERN.test(musicId) && (await this.musicRepo.get(boxId, musicId)) !== null;
     }
     /**
-     * Bước 1: cấp signed POST policy. musicId có = thay nội dung bài đó (rev + 1), không có =
-     * bài mới. CHƯA ghi gì vào DB: tải lên hỏng giữa chừng thì không có bản ghi mồ côi trỏ
-     * tới file không tồn tại (hộp sẽ tải hỏng mãi).
+     * Step 1: issue a signed POST policy (musicId = replace that track, rev + 1).
+     * NOTHING is written to the DB yet, so a failed upload leaves no orphan record.
      */
     async initiateUpload(boxId, musicId) {
         let id = musicId;
@@ -65,8 +64,8 @@ class MusicService {
         return { music_id: id, rev, path, upload };
     }
     /**
-     * Bước 2: file đã lên Storage. Backend TỰ tải về để đo size + crc32 và kiểm header,
-     * không tin con số web gửi: hộp dựa vào đúng hai số này để nhận file.
+     * Step 2: the backend downloads the file ITSELF to measure size + crc32 and
+     * check the header (the box relies on these numbers; the web's are not trusted).
      */
     async commit(boxId, uid, body) {
         const id = String(body?.music_id || '');
@@ -135,7 +134,7 @@ class MusicService {
             throw new error_handler_middleware_1.AppError(404, 'music_not_found', 'Music not found');
         await this.musicRepo.rename(boxId, musicId, n);
     }
-    /** Xoá bài; báo thức đang dùng nó chuyển về tiếng bíp trong cùng một lần ghi. */
+    /** Delete a track; alarms using it switch to the beep in the same write. */
     async remove(boxId, musicId) {
         const existing = ID_PATTERN.test(musicId) ? await this.musicRepo.get(boxId, musicId) : null;
         if (!existing)
@@ -144,7 +143,7 @@ class MusicService {
         await this.storageRepo.deleteFile(existing.storage_path).catch(() => undefined);
         return { detached_alarms: detached };
     }
-    /** URL ký 15 phút để web nghe lại bài đã lưu (web tự bỏ 10 byte AUDC trước RIFF). */
+    /** 15-minute signed URL so the web can play a stored track (the web skips the 10 AUDC bytes before RIFF). */
     async previewUrl(boxId, musicId) {
         const existing = ID_PATTERN.test(musicId) ? await this.musicRepo.get(boxId, musicId) : null;
         if (!existing)

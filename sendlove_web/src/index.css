@@ -1,12 +1,4 @@
-/* ============================================================
-   Reset toàn cục. Mọi giá trị thiết kế nằm ở styles/tokens.css và
-   styles/sendlove.css — file này CỐ Ý không định nghĩa màu, font hay
-   khoảng cách nào của riêng nó.
-
-   Bản cũ đặt h1-h6 sang 'Dancing Script' màu hồng và phủ nền gradient
-   lên body, nên mỗi màn dùng hệ mới phải tự gỡ lại hai luật đó. Nay
-   không còn màn nào chạy hệ cũ nên gỡ hẳn ở đây.
-   ============================================================ */
+/* Global reset only: design values live in styles/tokens.css and styles/sendlove.css. */
 @import './styles/tokens.css';
 
 * {
@@ -29,7 +21,7 @@ a {
   color: inherit;
 }
 
-/* Bàn phím phải luôn nhìn thấy được ô đang chọn. */
+/* Keyboard users must always see the focused control. */
 :focus-visible {
   outline: 2px solid var(--rose-400);
   outline-offset: 2px;

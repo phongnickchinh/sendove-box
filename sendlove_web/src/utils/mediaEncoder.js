@@ -1,8 +1,6 @@
 /**
- * mediaEncoder.js
- * 
- * Mã hóa Video, Image thành file .bin cho ESP32.
- * Định dạng mới (Tối ưu dung lượng): Header SLBX 16-byte + (Frame Size + JPEG Data)
+ * Encodes video, images and audio into the files the box plays.
+ * Visual format: 16-byte SLBX header + repeated (u32 frame size + JPEG data).
  */
 
 const HEADER_MAGIC = [0x53, 0x4C, 0x42, 0x58]; // 'SLBX'
@@ -34,7 +32,6 @@ function createHeader(type, fps, totalFrames) {
   return header;
 }
 
-// Hàm lấy Blob JPEG từ Canvas
 const getJpegBlob = (canvas, quality = 0.7) => {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
@@ -62,7 +59,7 @@ function drawScaledCropped(ctx, source, sourceWidth, sourceHeight) {
   ctx.drawImage(source, offsetX, offsetY, drawWidth, drawHeight, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
 }
 
-// Gói dữ liệu JPEG với kích thước (4 bytes little-endian) ở đầu
+// Prefix the JPEG data with its size (u32 little-endian).
 const packJpegFrame = async (jpegBlob) => {
   const arrayBuffer = await jpegBlob.arrayBuffer();
   const dataSize = arrayBuffer.byteLength;
@@ -77,7 +74,7 @@ const packJpegFrame = async (jpegBlob) => {
 };
 
 export const encodeImageToBin = async (imageBlob) => {
-  // Ảnh từ component ImageInput đã được crop sẵn vuông 240x240
+  // ImageInput already cropped the image to a 240x240 square.
   const bitmap = await createImageBitmap(imageBlob);
   const canvas = document.createElement('canvas');
   canvas.width = TARGET_WIDTH;
@@ -94,20 +91,16 @@ export const encodeImageToBin = async (imageBlob) => {
   
   return {
     binBlob: blob,
-    thumbBlob: jpegBlob, // Thumbnail cũng là JPEG
+    thumbBlob: jpegBlob, // the thumbnail is the same JPEG
     frameCount: 1,
     duration: 0
   };
 };
 
-/**
- * Trần an toàn của mọi đoạn cắt — đúng trần duration backend chấp nhận
- * (validation.middleware.ts confirmMessageSchema max 60). Trần theo loại hộp
- * (15s NAND / 60s SD) do màn chọn đoạn áp, không đặt ở đây.
- */
+/** Hard cap the backend accepts; the per-storage cap (15s NAND / 60s SD) is applied by the range picker. */
 const HARD_MAX_SECONDS = 60;
 
-/** Đoạn [start, end) hợp lệ trong một media dài `total` giây. */
+/** Clamp [start, end) to a valid segment of a media `total` seconds long. */
 function segmentOf(total, { start = 0, end } = {}) {
   const s = Math.max(0, Math.min(start, total));
   const e = Math.min(end ?? total, total, s + HARD_MAX_SECONDS);
@@ -119,11 +112,11 @@ export const encodeVideoToBin = async (videoBlob, onProgress, range) => {
     const video = document.createElement('video');
     video.src = URL.createObjectURL(videoBlob);
     video.muted = true;
-    video.setAttribute('playsinline', ''); // Hỗ trợ mobile
+    video.setAttribute('playsinline', ''); // required on mobile
 
     video.onloadeddata = async () => {
-      const fps = 15; // Target FPS
-      // Chỉ mã hoá đoạn người dùng đã chọn ở VideoInput (không còn cắt cứng 15s đầu).
+      const fps = 15;
+      // Only the segment picked in VideoInput.
       const { start, duration } = segmentOf(video.duration, range);
       const totalFrames = Math.floor(duration * fps);
       
@@ -156,14 +149,12 @@ export const encodeVideoToBin = async (videoBlob, onProgress, range) => {
       video.onseeked = async () => {
         drawScaledCropped(ctx, video, video.videoWidth, video.videoHeight);
         
-        // Nén Canvas thành JPEG
-        const jpegBlob = await getJpegBlob(canvas, 0.7); // Quality 70% giống file Python
+        const jpegBlob = await getJpegBlob(canvas, 0.7);
         
         if (currentFrame === Math.floor(totalFrames / 2)) {
           thumbBlob = jpegBlob;
         }
         
-        // Đóng gói Header Size (4 bytes) + JPEG Data
         const packedFrame = await packJpegFrame(jpegBlob);
         frames.push(packedFrame);
         
@@ -184,7 +175,8 @@ export const encodeVideoToBin = async (videoBlob, onProgress, range) => {
   });
 };
 
-function audioBufferToWavBlob(buffer) {
+/** Mono AudioBuffer (Float32) → 16-bit PCM WAV Blob. */
+export function audioBufferToWavBlob(buffer) {
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
   const format = 1; // PCM
@@ -193,13 +185,12 @@ function audioBufferToWavBlob(buffer) {
   const result = new Float32Array(buffer.length);
   buffer.copyFromChannel(result, 0, 0); // Assuming mono
   
-  // Calculate size
   const dataLength = result.length * (bitDepth / 8);
   const bufferLength = 44 + dataLength;
   const arrayBuffer = new ArrayBuffer(bufferLength);
   const view = new DataView(arrayBuffer);
   
-  // Write WAV header
+  // WAV header
   const writeString = (view, offset, string) => {
     for (let i = 0; i < string.length; i++) {
       view.setUint8(offset + i, string.charCodeAt(i));
@@ -220,7 +211,7 @@ function audioBufferToWavBlob(buffer) {
   writeString(view, 36, 'data');
   view.setUint32(40, dataLength, true);
   
-  // Write PCM data
+  // PCM data
   let offset = 44;
   for (let i = 0; i < result.length; i++, offset += 2) {
     let s = Math.max(-1, Math.min(1, result[i]));
@@ -230,15 +221,12 @@ function audioBufferToWavBlob(buffer) {
   return new Blob([view], { type: 'audio/wav' });
 }
 
-// Loa MAX98357A trên box phát mono 16-bit. 8kHz đủ cho giọng nói và giữ file
-// nhỏ để vừa slot NAND (một slot chứa cả video lẫn audio).
+// 16-bit mono. 8 kHz is enough for speech and fits a NAND slot next to the video.
 const AUDIO_SAMPLE_RATE = 8000;
 
 /**
- * Trần PCM firmware hiện tại nạp được cho MỘT file âm thanh
- * (AUDIO_MAX_PCM_BYTES = 600000, config.h) — 16 kHz chỉ chứa được ~18,7s.
- * Lời nhắn thoại dài hơn thì hạ xuống 8 kHz (~37,5s) để hộp đang chạy vẫn
- * phát trọn. Quá 37,5s thì chỉ còn cách nâng trần phía firmware.
+ * PCM budget of the firmware for ONE audio file (AUDIO_MAX_PCM_BYTES, config.h):
+ * ~18.7s at 16 kHz; longer voice messages drop to 8 kHz (~37.5s).
  */
 export const FW_AUDIO_PCM_BYTES = 600000;
 
@@ -246,7 +234,7 @@ export function voiceSampleRate(durationSec) {
   return durationSec * 16000 * 2 <= FW_AUDIO_PCM_BYTES ? 16000 : 8000;
 }
 
-/** Giải mã mọi thứ trình duyệt phát được (webm/ogg/mp3/m4a/wav/mp4) ra AudioBuffer. */
+/** Decode anything the browser can play (webm/ogg/mp3/m4a/wav/mp4) into an AudioBuffer. */
 export async function decodeAudioBlob(blob) {
   const arrayBuffer = await blob.arrayBuffer();
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -257,11 +245,7 @@ export async function decodeAudioBlob(blob) {
   }
 }
 
-/**
- * Cắt [start, end) của một AudioBuffer, downmix mono, resample, chuẩn hoá độ to,
- * qua bộ nén đỉnh (xem renderSegment) → WAV PCM16. Dùng cho lời nhắn thoại (thu trực tiếp
- * hoặc file tải lên) và nhạc nền của tin tĩnh.
- */
+/** Cut [start, end), render it (see renderSegment) → WAV PCM16. For voice messages and background music. */
 export async function encodeAudioSegment(buffer, range, sampleRate) {
   const { start, duration } = segmentOf(buffer.duration, range);
   const rate = sampleRate || voiceSampleRate(duration);
@@ -270,9 +254,9 @@ export async function encodeAudioSegment(buffer, range, sampleRate) {
 }
 
 /**
- * Nhạc báo thức (thiết kế 2026-09-24): 16 kHz mono (user chốt, mở lại "giữ 8kHz" RIÊNG cho
- * nhạc), 5–60 giây (hộp kêu tối đa 1 phút), file gốc ≤ 15 MB — decodeAudioData giải mã
- * cả bài vào RAM, file 10 phút trên điện thoại làm sập tab.
+ * Alarm music: 16 kHz mono (product decision: the 8 kHz rule is lifted for music
+ * ONLY), 5–60 seconds, source file ≤ 15 MB (decodeAudioData decodes the whole
+ * track into RAM; a long file crashes the tab on a phone).
  */
 export const ALARM_MUSIC = {
   RATE: 16000,
@@ -283,12 +267,11 @@ export const ALARM_MUSIC = {
 };
 
 /**
- * Cắt đoạn nhạc báo thức → file hộp phát thẳng từ thẻ: "AUDC" + u16 tần số + u32 cỡ WAV
- * (little-endian, đúng AudioPlayer::parseAudc) rồi WAV PCM16. Tin thoại thì firmware tự
- * thêm AUDC lúc tải; nhạc tải thẳng xuống thẻ nên web phải đóng gói sẵn.
- * Dùng chung renderSegment (chuẩn hoá độ to + nén + trần đỉnh) như tin thoại: cùng độ
- * to thì âm lượng báo thức và tin nhắn mới so được với nhau. Đỉnh cao làm ampli kéo
- * dòng đột ngột → sụt áp. Fade 50ms hai đầu để hộp phát lặp không nghe "tạch".
+ * Cut an alarm-music clip into the file the box plays from the card: "AUDC" +
+ * u16 sample rate + u32 WAV size (little-endian), then WAV PCM16. The web wraps
+ * it because music, unlike voice messages, goes straight to the card. Same
+ * renderSegment as voice, so volumes are comparable; a 50ms fade on both ends
+ * keeps the loop from clicking.
  */
 export async function encodeAlarmMusic(buffer, range) {
   const { start, duration } = segmentOf(buffer.duration, range);
@@ -315,20 +298,18 @@ export async function encodeAlarmMusic(buffer, range) {
   };
 }
 
-/** File .aud đã lưu → Blob WAV trình duyệt phát được (bỏ 10 byte AUDC ở đầu). */
+/** Stored .aud file → WAV Blob the browser can play (drops the 10-byte AUDC header). */
 export async function audFileToWavBlob(arrayBuffer) {
   return new Blob([arrayBuffer.slice(10)], { type: 'audio/wav' });
 }
 
 export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
-  // Giải mã offline thay vì play() realtime: không phụ thuộc autoplay policy,
-  // không mất mẫu khi tab bị throttle, và chạy nhanh hơn thời lượng thật.
+  // Decode offline, not by real-time play(): no autoplay policy, no dropped samples.
   let decoded;
   try {
     decoded = await decodeAudioBlob(videoBlob);
   } catch (err) {
-    // Trình duyệt không giải mã được audio track của container này.
-    // Video vẫn gửi được, chỉ là không có tiếng.
+    // Undecodable audio track: the video still sends, without sound.
     console.error('Không giải mã được audio track của video', err);
     return null;
   }
@@ -340,7 +321,7 @@ export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
     return null;
   }
 
-  // Cùng đoạn với phần hình (encodeVideoToBin) để tiếng khớp khung.
+  // Same segment as the picture, so audio lines up with the frames.
   const { start, duration } = segmentOf(decoded.duration, range);
   const rendered = await renderSegment(decoded, start, duration, AUDIO_SAMPLE_RATE);
 
@@ -350,38 +331,24 @@ export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
 };
 
 /**
- * Chuẩn hoá độ to (user chốt 2026-09-25): mọi đoạn gửi xuống hộp — tin thoại, tiếng video,
- * nhạc báo thức — về cùng một độ to, để % âm lượng trên hộp là % so với một mức chuẩn của
- * loa chứ không phụ thuộc file gốc thu to hay nhỏ.
- *
- * Độ to = RMS (dBFS) của các khối 400ms, bỏ khối im lặng (cổng tuyệt đối -60 dB và cổng
- * tương đối -10 dB dưới trung bình, cùng ý với LUFS) để khoảng lặng giữa câu không làm file
- * bị nâng quá tay. Đo sau lọc thông cao SPEAKER_LOW_HZ: loa nhỏ của hộp gần như không
- * phát được âm trầm, bài nhiều bass không được tính là "to".
- *
- * "To thật to" (user chốt 2026-09-25, sau khi nghe bản -20 dB: mọi file đều nhỏ hơn tiếng bíp,
- * "ru ngủ người dùng"; user tự nghe rồi hạ dần nếu cần): mức -10 dB, nén mạnh, bỏ hẳn phần
- * trầm loa không phát được (chỉ tốn biên độ và dòng ampli), rồi limiter ghim đỉnh sát 0 dBFS.
- * Muốn nhỏ lại: hạ targetDb của profile trước, rồi mới hạ AUDIO_PEAK_CEILING.
+ * Loudness normalization (product decision): everything sent to the box lands
+ * at the same loudness, "really loud": -10 dB target, heavy compression, bass
+ * cut, then a limiter near 0 dBFS. To make it quieter lower the profile's
+ * targetDb first, AUDIO_PEAK_CEILING second.
  */
-// Tin thoại / tiếng video: vẫn phải nghe rõ lời, không nén tới mức méo.
+// Voice messages / video audio: speech must stay clear.
 const PROFILE_VOICE = { targetDb: -10, lowHz: 250, presenceDb: 0 };
-// Nhạc báo thức (user nghe: bản -10 dB vẫn thua tiếng bíp khi cả hai 100%): mục đích là đánh
-// thức, không phải nghe hay. Bíp là một âm 1,6 kHz — đúng vùng tai nhạy nhất và loa nhỏ kêu
-// khoẻ nhất — nên cùng RMS nó vẫn to hơn nhạc. Nhạc báo thức vì vậy: bỏ thêm trầm (< 400 Hz),
-// nâng +6 dB quanh PRESENCE_HZ để dồn năng lượng về vùng đó, rồi ghim tới -6 dB RMS (khoảng
-// cách đỉnh / trung bình chỉ còn ~6 dB: nghe "dẹt", chấp nhận cho báo thức).
+// Alarm music: made to wake someone up, not to sound good. To compete with the
+// 1.6 kHz beep: cut more bass (< 400 Hz), +6 dB around PRESENCE_HZ, -6 dB RMS.
 const PROFILE_ALARM = { targetDb: -6, lowHz: 400, presenceDb: 6 };
 const PRESENCE_HZ = 2000;
-// File thu quá nhỏ phần lớn là tiếng ồn nền: nâng hơn mức này chỉ nghe thấy ồn.
+// Boosting a very quiet recording past this only amplifies noise.
 const LOUDNESS_MAX_BOOST_DB = 30;
 
 /**
- * Resample về `rate` mono. OfflineAudioContext lo cả downmix (destination 1
- * kênh) lẫn nội suy tần số, chính xác hơn tự viết tay.
- * Lượt 1 chỉ resample để đo độ to; lượt 2 lọc trầm, nhân hệ số chuẩn hoá rồi nén. Đo lại sau
- * nén: DynamicsCompressorNode của trình duyệt TỰ cộng độ lợi bù (makeup gain, đo được ~+4 dB
- * trên Chrome), không tắt được, nên phải kéo về mức chuẩn bằng một hệ số cuối, rồi limiter.
+ * Resample to mono at `rate`. Pass 1 only resamples, to measure loudness; pass 2
+ * cuts bass, applies the gain and compresses. Loudness is re-measured afterwards
+ * because DynamicsCompressorNode adds its own makeup gain (~+4 dB on Chrome).
  */
 async function renderSegment(decoded, start, duration, rate, profile = PROFILE_VOICE) {
   const { targetDb, lowHz } = profile;
@@ -390,8 +357,7 @@ async function renderSegment(decoded, start, duration, rate, profile = PROFILE_V
   const gainDb = loudness === null ? 0 : Math.min(LOUDNESS_MAX_BOOST_DB, targetDb - loudness);
   const rendered = await renderPass(decoded, start, duration, rate, { process: true, gainDb, profile });
   const data = rendered.getChannelData(0);
-  // Limiter hạ đỉnh thì độ to tụt dưới mức chuẩn (giọng nói nhiều đỉnh nhọn tụt ~3 dB):
-  // lặp đo → bù → ghim đỉnh vài lượt để tiến sát mức chuẩn.
+  // Limiting lowers loudness: iterate measure → compensate → limit to converge.
   for (let pass = 0; pass < 5; pass++) {
     const after = await measureLoudness(rendered, lowHz);
     if (after === null || Math.abs(targetDb - after) < 0.3) break;
@@ -399,15 +365,14 @@ async function renderSegment(decoded, start, duration, rate, profile = PROFILE_V
     for (let i = 0; i < data.length; i++) data[i] *= fix;
     limitPeaks(data, rate, AUDIO_PEAK_CEILING);
   }
-  limitPeaks(data, rate, AUDIO_PEAK_CEILING);  // vòng trên có thể thoát trước khi ghim lượt nào
+  limitPeaks(data, rate, AUDIO_PEAK_CEILING);  // the loop may exit without limiting
   logAndCapPeak(rendered, loudness, gainDb);
   return rendered;
 }
 
 /**
- * Limiter nhìn trước 5ms: hệ số tại mỗi mẫu = nhỏ nhất trong cửa sổ phía trước (hạ kịp trước
- * đỉnh, không cắt méo), nhả về 1 trong ~80ms. Ghim đỉnh mà không phải hạ CẢ bài như
- * logAndCapPeak — hạ cả bài là mất độ to vừa chuẩn hoá.
+ * 5ms look-ahead limiter, ~80ms release: pins peaks without scaling the WHOLE
+ * clip (which would undo the loudness normalization).
  */
 function limitPeaks(data, rate, ceiling) {
   const look = Math.max(1, Math.round(0.005 * rate));
@@ -438,14 +403,13 @@ async function renderPass(decoded, start, duration, rate, { process, gainDb = 0,
   if (!process) {
     source.connect(offlineCtx.destination);
   } else {
-    // Phần dưới lowHz loa không phát ra tiếng, chỉ chiếm biên độ (làm đỉnh chạm
-    // trần sớm) và kéo dòng ampli. Bỏ đi thì cùng trần đỉnh, phần nghe được to hơn.
+    // Below lowHz the speaker is silent; that content only eats headroom.
     const highpass = offlineCtx.createBiquadFilter();
     highpass.type = 'highpass';
     highpass.frequency.value = profile.lowHz;
     highpass.Q.value = Math.SQRT1_2;
 
-    // Nâng vùng tai nhạy / loa kêu khoẻ (0 dB = không đổi gì).
+    // Boost the band where the ear and the speaker are strongest (0 dB = no-op).
     const presence = offlineCtx.createBiquadFilter();
     presence.type = 'peaking';
     presence.frequency.value = PRESENCE_HZ;
@@ -455,9 +419,8 @@ async function renderPass(decoded, start, duration, rate, { process, gainDb = 0,
     const gain = offlineCtx.createGain();
     gain.gain.value = 10 ** (gainDb / 20);
 
-    // Nén mạnh để khoảng cách đỉnh / trung bình nhỏ lại: cùng trần đỉnh thì độ to trung bình
-    // lên được cao. Ampli MAX98357A dùng chung nguồn với đèn nền; nếu breadboard rè / nháy
-    // màn khi phát, hạ LOUDNESS_TARGET_DB (user nhận rủi ro, 2026-09-25).
+    // Heavy compression raises average loudness under the same ceiling. If the box
+    // crackles or the screen flickers, lower the profile's targetDb (accepted risk).
     const compressor = offlineCtx.createDynamicsCompressor();
     compressor.threshold.value = -24;
     compressor.knee.value = 12;
@@ -475,14 +438,14 @@ async function renderPass(decoded, start, duration, rate, { process, gainDb = 0,
   return offlineCtx.startRendering();
 }
 
-/** Độ to (dBFS) theo khối 400ms có cổng im lặng; null = cả đoạn im lặng. */
+/** Gated loudness (dBFS) over 400ms blocks; null = the whole clip is silent. */
 async function measureLoudness(buffer, lowHz) {
   const rate = buffer.sampleRate;
   const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   const ctx = new OfflineCtx(1, buffer.length, rate);
   const source = ctx.createBufferSource();
   source.buffer = buffer;
-  // Chỉ lọc lúc ĐO; file gửi xuống giữ nguyên dải tần.
+  // Filter for MEASURING only; the file that gets sent keeps its full band.
   const highpass = ctx.createBiquadFilter();
   highpass.type = 'highpass';
   highpass.frequency.value = lowHz;
@@ -503,15 +466,14 @@ async function measureLoudness(buffer, lowHz) {
   const mean = (arr) => arr.reduce((s, e) => s + e, 0) / arr.length;
   const loud = energies.filter((e) => e > 1e-6); // -60 dB
   if (!loud.length) return null;
-  const relGate = mean(loud) * 0.1; // -10 dB dưới trung bình
+  const relGate = mean(loud) * 0.1; // 10 dB below the mean
   const kept = loud.filter((e) => e > relGate);
   return 10 * Math.log10(mean(kept));
 }
 
-// Trần biên độ gửi xuống box (limitPeaks ghim, logAndCapPeak là lưới an toàn cuối).
-// 0,7 (-3,1 dBFS) → 0,98 (-0,2 dBFS) ngày 2026-09-25: user muốn to hết mức, tự nghe rồi hạ
-// dần. Trước đây 0,7 để đỡ sụt áp do ampli dùng chung nguồn đèn nền — nếu hộp rè / nháy màn
-// khi phát thì đây là nút thứ hai cần hạ, sau LOUDNESS_TARGET_DB.
+// Peak ceiling sent to the box (product decision: as loud as possible). If the
+// box crackles or the screen flickers (the amp shares the backlight supply), this
+// is the second knob to lower, after the profile's targetDb.
 const AUDIO_PEAK_CEILING = 0.98;
 
 function logAndCapPeak(buffer, loudness, gainDb) {

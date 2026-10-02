@@ -3,8 +3,8 @@ import { db } from '../../firebase';
 import { IAlarmRepository } from '../interfaces/alarm.repository.interface';
 
 /**
- * Alarm được lưu tại: boxes/{boxId}/config/alarm_list/{alarmId}
- * Khi thay đổi alarm list, cần set flags/a_flag = true để ESP32 biết.
+ * Alarms live at boxes/{boxId}/config/alarm_list/{alarmId}.
+ * Any change to the list must set flags/a_flag = true so the ESP32 notices.
  */
 export class FirebaseAlarmRepository implements IAlarmRepository {
   private getBasePath(boxId: string): string {
@@ -16,7 +16,7 @@ export class FirebaseAlarmRepository implements IAlarmRepository {
     const record = { id: alarmId, ...data };
     await ref.set(record);
 
-    // Set a_flag = true để ESP32 biết alarm list đã thay đổi
+    // Set a_flag = true so the ESP32 knows the alarm list changed
     await db.ref(`boxes/${boxId}/flags/a_flag`).set(true);
 
     return record as Alarm;

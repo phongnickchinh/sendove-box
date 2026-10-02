@@ -31,6 +31,8 @@ node_modules/
 serviceAccountKey.json
 sendlove_backend/firebase-debug.log
 firebase-debug.log
+# Firebase CLI deploy cache
+.firebase/
 
-# Blender backup tự sinh
+# Blender auto-generated backups
 *.blend1

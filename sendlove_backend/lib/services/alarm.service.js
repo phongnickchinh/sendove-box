@@ -4,14 +4,14 @@ exports.AlarmService = void 0;
 const firebase_alarm_repository_1 = require("../repositories/firebase/firebase-alarm.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
 const music_service_1 = require("./music.service");
-/** Âm lượng báo thức mặc định (user chốt 2026-09-24), khớp AlarmItem.volume của firmware. */
+/** Default alarm volume (product decision), matching the firmware's AlarmItem.volume. */
 const DEFAULT_VOLUME = 80;
 class AlarmService {
     constructor(alarmRepo = new firebase_alarm_repository_1.FirebaseAlarmRepository(), musicService = new music_service_1.MusicService()) {
         this.alarmRepo = alarmRepo;
         this.musicService = musicService;
     }
-    /** music_id phải là bài có trong thư viện của CHÍNH hộp này. "" -> null (gỡ nhạc). */
+    /** music_id must be a track in THIS box's library. "" -> null (remove the music). */
     async resolveMusic(boxId, musicId) {
         if (musicId === undefined)
             return undefined;
@@ -23,8 +23,8 @@ class AlarmService {
         return musicId;
     }
     /**
-     * Tạo alarm mới (max 10 alarms / box).
-     * Repository tự set a_flag = true khi tạo.
+     * Create an alarm (max 10 per box).
+     * The repository sets a_flag = true on create.
      */
     async createAlarm(boxId, data) {
         const alarms = await this.alarmRepo.listAlarms(boxId);
@@ -56,7 +56,7 @@ class AlarmService {
         const musicId = await this.resolveMusic(boxId, music_id);
         return this.alarmRepo.updateAlarm(boxId, alarmId, {
             ...rest,
-            // null xoá khoá trong RTDB (update()) -> báo thức về tiếng bíp
+            // null deletes the key in RTDB (update()) -> the alarm falls back to the beep
             ...(musicId !== undefined ? { music_id: musicId } : {}),
             updated_at: Date.now(),
         });

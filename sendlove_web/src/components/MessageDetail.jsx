@@ -5,15 +5,9 @@ import Icon from './ui/Icon';
 import { Modal } from './ui/Screen';
 
 /**
- * Popup "message-detail-popup" (+ biến thể voice), dùng chung cho người gửi
- * (lịch sử) và người nhận (danh sách tin của hộp).
- *
- * CHƯA đối chiếu với frame Figma thật — dựng theo style guide Warm Minimalism
- * trong lúc Figma MCP hết quota. Cần soi lại khi đọc được frame.
- *
- * Dữ liệu: danh sách chỉ có storage path thô, nên mở popup mới gọi
- * GET /messages/:id để lấy signed URL (hết hạn 15 phút — popup mở lâu hơn thế
- * thì media không tải lại được, đóng mở lại là có URL mới).
+ * Message detail popup, shared by sender and receiver. NOT yet checked against
+ * the Figma frame. It calls GET /messages/:id on open for signed URLs (15-minute
+ * expiry; reopening fetches fresh ones).
  */
 export default function MessageDetail({ boxId, message, onClose }) {
   const [detail, setDetail] = useState(null);
@@ -104,7 +98,7 @@ function Media({ msg, media }) {
   return null;
 }
 
-/** label bỏ trống khi tiêu đề popup đã nói rõ đây là gì (tin thoại). */
+/** label is omitted when the popup title already says what this is (voice message). */
 function AudioRow({ label, src, big = false }) {
   return (
     <div className={`sl-msgdetail__audio${big ? ' sl-msgdetail__audio--big' : ''}`}>
@@ -119,7 +113,7 @@ function AudioRow({ label, src, big = false }) {
   );
 }
 
-/** File gốc không có hoặc không ký được: nói thẳng, vẫn hiện thumbnail nếu có. */
+/** The original is missing or couldn't be signed: say so, and still show the thumbnail if there is one. */
 function Fallback({ media, what }) {
   return (
     <>

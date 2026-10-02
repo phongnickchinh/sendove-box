@@ -61,9 +61,7 @@ const container = (0, container_1.createContainer)();
 // Middleware
 // Security headers (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.)
 app.use((0, helmet_1.default)());
-// TODO: Restrict CORS origins before production deployment.
-// Current config allows all origins for development/testing convenience.
-// Example: app.use(cors({ origin: ['https://iot-app-839a2.web.app'] }));
+// TODO: restrict CORS before production, e.g. cors({ origin: ['https://iot-app-839a2.web.app'] }).
 app.use((0, cors_1.default)({ origin: true }));
 // Parse JSON with explicit body size limit to prevent DoS via large payloads
 app.use(express_1.default.json({ limit: '10kb' }));
@@ -77,7 +75,7 @@ app.use('/users', (0, user_routes_1.default)(container.userController));
 const msgRouter = (0, message_routes_1.default)(container.messageController);
 const alrmRouter = (0, alarm_routes_1.default)(container.alarmController);
 const themeRouter = (0, theme_routes_1.default)(container.themeController);
-// Nhạc báo thức theo hộp (2026-09-24). Route /music cũ (thư viện giả 2 bài) đã gỡ.
+// Per-box alarm music.
 const musicRouter = (0, music_routes_1.default)(container.musicController);
 app.use('/boxes', (0, box_routes_1.default)(container.boxController, msgRouter, alrmRouter, themeRouter, musicRouter));
 app.use('/device', (0, device_routes_1.default)(container.deviceController));

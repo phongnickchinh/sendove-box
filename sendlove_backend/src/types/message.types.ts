@@ -1,55 +1,52 @@
 import { BaseModel } from './base.types';
 
-// ==================================================
-// Message — Node: messages/{box_id}/{message_id}
-// ==================================================
-// Không có MessageStatus: Sender không được biết trạng thái tin nhắn.
-// ESP32 dùng timestamp + local last_download_ts để xác định tin mới.
-// ==================================================
+// Message — messages/{box_id}/{message_id}
+// There is no MessageStatus by design: the box finds new messages from timestamp
+// + its local last_download_ts.
 export interface Message extends BaseModel {
   sender_id: string;
   box_id: string;
 
-  /** Thời điểm gửi (ESP32 so sánh trường này với last_download_ts nội bộ) */
+  /** Send time (the ESP32 compares it with its local last_download_ts) */
   timestamp: number;
 
-  /** Loại tin nhắn chính */
+  /** Primary message type */
   type: 'video' | 'image' | 'gif' | 'voice' | 'text';
 
-  /** Nội dung text của tin nhắn */
+  /** Text content */
   text?: string;
 
-  /** Video đã encode RGB565 (.bin) - URL trên Firebase Storage */
+  /** Encoded visual (.bin) — Firebase Storage path */
   bin_url?: string;
 
-  /** Audio ghi âm (.wav) - URL trên Firebase Storage */
+  /** Recorded audio (.wav) — Firebase Storage path */
   voice_url?: string;
 
-  /** File gốc: Video (.mp4) - URL */
+  /** Original file: video (.mp4) */
   video_url?: string;
 
-  /** File gốc: Ảnh GIF - URL */
+  /** Original file: GIF */
   gif_url?: string;
 
-  /** File gốc: Nhạc nền - URL */
+  /** Original file: background music */
   bg_music_url?: string;
 
-  /** File gốc: Ảnh tĩnh - URL */
+  /** Original file: still image */
   image_url?: string;
 
-  /** Tổng dung lượng file đính kèm encode và gốc (bytes) */
+  /** Total size of encoded + original attachments (bytes) */
   total_size?: number;
 
-  /** Thumbnail cho Web App hiển thị lịch sử */
+  /** Thumbnail for the web app's history view */
   thumbnail_url?: string;
 
-  /** Thời lượng media tính bằng giây */
+  /** Media duration in seconds */
   duration?: number;
 
-  /** Số frame trong file .bin */
+  /** Frame count of the .bin file */
   frame_count?: number;
 
-  /** Kích thước video encode (pixels) */
+  /** Encoded video dimensions (pixels) */
   width?: number;
   height?: number;
 }

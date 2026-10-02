@@ -1,6 +1,6 @@
 #include "MediaPlayer.h"
 
-#include <new>  // std::nothrow cho JPEGDEC cap tren heap
+#include <new>  // std::nothrow for the heap-allocated JPEGDEC
 
 #include "DisplayDriver.h"
 #include "SystemMonitor.h"
@@ -9,23 +9,15 @@
 #include "Settings.h"
 #include "SdStore.h"
 
-// ============================================================================
-// MediaPlayer Implementation — VJPG/VIMG via IStorageProvider
-// ============================================================================
-
 static DisplayDriver* s_display = nullptr;
 
 static void dumpHexBytes(const char* tag, const uint8_t* data, size_t len) {
     if (tag == nullptr || data == nullptr || len == 0) return;
 }
 
-// ============================================================================
-// ASCII-fold tiếng Việt (tạm thời, chờ phase font Unicode thật) — bỏ dấu để
-// hiển thị được bằng font FreeSansBold9pt7b (có sẵn, chỉ có glyph ASCII 32-126).
-// ============================================================================
+// ---- Vietnamese ASCII folding (temporary: the font only has ASCII 32-126) ----
 
-// Khối Vietnamese Unicode U+1EA0-1EF9 (và 4 cặp Latin Extended-A Ă/Đ/Ơ/Ư) đều
-// xen kẽ chẵn=hoa/lẻ=thường trong từng khối liên tục -> chỉ cần base letter.
+// U+1EA0-1EF9 and the Ă/Đ/Ơ/Ư pairs alternate even=upper/odd=lower within a run.
 struct AsciiFoldAltRange { uint16_t start; uint16_t end; char base; };
 static const AsciiFoldAltRange ASCII_FOLD_ALT_RANGES[] = {
     {0x1EA0, 0x1EB7, 'A'}, {0x1EB8, 0x1EC7, 'E'}, {0x1EC8, 0x1ECB, 'I'},
@@ -33,8 +25,7 @@ static const AsciiFoldAltRange ASCII_FOLD_ALT_RANGES[] = {
     {0x0102, 0x0103, 'A'}, {0x0110, 0x0111, 'D'}, {0x01A0, 0x01A1, 'O'}, {0x01AF, 0x01B0, 'U'},
 };
 
-// Latin-1 Supplement: mỗi khối cùng 1 case (hoa/thường tách khối riêng), map
-// thẳng ra 1 ký tự cố định, không cần tính chẵn/lẻ.
+// Latin-1 Supplement: each run is a single case, mapped to one fixed character.
 struct AsciiFoldFlatRange { uint16_t start; uint16_t end; char out; };
 static const AsciiFoldFlatRange ASCII_FOLD_FLAT_RANGES[] = {
     {0x00C0, 0x00C3, 'A'}, {0x00E0, 0x00E3, 'a'},
@@ -45,7 +36,7 @@ static const AsciiFoldFlatRange ASCII_FOLD_FLAT_RANGES[] = {
     {0x00DD, 0x00DD, 'Y'}, {0x00FD, 0x00FD, 'y'},
 };
 
-// Decode 1 ký tự UTF-8 (1-3 byte, đủ cho toàn bộ range tiếng Việt) thành codepoint.
+// Decodes one UTF-8 character of 1-3 bytes (covers all of Vietnamese).
 static uint16_t decodeUtf8Char(const char* s, size_t remaining, uint8_t* outBytesConsumed) {
     uint8_t b0 = (uint8_t)s[0];
     if (b0 < 0x80) { *outBytesConsumed = 1; return b0; }
@@ -57,12 +48,12 @@ static uint16_t decodeUtf8Char(const char* s, size_t remaining, uint8_t* outByte
         *outBytesConsumed = 3;
         return (uint16_t)(((b0 & 0x0F) << 12) | (((uint8_t)s[1] & 0x3F) << 6) | ((uint8_t)s[2] & 0x3F));
     }
-    // Chuỗi UTF-8 lỗi hoặc 4-byte (ngoài phạm vi tiếng Việt) -> bỏ qua an toàn.
+    // Malformed or 4-byte UTF-8: skip.
     *outBytesConsumed = 1;
     return 0xFFFF;
 }
 
-// Trả về 0 nếu không map được (ký tự bị bỏ qua khi ghép chuỗi kết quả).
+// 0 = unmappable (dropped).
 static char asciiFoldCodepoint(uint16_t cp) {
     if (cp < 0x80) return (char)cp;
     for (const auto& r : ASCII_FOLD_ALT_RANGES) {
@@ -77,8 +68,7 @@ static char asciiFoldCodepoint(uint16_t cp) {
     return 0;
 }
 
-/// Bỏ dấu tiếng Việt (UTF-8 -> ASCII gần đúng nhất). Ký tự không map được bị
-/// bỏ qua hoàn toàn (không chèn '?' rác vào caption).
+/// UTF-8 -> closest ASCII; unmappable characters are dropped.
 static void asciiFoldVietnamese(const char* utf8In, char* asciiOut, size_t maxOut) {
     if (asciiOut == nullptr || maxOut == 0) return;
     if (utf8In == nullptr) { asciiOut[0] = '\0'; return; }
@@ -120,10 +110,8 @@ bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
     if (_playerMutex == nullptr) {
         _playerMutex = xSemaphoreCreateRecursiveMutex();
     }
-    // _jpegBuffer (32KB) được cấp phát on-demand trong playItem() và giải phóng
-    // ngay trong stop() để trả lại toàn bộ heap cho MbedTLS SSL Handshake lúc Standby.
-    // I2S cũng vậy: KHÔNG init ở đây nữa (2026-09-18). playItem() tự init khi cần,
-    // beep() cũng thế; init sẵn từ boot nghĩa là giữ 24KB DMA suốt đời máy.
+    // _jpegBuffer (32KB) and I2S (24KB DMA) are NOT set up here: they are allocated
+    // on demand and freed in stop(), leaving the heap to the TLS handshake.
     return true;
 }
 
@@ -143,7 +131,7 @@ bool MediaPlayer::playItem(const char* identifier) {
     if (_jpegBuffer == nullptr) {
         _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
         if (_jpegBuffer == nullptr) {
-            // Lần 1 thất bại: nhường CPU 100ms cho IDLE task dọn dẹp task vừa xóa (WakeSync 12KB)
+            // Yield 100ms so the IDLE task can reclaim freed memory, then retry.
             DLOG("[PLAY] JPEG buf retry (yield IDLE)...");
             if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -158,7 +146,7 @@ bool MediaPlayer::playItem(const char* identifier) {
         }
     }
 
-    // Bộ giải mã (17,9KB) đi cùng nhịp với _jpegBuffer — xem chú thích ở MediaPlayer.h
+    // The decoder (17.9KB) shares _jpegBuffer's lifetime.
     if (_jpeg == nullptr) {
         _jpeg = new (std::nothrow) JPEGDEC();
         if (_jpeg == nullptr) {
@@ -201,11 +189,8 @@ bool MediaPlayer::playItem(const char* identifier) {
     strncpy(_currentId, identifier, sizeof(_currentId) - 1);
     _currentSlot = (identifier[0] >= '0' && identifier[0] <= '9') ? atoi(identifier) : -1;
 
-    // Tin nhắn tĩnh KHÔNG có ảnh thật (chỉ audio/text): NetworkManager ghi slot
-    // rỗng với dataSize=4 sentinel (xem checkAndDownloadNewMessages()). Bỏ qua
-    // hoàn toàn bước dò header SLBX + decodeOneFrame() bên dưới — nếu cứ chạy sẽ
-    // đọc trúng vùng NAND chưa từng ghi (0xFF) và báo lỗi "Bad jpegSize" +
-    // delay(2000) chặn màn hình vô ích.
+    // Audio/text-only message: an empty slot with the dataSize=4 sentinel. Skip the
+    // header probe and decodeOneFrame(), which would read unwritten storage.
     bool isStaticNoImage = (info.type == StorageItemType::IMAGE && _currentDataSize <= 4);
 
     _display->turnOn();
@@ -218,7 +203,7 @@ bool MediaPlayer::playItem(const char* identifier) {
         _frameBaseOffset = 0;
         _readFrameSizeHeader = true;
     } else {
-    // Tự động kiểm tra header tại offset 4 (SLBX / SLOT / VJPG / VIMG)
+    // Container magic at offset 4 (SLBX / SLOT / VJPG / VIMG)
     uint8_t hdrCheck[20] = {0};
     _storage->readData(hdrCheck, 20);
     dumpHexBytes("[MediaPlayer] Header dump:", hdrCheck, sizeof(hdrCheck));
@@ -237,13 +222,11 @@ bool MediaPlayer::playItem(const char* identifier) {
         _fps             = (fps > 0) ? fps : 15;
         _totalFrames     = (totalFrames > 0) ? totalFrames : 1;
 
-        // Tự động phát hiện payload là JPEG hay Raw RGB565 bằng cách peek 7 bytes tại offset 20
-        // JPEG format: [4-byte size][FF D8 FF ...]  → bytes[4..6] == JPEG magic
-        // RGB565 format: pixel data thô, không có JPEG magic
+        // JPEG payload = [4-byte size][FF D8 FF ...]; anything else is raw RGB565.
         uint8_t peek[7] = {0};
         _storage->seek(20);
         _storage->readData(peek, sizeof(peek));
-        _storage->seek(20); // Rewind về đầu payload
+        _storage->seek(20);
 
         const bool isJpegPayload = (peek[4] == 0xFF && peek[5] == 0xD8 && peek[6] == 0xFF);
 
@@ -261,71 +244,63 @@ bool MediaPlayer::playItem(const char* identifier) {
     } else if (memcmp(hdrCheck + 4, "SLOT", 4) == 0 ||
                memcmp(hdrCheck + 4, "VJPG", 4) == 0 ||
                memcmp(hdrCheck + 4, "VIMG", 4) == 0) {
-        // Tệp container pre-encoded: Skip 4-byte reserve + 16-byte container header -> Seek đến offset 20!
+        // Container: payload starts after the 4-byte prefix + 16-byte header.
         _frameBaseOffset = 20;
         _readFrameSizeHeader = true;
         _storage->seek(20);
     } else {
-        // Tệp Raw JPEG: Seek về offset 0 để đọc 4-byte frame size header
+        // Raw JPEG: the 4-byte frame size is at offset 0.
         _frameBaseOffset = 0;
         _readFrameSizeHeader = true;
         _storage->seek(0);
     }
-    } // end else (!isStaticNoImage) — đóng nhánh dò header SLBX/SLOT/VJPG/VIMG
+    } // end else (!isStaticNoImage)
 
     DLOG("[PLAY] setup OK: frames=%d", _totalFrames);
 
-    // Khởi tạo I2S nếu chưa có (chỉ init 1 lần trong vòng đời MediaPlayer)
-    // Âm lượng đặt TRƯỚC init(): âm lượng 0 thì init() để ampli tắt luôn.
+    // Volume BEFORE init(): at volume 0, init() leaves the amp off.
     _audio.setVolume(Settings::volume.load(), true);
     if (!_audio.isInitialized()) {
         _audio.init();
     }
 
-    // Tìm audio (AUDC header) ngay sau phần video data
-    // _currentDataSize là kích thước video (từ SlotEntry.dataSize)
-    // AUDC header nằm ở offset _currentDataSize tính từ đầu slot
+    // The AUDC header sits right after the video data, at offset _currentDataSize.
     bool hasAudio = _audio.loadFromStorage(_storage, _currentDataSize, _currentAudioSize);
     if (hasAudio) {
-        _audio.prefill(); // Nạp 2 DMA buffer trước để tránh tiếng click đầu bài
+        _audio.prefill(); // avoids a click at the start
     }
 
-    // Seek về đầu phần video để bắt đầu phát
     _storage->seek(_frameBaseOffset);
 
     if (info.type == StorageItemType::IMAGE) {
         _state = PlaybackState::SHOWING;
         if (isStaticNoImage) {
-            // Đã _display->clear() ở trên -> giữ nguyên màn đen (bản NAND).
-            // Bản SD card sẽ có background mặc định riêng ở phase sau.
+            // Keep the cleared (black) screen.
         } else {
             decodeOneFrame(false);
         }
 
-        // Caption text (nếu có) — bỏ dấu tiếng Việt tạm thời rồi word-wrap vẽ đè.
+        // Caption: ASCII-folded, word-wrapped, drawn on top.
         char rawCaption[300] = "";
         if (_storage->getItemText(identifier, rawCaption, sizeof(rawCaption))) {
             char asciiCaption[300];
             asciiFoldVietnamese(rawCaption, asciiCaption, sizeof(asciiCaption));
             if (isStaticNoImage) {
-                // Không có ảnh: caption chiếm gần trọn màn hình.
+                // No image: nearly the whole screen.
                 _display->showWrappedText(asciiCaption, 8, 8, SCREEN_WIDTH - 16, SCREEN_HEIGHT - 16);
             } else {
-                // Có ảnh: dải chữ ở 1/3 dưới màn hình, không đè lên phần trên.
+                // With an image: a band in the bottom third.
                 int32_t bandY = (SCREEN_HEIGHT * 2) / 3;
                 _display->showWrappedText(asciiCaption, 8, bandY, SCREEN_WIDTH - 16, SCREEN_HEIGHT - bandY - 8);
             }
-            // ĐO, chưa sửa. showWrappedText() cấp char lines[16][48] = 768B trên stack,
-            // trong khi TASK_STACK_MEDIA_PLAYER từng bị hạ 8192->6144 mà CHƯA HỀ ĐO
-            // (MEMORY.md §9.7). Đây là đường dùng stack sâu nhất của task này, nên đo
-            // ngay tại đây. Chỉ refactor sang 2 lượt nếu con số này < ~1024.
-            // Trên ESP-IDF hàm trả về BYTES (không phải words như FreeRTOS gốc) —
-            // đọc thẳng, đừng nhân 4.
+            // Measurement only: showWrappedText() puts 768B on the stack (MEMORY.md
+            // §9.7). Refactor to two passes only if this drops < ~1024. ESP-IDF returns
+            // BYTES here, not words.
             DLOG("[PLAY] stack hwm=%u", (unsigned)uxTaskGetStackHighWaterMark(nullptr));
         }
     } else {
         _state = PlaybackState::PLAYING;
-        ScreenLogger::setOverlayEnabled(false); // Tắt render log overlay lên LCD để giải phóng 100% SPI cho video
+        ScreenLogger::setOverlayEnabled(false); // the SPI bus is all for video
         uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
         _nextFrameDeadline = millis() + targetMs;
         _lastFrameSkipped = false;
@@ -337,23 +312,20 @@ bool MediaPlayer::playItem(const char* identifier) {
 void MediaPlayer::update() {
     if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
 
-    // Web đổi âm lượng giữa lúc đang phát: chỉ đổi đích, fillChunk() trượt dần tới đó.
+    // Volume changed mid-playback: fillChunk() ramps to the new target.
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
         _audio.setVolume(Settings::volume.load());
     }
 
     if (_state == PlaybackState::PLAYING) {
-        // 1. Tick audio trước decode (nạp đầy DMA 192ms)
+        // Top up the DMA before decoding
         _audio.tick();
 
         uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
 
-        // Đã trễ mốc của chính frame này => bỏ render nó.
-        // Cách cũ là giải mã dồn hai frame dính liền nhau không nghỉ: đọc NAND +
-        // JPEGDEC + đẩy nguyên frame qua SPI ở 100% CPU, tạo đỉnh dòng chồng đúng
-        // lúc ampli đang kéo dòng -> sụt áp -> rè tiếng + nhấp nháy đèn nền.
-        // Bỏ frame thì RẺ hơn giải mã, nên khi trễ máy tiêu thụ ÍT đi chứ không
-        // nhiều lên, mà nhịp hình vẫn bám đúng mốc thời gian của audio.
+        // Past this frame's deadline => skip rendering it. Decoding two frames back
+        // to back to catch up peaks the current while the amp draws (voltage sag,
+        // crackle, backlight flicker); skipping is cheaper and keeps A/V in sync.
         bool skipRender = !_lastFrameSkipped &&
                           (int32_t)(_nextFrameDeadline - millis()) < 0;
 
@@ -367,7 +339,7 @@ void MediaPlayer::update() {
         }
         _lastFrameSkipped = skipRender;
 
-        // 2. Tick audio ngay sau decode & render để bù lượng DMA vừa tiêu thụ
+        // Refill the DMA consumed during decode + render
         _audio.tick();
 
         _currentFrame++;
@@ -375,7 +347,7 @@ void MediaPlayer::update() {
             _storage->seek(_frameBaseOffset);
             _currentFrame = 0;
             _lastFrameSkipped = false;
-            // Restart audio khi video loop về đầu
+            // Restart audio when the video loops
             if (_audio.hasAudio()) {
                 _audio.loadFromStorage(_storage, _currentDataSize, _currentAudioSize);
                 _audio.prefill();
@@ -384,33 +356,26 @@ void MediaPlayer::update() {
             _nextFrameDeadline = millis() + targetMs;
         }
 
-        // Pacer cộng dồn mốc thay vì "ngủ nếu còn dư": I2S chạy bằng clock phần
-        // cứng và không bao giờ chờ, nên với cách cũ mỗi frame chậm đẩy video
-        // tụt lại vĩnh viễn so với audio. Cộng dồn thì một frame chậm được bù
-        // ngay ở frame sau, miễn là trung bình còn dưới ngân sách.
+        // Accumulated deadlines, not "sleep if time is left": I2S never waits, so a
+        // slow frame must be made up by the next one or video drifts behind audio.
         _nextFrameDeadline += targetMs;
         uint32_t now = millis();
         int32_t remain = (int32_t)(_nextFrameDeadline - now);
 
-        // Trễ quá 4 frame nghĩa là phần cứng không theo kịp thật sự; bám lại mốc
-        // hiện tại để khỏi chạy đuổi vô hạn (chỉ ăn CPU mà không đuổi kịp).
+        // More than 4 frames late: re-anchor to now instead of chasing forever.
         if (remain < -(int32_t)(targetMs * 4)) {
             _nextFrameDeadline = now + targetMs;
             remain = 0;
         }
 
-        // Luôn chừa lại một khoảng nghỉ: kể cả khi bỏ frame vẫn chưa bù đủ,
-        // không bao giờ được chạy hai lần decode dính liền nhau.
+        // Always leave an idle gap: never two decodes back to back.
         if (remain < (int32_t)FRAME_MIN_IDLE_MS) remain = (int32_t)FRAME_MIN_IDLE_MS;
 
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS((uint32_t)remain));
     } else if (_state == PlaybackState::SHOWING) {
-        // Ảnh tĩnh / tin nhắn tĩnh không có frame nào để decode, nhưng vẫn có
-        // thể có audio (voice/nhạc nền) đi kèm. Trước đây nhánh này không bao
-        // giờ tick audio (chỉ PLAYING mới tick) -> combo ảnh+voice bị câm tiếng
-        // dù NetworkManager đã tải đúng. Tick định kỳ ở đây đủ nhanh so với độ
-        // sâu DMA (~192ms) để không bao giờ bị underrun.
+        // A still image may carry audio: without this tick it would stay silent.
+        // A 50ms period is within the DMA depth (96-192ms).
         if (_audio.hasAudio()) _audio.tick();
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -429,12 +394,11 @@ void MediaPlayer::stop() {
     _state = PlaybackState::IDLE;
     _alarmMusic = false;
     _audio.stop();
-    // Giải phóng _jpegBuffer để hoàn trả 32KB cho heap lúc Standby / TLS Handshake
+    // Return the 32KB buffer and the 17.9KB decoder to the heap for the TLS handshake
     if (_jpegBuffer != nullptr) {
         free(_jpegBuffer);
         _jpegBuffer = nullptr;
     }
-    // ...và 17,9KB của bộ giải mã, cùng lý do (MediaPlayer.h)
     if (_jpeg != nullptr) {
         delete _jpeg;
         _jpeg = nullptr;
@@ -461,7 +425,7 @@ bool MediaPlayer::startAlarmMusic(const char* path, uint8_t volume) {
     if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
     _audio.setVolume(volume, true);
     bool ok = _audio.isInitialized() || _audio.init();
-    // Nhạc báo thức chỉ cần I2S DMA (~24KB) + 3KB đệm, không cấp bộ giải mã JPEG.
+    // Alarm music needs only I2S DMA + a 3KB buffer, no JPEG decoder.
     if (ok) ok = _audio.loadFromFile(SdStore::card(), path, true);
     if (ok) {
         _audio.prefill();
@@ -493,15 +457,11 @@ int8_t MediaPlayer::getCurrentSlot() const {
 bool MediaPlayer::decodeOneFrame(bool skipRender) {
     if (_jpegBuffer == nullptr || _jpeg == nullptr || _storage == nullptr) return false;
 
-    // Serial.printf("[MediaPlayer] decodeOneFrame: slot=%d state=%d totalFrames=%u baseOffset=%lu readHeader=%d\n",
-    //               _currentSlot, (int)_state, _totalFrames, (unsigned long)_frameBaseOffset,
-    //               _readFrameSizeHeader ? 1 : 0);
-
-    // XỬ LÝ 1: Tệp SLBX Raw RGB565 (Render trực tiếp khung hình pixel lên LCD không qua JPEGDEC)
+    // Case 1: SLBX raw RGB565, pushed straight to the LCD
     if (_isSlbxRgb565) {
         uint32_t bytesPerLine = _slbxWidth * 2;
         uint32_t linesPerChunk = JPEG_BUFFER_SIZE / bytesPerLine;
-        if (linesPerChunk == 0) linesPerChunk = 1; // Safeguard
+        if (linesPerChunk == 0) linesPerChunk = 1;
 
         int x = (SCREEN_WIDTH > _slbxWidth) ? (SCREEN_WIDTH - _slbxWidth) / 2 : 0;
         int y = (SCREEN_HEIGHT > _slbxHeight) ? (SCREEN_HEIGHT - _slbxHeight) / 2 : 0;
@@ -512,17 +472,15 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
             uint32_t linesToRead = (remainingLines > linesPerChunk) ? linesPerChunk : remainingLines;
             uint32_t bytesToRead = linesToRead * bytesPerLine;
 
-            // Đọc NAND trước (SPI chưa bị khóa bởi LCD)
             int readBytes = _storage->readData(_jpegBuffer, bytesToRead);
             if ((uint32_t)readBytes < bytesToRead) {
                 DLOG("[PLAY] RGB short read");
                 return false;
             }
 
-            // Cùng lý do như nhánh JPEG bên dưới: nạp DMA trước khi khoá bus.
+            // Top up the DMA before locking the bus (see the JPEG branch).
             _audio.tick();
 
-            // Lấy SPI mutex chỉ trong lúc push lên LCD
             if (!skipRender) {
                 if (!_display->acquireSPI()) return false;
                 _display->pushImage(x, currentY, _slbxWidth, linesToRead, (const uint16_t*)_jpegBuffer);
@@ -536,11 +494,10 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
         return true;
     }
 
-    // XỬ LÝ 2: Tệp JPEG / MJPEG (Giải mã qua JPEGDEC)
+    // Case 2: JPEG / MJPEG
     uint32_t jpegSize = 0;
 
     if (_readFrameSizeHeader) {
-        // 1. Đọc kích thước khung hình JPEG (4 bytes header)
         uint8_t sizeBytes[4] = {0};
         int sizeRead = _storage->readData(sizeBytes, sizeof(sizeBytes));
         if (sizeRead < 4) {
@@ -570,7 +527,6 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
         if (jpegSize > JPEG_BUFFER_SIZE) jpegSize = JPEG_BUFFER_SIZE;
     }
 
-    // 2. Đọc toàn bộ dữ liệu JPEG vào RAM buffer trong 1 lệnh duy nhất
     int readBytes = _storage->readData(_jpegBuffer, jpegSize);
     if ((uint32_t)readBytes < jpegSize) {
         if (_display) {
@@ -582,30 +538,24 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
         return false;
     }
 
-    // Đã đọc xong dữ liệu nên con trỏ file đã đúng vị trí frame kế; thoát sớm
-    // để bỏ đúng phần đắt nhất (JPEGDEC + đẩy full frame qua SPI).
+    // The cursor already sits at the next frame: skip only the decode + push.
     if (skipRender) return true;
 
-    // Nạp DMA đầy lại NGAY TRƯỚC đoạn mù dài nhất. update() chỉ tick hai đầu
-    // frame, nên giữa hai lần đó DMA không nhận byte nào trong suốt (đọc SD +
-    // giải mã + đẩy màn hình). DMA chỉ cầm cự 192ms ở file 8kHz và 96ms ở 16kHz
-    // (12 × 512 khung, phần cứng chạy x AUDIO_OVERSAMPLE) -> cạn là nghe rẹt.
-    // Đặt ở ĐÂY chứ không sau acquireSPI(): tick() đọc thẻ nên phải nằm ngoài
-    // giao dịch hiển thị, mutex không đệ quy.
+    // Top up the DMA right before the longest stretch without ticks (it lasts only
+    // 96ms at 16kHz). BEFORE acquireSPI(): tick() reads the card and the mutex is
+    // not recursive.
     _audio.tick();
 
-    // 3. Khóa bus SPI và giải mã trực tiếp lên màn hình
     if (!_display->acquireSPI()) return false;
 
     if (_jpeg->openRAM(_jpegBuffer, jpegSize, jpegDrawCallback)) {
         _jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
         LGFX* tft = _display->getTFT();
 
-        tft->startWrite(); // Khóa giao dịch SPI với ST7789 để đẩy toàn bộ block MCU siêu mượt
+        tft->startWrite(); // one SPI transaction for all MCU blocks
         int decodeRes = _jpeg->decode(0, 0, 0);
         tft->endWrite();
 
-        // Serial.printf("[MediaPlayer] JPEG decode result=%d size=%lu\n", decodeRes, (unsigned long)jpegSize);
         _jpeg->close();
     } else {
         DLOG("[PLAY] ERR: openRAM");

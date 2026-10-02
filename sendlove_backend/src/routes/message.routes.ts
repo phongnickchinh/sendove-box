@@ -10,16 +10,16 @@ export default function messageRoutes(controller: MessageController) {
 
   router.use(requireAuth);
 
-  // Sender: Bước 1 — Yêu cầu tạo message, nhận upload URLs (Rate Limited + Validated)
+  // Sender, step 1 — request a message and get upload URLs (rate limited + validated)
   router.post('/initiate', requireRole('sender'), messageSendRateLimit, validate(initiateMessageSchema), controller.initiateMessage);
 
-  // Sender: Bước 2 — Upload xong, xác nhận ghi message vào RTDB (Validated)
+  // Sender, step 2 — uploads done; confirm and write the message to RTDB (validated)
   router.post('/confirm', requireRole('sender'), validate(confirmMessageSchema), controller.confirmMessage);
 
-  // Sender & Receiver: Xem lịch sử tin nhắn
+  // Sender & receiver: message history
   router.get('/', requireRole(['sender', 'receiver']), controller.getMessages);
 
-  // Sender & Receiver: Xem chi tiết 1 tin nhắn
+  // Sender & receiver: one message's details
   router.get('/:msgId', requireRole(['sender', 'receiver']), controller.getMessageDetails);
 
   return router;

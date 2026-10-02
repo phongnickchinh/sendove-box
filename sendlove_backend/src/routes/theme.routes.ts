@@ -4,9 +4,8 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role-guard.middleware';
 
 /**
- * /boxes/:boxId/theme — giao diện màn chờ. Chỉ người nhận (người giữ hộp) sửa
- * được, giống báo thức. Body được kiểm tra trong ThemeService.sanitizeWidgets
- * (mảng lồng nhau, validate() phẳng không kiểm được).
+ * /boxes/:boxId/theme — standby-screen theme, receiver only. The body is
+ * validated in ThemeService.sanitizeWidgets (validate() can't check nested arrays).
  */
 export default function themeRoutes(controller: ThemeController) {
   const router = Router({ mergeParams: true });

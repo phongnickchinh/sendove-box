@@ -3,25 +3,19 @@
 
 #include <Arduino.h>
 
-// ============================================================================
-// SdLog — nhật ký bền trên thẻ + đẩy đoạn cuối lên cloud khi có lỗi (đề xuất #2)
-// ============================================================================
-// ScreenLogger::log() gọi add() cho MỌI dòng DLOG. add() chỉ chép vào vòng RAM (không
-// đụng thẻ): DLOG được gọi từ mọi task, có chỗ đang giữ spiMutex, ghi thẻ ở đó là
-// deadlock (quy tắc R1 của SDCardManager).
-//
-// flush() ghi các dòng chưa ghi xuống /sys/log/log0.txt, quá 64KB thì đổi sang log1.txt.
-// Gọi từ nơi KHÔNG giữ spiMutex: vòng STANDBY của Task_MediaPlayer và trước khi ngủ.
-//
-// takeTail(): đoạn cuối log để đẩy lên status/log_tail. Chỉ trả khi có dòng lỗi mới từ
-// lần lấy trước, hoặc lần đầu sau boot (để thấy `[BOOT] reset=` của lần reboot vừa rồi).
-// ============================================================================
+// SdLog — a persistent log on the card, with its tail pushed to the cloud on
+// errors (MEMORY.md §29, proposal #2).
+// add() is called for EVERY DLOG line and only copies into a RAM ring: DLOG may run
+// while spiMutex is held, and touching the card there would deadlock (rule R1 in SDCardManager.cpp).
+// flush() writes to /sys/log/log0.txt (rotating at 64KB); call it where spiMutex is
+// NOT held. takeTail() returns data only after a new error line or the first time
+// after boot.
 
 namespace SdLog {
 
 void add(const char* line);
 void flush();
-/// true + chép đoạn cuối (các dòng cách nhau '\n') vào out nếu có gì mới đáng đẩy.
+/// true + copies the tail ('\n'-separated lines) into out when there is something new worth pushing.
 bool takeTail(char* out, size_t maxLen);
 
 }  // namespace SdLog

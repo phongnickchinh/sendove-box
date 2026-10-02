@@ -7,8 +7,7 @@ import { validate, createAlarmSchema, updateAlarmSchema } from '../middleware/va
 export default function alarmRoutes(controller: AlarmController) {
   const router = Router({ mergeParams: true });
 
-  // Note: role guard should allow both sender and receiver to list alarms, but maybe only receiver creates
-  // Or based on requirements, "Receiver tự cài" so Receiver role for all
+  // Alarms are set by the receiver only, so every route requires the receiver role.
   router.use(requireAuth);
   router.use(requireRole('receiver'));
 

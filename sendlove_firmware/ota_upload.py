@@ -3,19 +3,19 @@
 OTA Push Upload Script for Sendlove Box (ESP32-C3).
 
 Usage:
-  python ota_upload.py --host 192.168.1.100    # IP hien tren man hinh che do OTA (KHUYEN DUNG)
-  python ota_upload.py                         # mDNS sendlovebox.local (tren Windows hay khong phan giai duoc)
+  python ota_upload.py --host 192.168.1.100    # IP shown on the OTA mode screen (RECOMMENDED)
+  python ota_upload.py                         # mDNS sendlovebox.local (often fails to resolve on Windows)
   python ota_upload.py --bin path/to/firmware.bin  # Specific firmware binary file
 
-Truoc khi chay: tren hop GIU 3s, nha, GIU 3s, nha, roi GIU 6s de vao che do OTA. Web server chi
-ton tai trong che do do (tu 2026-09-21 khong con bat bang co cloud nua).
+Before running: on the box HOLD 3s, release, HOLD 3s, release, then HOLD 6s to enter OTA mode.
+The web server only exists in that mode (it is not enabled by a cloud flag).
 
 Workflow:
   1. Read firmware binary, compute MD5
   2. POST /api/ota/begin  -> ESP32 prepares flash partition
   3. POST /api/ota/upload -> Send firmware binary
   4. ESP32 automatically restarts with new firmware
-  5. Ban moi phai song 60s moi duoc xac nhan; reset truoc do thi hop tu quay ve ban cu
+  5. The new build must run 60s before it is confirmed; a reset before that rolls the box back
 """
 
 import argparse
@@ -32,7 +32,7 @@ except ImportError:
     sys.exit(1)
 
 # Defaults
-# Can ".local" thi moi di qua mDNS. Ten tran "sendlovebox" khong phan giai duoc.
+# ".local" is required to go through mDNS. The bare name "sendlovebox" does not resolve.
 DEFAULT_HOST = "sendlovebox.local"
 DEFAULT_PORT = 80
 DEFAULT_BIN  = ".pio/build/esp32-c3-devkitm-1/firmware.bin"
@@ -66,7 +66,7 @@ def ota_upload(host: str, port: int, bin_path: str):
     print(f"  MD5  : {fw_md5}")
     print(f"============================================")
 
-    # Step 1: POST /api/ota/begin. Retry cho toi khi nguoi dung dua hop vao che do OTA.
+    # Step 1: POST /api/ota/begin. Retry until the user puts the box into OTA mode.
     max_wait_time = 310  # Wait up to 310 seconds (> 5 minutes)
     start_time = time.time()
     retry_interval = 3   # Retry every 3 seconds

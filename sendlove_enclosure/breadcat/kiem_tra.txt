@@ -1,4 +1,4 @@
-body: canh_hong=0 manh=1 the_tich=23.5cm3
+body: canh_hong=0 manh=1 the_tich=23.6cm3
 base: canh_hong=0 manh=1 the_tich=5.6cm3
 ear_R: canh_hong=0 manh=1 the_tich=0.8cm3
 ear_L: canh_hong=0 manh=1 the_tich=0.8cm3

@@ -1,13 +1,13 @@
-02:21.781  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_doc.png'
-02:22.766  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_ngang.png'
-02:23.063  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_no_tung.png'
-02:23.313  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_mat_sau.png'
-02:23.563  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_day.png'
+03:08.171  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_doc.png'
+03:09.187  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_cat_ngang.png'
+03:09.500  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_no_tung.png'
+03:09.828  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_mat_sau.png'
+03:10.250  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\ky_thuat_day.png'
 HEART z 43.7..63.6
 BBOX inner [-24.38, 24.38, 1.9, 60.1, -12.1, 50.47]
-BUILD 130 s
+BUILD 169 s
 REPORT
-body: canh_hong=0 manh=1 the_tich=23.5cm3
+body: canh_hong=0 manh=1 the_tich=23.6cm3
 base: canh_hong=0 manh=1 the_tich=5.6cm3
 ear_R: canh_hong=0 manh=1 the_tich=0.8cm3
 ear_L: canh_hong=0 manh=1 the_tich=0.8cm3
@@ -31,38 +31,12 @@ Info: File exported successfully
 Info: File exported successfully
 Info: File exported successfully
 Info: Saved as "breadcat_vo.blend"
-SAVED 135 s
-DONE 140 s
+SAVED 176 s
+DONE 183 s
 Blender 5.2.1 LTS (hash 9e2066aef7ef built 2026-08-25 02:38:20)
-Timer 'STL Export' took 159.37 ms
-Timer 'STL Export' took 7.67 ms
-Timer 'STL Export' took 15.04 ms
-Timer 'STL Export' took 14.63 ms
-
-Blender quit
-P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:206: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
-  m = bpy.data.materials.new("toast"); m.use_nodes = True
-P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:235: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
-  m = bpy.data.materials.new(name); m.use_nodes = True
-P:\coddd\sendove-box\sendlove_enclosure\breadcat\breadcat.py:279: DeprecationWarning: 'World.use_nodes' is expected to be removed in Blender 6.0
-  w = bpy.data.worlds.new("w"); sc.world = w; w.use_nodes = True
-00:17.579  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_v34.png'
-00:28.110  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_front.png'
-00:39.000  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_side.png'
-00:51.500  render           | Saved: 'P:\coddd\sendove-box\sendlove_enclosure\breadcat\shape_back.png'
-HEART z 43.7..63.6
-DIMS 51.0 74.5 63.6
-RONG z=0.3: 48.03
-RONG z=3: 50.75
-RONG z=5: 51.01
-RONG z=8: 50.89
-RONG z=10: 50.67
-RONG z=20: 49.15
-RONG z=30: 47.60
-RONG z=38: 46.01
-RONG z=42: 44.29
-RONG z=44: 42.87
-Info: Saved as "breadcat_shape.blend"
-Blender 5.2.1 LTS (hash 9e2066aef7ef built 2026-08-25 02:38:20)
+Timer 'STL Export' took 127.82 ms
+Timer 'STL Export' took 10.91 ms
+Timer 'STL Export' took 19.49 ms
+Timer 'STL Export' took 21.33 ms
 
 Blender quit

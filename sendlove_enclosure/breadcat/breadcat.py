@@ -314,9 +314,12 @@ BOSS_D, PILOT_D = 5.0, 1.7   # vit tu ren M2
 BAT = (-15.0, 15.0, 9.5, 59.5, 2.2, 10.2)                  # pin 30x50x8 nam tren tam day
 SPK = dict(t=7.1, l=30.0, h=20.0, y0=20.0, z0=17.3)         # loa dung sat thanh phai
 TOUCH = dict(w=8.8, l=12.7, t=0.4, yc=36.0, wall=1.0, clr=0.3)
-USB = dict(x=-4.0, z=PCB_Z + 1.6 + 1.6, plug=(12.5, 7.0), slot=(13.1, 7.6))   # than dau cam 12.5x7 GIA DINH
+# slot = vo kim loai cong 8.94 x 3.26 + khe 0.33 / 0.37 moi ben; chamfer = vat mep trong dan huong cong khi lap; plug = than dau cam GIA DINH (nam ngoai vo)
+USB = dict(x=-4.0, z=PCB_Z + 1.6 + 1.6, plug=(12.5, 7.0), slot=(9.6, 4.0), chamfer=0.8)
 D2 = dict(x=-14.0, d=2.0)
-SW = dict(x=10.0, z=PCB_Z + 1.6 + 1.8, slot=(6.0, 3.0))
+# PCM12SMTR (datasheet C&K): than 6.7x2.6x1.4 dat tren mat PCB; can gat rong 1.3, nhô 1.5, hanh trinh 1.5 -> khe vuong 3.4 x 2.0 (can + khe 0.3 moi ben)
+# recess = hom vuong o mat ngoai (rong, cao, sau) de dau can thò sat mat ngoai (thanh con T - sau)
+SW = dict(x=10.0, z=PCB_Z + 1.6 + 0.7, slot=(3.4, 2.0), recess=(5.0, 3.4, 1.0))
 LED = dict(x=17.0, y=3.5, bore=4.0, z0=41.0, z1=47.0)       # lo 4 mm cho LED 3 mm co vanh / LED han san day
 
 def link(ob, coll):
@@ -362,14 +365,17 @@ def cone(name, p0, r0, p1, r1, seg=32):
     me = bpy.data.meshes.new(name); bm.to_mesh(me); bm.free()
     ob = bpy.data.objects.new(name, me); bpy.context.scene.collection.objects.link(ob); return ob
 
-def slot_y(name, x, z, w, h, y0, y1, seg=16):
-    """lo oval (rong w, cao h) xuyen theo truc y"""
+def slot_pts(x, z, w, h, y, seg=16):
     r = h / 2; pts = []
     for cx, a0 in ((x - w / 2 + r, math.pi / 2), (x + w / 2 - r, -math.pi / 2)):
         for i in range(seg + 1):
             a = a0 + math.pi * i / seg
-            pts += [(cx + r * math.cos(a), y, z + r * math.sin(a)) for y in (y0, y1)]
-    return hull(name, pts)
+            pts.append((cx + r * math.cos(a), y, z + r * math.sin(a)))
+    return pts
+
+def slot_y(name, x, z, w, h, y0, y1, seg=16):
+    """lo oval (rong w, cao h) xuyen theo truc y"""
+    return hull(name, slot_pts(x, z, w, h, y0, seg) + slot_pts(x, z, w, h, y1, seg))
 
 def ray_hit(ob, origin, direction):
     ok, loc, n, i = ob.ray_cast(Vector(origin), Vector(direction).normalized())
@@ -499,7 +505,12 @@ def build_parts():
     # ---- mat sau: USB-C, cong tac, LED sac
     yr = L - T - 1.0
     boolean(body, slot_y("usb", USB['x'], USB['z'], USB['slot'][0], USB['slot'][1], yr, L + 1))
-    boolean(body, slot_y("sw", SW['x'], SW['z'], SW['slot'][0], SW['slot'][1], yr, L + 1))
+    ch = USB['chamfer']   # phễu vat 45 do o mat trong thanh sau (y = L - T)
+    boolean(body, hull("usb_ch", slot_pts(USB['x'], USB['z'], USB['slot'][0] + 2 * ch, USB['slot'][1] + 2 * ch, L - T - 0.01)
+                       + slot_pts(USB['x'], USB['z'], USB['slot'][0], USB['slot'][1], L - T + ch)))
+    sw, rc = SW['slot'], SW['recess']
+    boolean(body, box("sw", SW['x'] - sw[0] / 2, SW['x'] + sw[0] / 2, yr, L + 1, SW['z'] - sw[1] / 2, SW['z'] + sw[1] / 2))
+    boolean(body, box("sw_rec", SW['x'] - rc[0] / 2, SW['x'] + rc[0] / 2, L - rc[2], L + 1, SW['z'] - rc[1] / 2, SW['z'] + rc[1] / 2))
     boolean(body, cyl("d2", (D2['x'], yr, USB['z']), (D2['x'], L + 1, USB['z']), D2['d'] / 2, 20))
     # ---- lo LED tai xuyen than
     for s in (1, -1):
@@ -632,8 +643,8 @@ if STAGE == "mech":
         hit_b = collides(body, b); hit_p = collides(base, b)
         cl = min(clearance(body, b), clearance(base, b))
         rep.append(f"{k}: cham_than={hit_b} cham_day={hit_p} khe_min={cl:.2f}")
-    # dau cam USB-C (than nhua 12.5x7 GIA DINH) cam tu ngoai vao
-    plug = slot_y("plug", USB['x'], USB['z'], USB['plug'][0], USB['plug'][1], L - T - 0.5, L + 8)
+    # dau cam USB-C (than nhua 12.5x7 GIA DINH) tua len mat ngoai thanh sau, khong vao lo
+    plug = slot_y("plug", USB['x'], USB['z'], USB['plug'][0], USB['plug'][1], L + 0.05, L + 8)
     rep.append(f"usb_dau_cam: cham_than={collides(body, plug)}")
     # LED 3 mm (cao 5.3) nho len tu mieng lo vao hoc tai
     for s, ek in ((1, "ear_R"), (-1, "ear_L")):

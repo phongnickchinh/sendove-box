@@ -1280,6 +1280,24 @@ bool NetworkManager::syncFirebaseAlarms() {
     return true;
 }
 
+// Storage object path -> download URL ('/' encoded as %2F).
+static String storageDownloadUrl(String path) {
+    path.replace("/", "%2F");
+    return "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + path + "?alt=media";
+}
+
+// A message's media field: an absolute URL, gs://bucket/path or a bare storage path.
+static String resolveMediaUrl(const String& raw) {
+    if (raw.startsWith("http")) return raw;
+    String path = raw;
+    if (path.startsWith("gs://")) {
+        int slashIdx = path.indexOf('/', 5);
+        if (slashIdx > 0) path = path.substring(slashIdx + 1);
+    }
+    if (path.startsWith("/")) path.remove(0, 1);
+    return storageDownloadUrl(path);
+}
+
 NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, const char* dstPath,
                                                      uint32_t size, uint32_t crc) {
     SDCardManager* card = SdStore::card();
@@ -1299,13 +1317,7 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
     }
 
     if ((uint32_t)have < size) {
-        // Storage path -> download URL ('/' encoded as %2F)
-        String url = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/";
-        for (const char* p = storagePath; *p; p++) {
-            if (*p == '/') url += "%2F";
-            else url += *p;
-        }
-        url += "?alt=media";
+        String url = storageDownloadUrl(storagePath);
 
         WiFiClientSecure client;
         configureTlsClient(client);
@@ -1614,16 +1626,7 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                                            IStorageProvider* storage, const char* writeSlotId) {
     if (rawVoiceUrl.length() == 0) return true;
 
-    String voiceUrl = rawVoiceUrl;
-    if (!voiceUrl.startsWith("http")) {
-        if (voiceUrl.startsWith("gs://")) {
-            int si = voiceUrl.indexOf('/', 5);
-            if (si > 0) voiceUrl = voiceUrl.substring(si + 1);
-        }
-        if (voiceUrl.startsWith("/")) voiceUrl.remove(0, 1);
-        voiceUrl.replace("/", "%2F");
-        voiceUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + voiceUrl + "?alt=media";
-    }
+    String voiceUrl = resolveMediaUrl(rawVoiceUrl);
 
     DLOG("[NET] voice/bg_music found, downloading...");
     HTTPClient httpAudio;
@@ -1707,6 +1710,26 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
         httpAudio.end();
     }
     return ok;
+}
+
+// A message's "timestamp" (number or numeric string); 0 when missing.
+static uint64_t messageTimestamp(JsonObjectConst msg) {
+    JsonVariantConst v = msg["timestamp"];
+    if (v.isNull()) return 0;
+    if (v.is<uint64_t>()) return v.as<uint64_t>();
+    if (v.is<double>()) return (uint64_t)v.as<double>();
+    if (v.is<const char*>()) return strtoull(v.as<const char*>(), nullptr, 10);
+    return v.as<uint64_t>();
+}
+
+// Same, but a message without a timestamp gets NTP time, else millis().
+static uint64_t messageTimestampOrNow(JsonObjectConst msg) {
+    uint64_t ts = messageTimestamp(msg);
+    if (ts == 0) {
+        time_t nowSec = time(nullptr);
+        ts = (nowSec > MIN_VALID_EPOCH) ? ((uint64_t)nowSec * 1000ULL) : (uint64_t)millis();
+    }
+    return ts;
 }
 
 bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
@@ -1803,40 +1826,13 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
 
     // Oldest first
     std::sort(msgList.begin(), msgList.end(), [](const JsonObject& a, const JsonObject& b) {
-        uint64_t tsA = 0, tsB = 0;
-        JsonVariantConst vA = a["timestamp"];
-        if (!vA.isNull()) {
-            if (vA.is<uint64_t>()) tsA = vA.as<uint64_t>();
-            else if (vA.is<double>()) tsA = (uint64_t)vA.as<double>();
-            else if (vA.is<const char*>()) tsA = strtoull(vA.as<const char*>(), nullptr, 10);
-            else tsA = vA.as<uint64_t>();
-        }
-        JsonVariantConst vB = b["timestamp"];
-        if (!vB.isNull()) {
-            if (vB.is<uint64_t>()) tsB = vB.as<uint64_t>();
-            else if (vB.is<double>()) tsB = (uint64_t)vB.as<double>();
-            else if (vB.is<const char*>()) tsB = strtoull(vB.as<const char*>(), nullptr, 10);
-            else tsB = vB.as<uint64_t>();
-        }
-        return tsA < tsB;
+        return messageTimestamp(a) < messageTimestamp(b);
     });
 
     uint8_t unreadInMem = storage ? storage->getUnreadCount() : 0;
     uint32_t newCloudMsg = 0;
     for (JsonObject msg : msgList) {
-        uint64_t ts = 0;
-        JsonVariantConst tsVar = msg["timestamp"];
-        if (!tsVar.isNull()) {
-            if (tsVar.is<uint64_t>()) ts = tsVar.as<uint64_t>();
-            else if (tsVar.is<double>()) ts = (uint64_t)tsVar.as<double>();
-            else if (tsVar.is<const char*>()) ts = strtoull(tsVar.as<const char*>(), nullptr, 10);
-            else ts = tsVar.as<uint64_t>();
-        }
-        if (ts == 0) {
-            time_t nowSec = time(nullptr);
-            ts = (nowSec > 1600000000) ? ((uint64_t)nowSec * 1000ULL) : (uint64_t)millis();
-        }
-        if (ts > lastTs) newCloudMsg++;
+        if (messageTimestampOrNow(msg) > lastTs) newCloudMsg++;
     }
     _numOfNewMsg = unreadInMem + newCloudMsg;
     DLOG("[NET] msg: cloud=%d mem=%d new=%d", newCloudMsg, unreadInMem, _numOfNewMsg);
@@ -1861,26 +1857,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     WiFi.setSleep(false);
 
     for (JsonObject msg : msgList) {
-        uint64_t ts = 0;
-        JsonVariantConst tsVar = msg["timestamp"];
-        if (!tsVar.isNull()) {
-            if (tsVar.is<uint64_t>()) {
-                ts = tsVar.as<uint64_t>();
-            } else if (tsVar.is<double>()) {
-                ts = (uint64_t)tsVar.as<double>();
-            } else if (tsVar.is<const char*>()) {
-                ts = strtoull(tsVar.as<const char*>(), nullptr, 10);
-            } else {
-                ts = tsVar.as<uint64_t>();
-            }
-        }
-
-        // No timestamp: fall back to NTP time, else millis()
-        if (ts == 0) {
-            time_t nowSec = time(nullptr);
-            ts = (nowSec > 1600000000) ? ((uint64_t)nowSec * 1000ULL) : (uint64_t)millis();
-        }
-
+        uint64_t ts = messageTimestampOrNow(msg);
         if (ts <= lastTs) {
             continue;
         }
@@ -1943,18 +1920,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         bool messageSuccess = false;
 
         if (rawMediaUrl.length() > 0) {
-            String fullUrl = rawMediaUrl;
-            
-            // Relative path or gs:// -> Storage download URL
-            if (!fullUrl.startsWith("http")) {
-                if (fullUrl.startsWith("gs://")) {
-                    int slashIdx = fullUrl.indexOf('/', 5);
-                    if (slashIdx > 0) fullUrl = fullUrl.substring(slashIdx + 1);
-                }
-                if (fullUrl.startsWith("/")) fullUrl.remove(0, 1);
-                fullUrl.replace("/", "%2F");
-                fullUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + fullUrl + "?alt=media";
-            }
+            String fullUrl = resolveMediaUrl(rawMediaUrl);
 
             _isDownloadingMedia = true;
             DLOG("[NET] Downloading media...");

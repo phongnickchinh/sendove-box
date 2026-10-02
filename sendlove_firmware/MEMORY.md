@@ -2506,7 +2506,8 @@ nặng). Khoảng cách còn lại ~4 dB RMS, ~11 dB ở dải 2 kHz.
 ta trong `lib/SD/src/sd_diskio.cpp`; phần còn lại của `lib/SD` là thư viện ngoài, không đụng),
 `platformio.ini`, `partitions_ota.csv`, `ota_upload.py` được rút gọn và dịch sang tiếng Anh.
 **Không đổi dòng code nào**, không đổi chuỗi log / chuỗi hiển thị / thông báo `#error` / nội dung
-trang portal trong `captive_portal_html.h`. Không refactor firmware.
+trang portal trong `captive_portal_html.h`. Không refactor firmware. (Đúng cho lượt một và hai;
+lượt ba có gộp code trong `NetworkManager.cpp`, xem bên dưới.)
 
 Vài comment vốn đã sai so với code thì sửa lại cho đúng luôn (chỉ sửa chữ, không sửa code):
 `MAX_MEDIA_BYTES` (comment còn nói 5,5 MB trong khi giá trị là 25,5 MB), `SD_SPI_FREQ_HZ`
@@ -2540,6 +2541,37 @@ do không hiển nhiên, cảnh báo "do NOT", con số cần thiết và tham c
 Xác minh như trên (so sau khi bỏ comment + `pio run`), số dòng lại lệch thêm một lần nữa.
 Comment của `addStorageAuthHeader()` từng ghi "chưa verify được" đã sửa theo §19 (đã đo thật).
 
-**Ghi nhận, chưa làm (cần user quyết).** `checkAndDownloadNewMessages()` lặp đoạn đọc `timestamp`
-4 lần; đoạn đổi đường dẫn Storage → URL lặp ở 3 hàm (`downloadFile`, `downloadVoiceSegment`,
-`checkAndDownloadNewMessages`); `dumpHexBytes()` trong `MediaPlayer.cpp` là hàm rỗng. Gộp lại được nhưng là sửa code firmware nên không làm trong đợt "chỉ đổi hình thức" này.
+**Lượt ba cùng ngày — user duyệt 4 việc còn treo.**
+- Thư mục `trash can wait for user bring to throw away/` đã **xoá hẳn** (commit `7c78067`). Cần lại
+  file nào: `git checkout 28ff9b9 -- "trash can wait for user bring to throw away/<đường dẫn>"`.
+- `compile_commands.json` và `.firebase/` không còn được track (đã vào `.gitignore`). clangd cần
+  file này thì sinh lại bằng `pio run -t compiledb`.
+- Backend gỡ `@ffmpeg-installer/ffmpeg`, `fluent-ffmpeg`, `sharp` (không ai import).
+- **Gộp code lặp trong `NetworkManager.cpp`** — thay đổi code firmware đầu tiên của đợt này, **đã
+  biên dịch (`pio run`), CHƯA nạp máy thật**:
+  - `messageTimestamp()` đọc `timestamp` (số / số thực / chuỗi số), dùng cho `std::sort`;
+    `messageTimestampOrNow()` thêm bước lùi về giờ NTP hoặc `millis()` khi thiếu, dùng cho vòng đếm
+    và vòng tải. Bước lùi **cố ý không** nằm trong hàm mà comparator gọi (đúng như code cũ).
+  - `resolveMediaUrl()` (giữ nguyên URL `http…`, bỏ `gs://bucket/`, bỏ `/` đầu) dùng cho media và
+    voice; `storageDownloadUrl()` (mã hoá `/` → `%2F` + tiền tố bucket + `?alt=media`) dùng thêm cho
+    `downloadFile()`. `downloadFile()` **không** đi qua bước chuẩn hoá, như trước.
+  - Xác minh: test trên máy tính so đoạn cũ với hàm mới bằng ArduinoJson thật, 20 dạng `timestamp`
+    × 4 mốc đồng hồ, không lệch; firmware nhỏ đi khoảng 1 KB; một agent review đối chiếu từng
+    chỗ gọi với code cũ (kể cả `WString.cpp` và ArduinoJson 7.4.3) và kết luận tương đương. Cần thử trên hộp: một tin video kèm
+    voice, một tin tĩnh có nhạc nền, và một lần tải theme hoặc nhạc báo thức (đi qua đủ 3 chỗ dựng
+    URL và cả hai vòng lặp `timestamp`).
+- **Gotcha phát hiện khi review — `lib_deps` không ghim phiên bản LovyanGFX** (`^1.1.12`). Một lần
+  cài mới (worktree này, và cả CI) kéo về **1.2.31**: image `firmware.bin` thành 1.931.472 byte,
+  **lớn hơn phân vùng app** 1.900.544 byte, trong khi `pio run` vẫn báo SUCCESS "95,4%" (nó đếm
+  section của ELF, không đếm image). Bản 1.2.31 link thêm `fs_bitstream_rle` (~227 KB) và bảng
+  firmware cảm ứng GSL (~100 KB). Với **1.2.26** (bản đang nằm trong `.pio/libdeps` của checkout
+  chính, cũng là bản §28 đã đối chiếu) image là 1.383.216 byte, Flash 68,7%. **Đừng nạp bản build
+  từ một lần cài thư viện mới** cho tới khi ghim `lovyan03/LovyanGFX@1.2.26` trong `platformio.ini`
+  — việc ghim chưa làm, chờ user quyết.
+
+**Còn lại, chưa làm (cần user quyết).** `dumpHexBytes()` trong `MediaPlayer.cpp` là hàm rỗng.
+
+> Ghi chú cũ của lượt một, giữ lại làm lịch sử (hai việc đầu **đã làm ở lượt ba**):
+> `checkAndDownloadNewMessages()` lặp đoạn đọc `timestamp` 4 lần; đoạn đổi đường dẫn Storage → URL
+> lặp ở 3 hàm (`downloadFile`, `downloadVoiceSegment`, `checkAndDownloadNewMessages`);
+> `dumpHexBytes()` là hàm rỗng.

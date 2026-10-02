@@ -2,11 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.heartbeatSchema = exports.registerDeviceSchema = exports.updateAlarmSchema = exports.createAlarmSchema = exports.updateProfileSchema = exports.confirmMessageSchema = exports.initiateMessageSchema = exports.updateBoxConfigSchema = exports.updateWifiSchema = exports.pairBoxSchema = exports.validate = void 0;
 const error_handler_middleware_1 = require("./error-handler.middleware");
-/**
- * Validation middleware factory.
- * Only fields declared in the schema survive in req.body (whitelist);
- * undeclared fields are dropped → no mass assignment.
- */
+/** Validation middleware factory. Whitelist: fields not in the schema are dropped from req.body. */
 const validate = (schema) => {
     return (req, _res, next) => {
         const errors = [];
@@ -78,9 +74,7 @@ const validate = (schema) => {
     };
 };
 exports.validate = validate;
-// ==========================================
-// Predefined Validation Schemas
-// ==========================================
+// ---- Predefined validation schemas ----
 /** POST /boxes/pair */
 exports.pairBoxSchema = {
     pairingCode: { type: 'string', required: true, pattern: /^[SR][A-Z0-9]{6,9}$/ },
@@ -117,11 +111,7 @@ exports.updateProfileSchema = {
     display_name: { type: 'string', minLength: 1, maxLength: 50 },
     avatar_url: { type: 'string', maxLength: 2048 },
 };
-/**
- * A real 24h "HH:mm". A looser /^\d{2}:\d{2}$/ would accept "99:99": the
- * firmware (AlarmClock::isValidTime) skips such an alarm while the web still
- * shows it as on. Same regex as database.rules.json (the box's alarm_list write rule).
- */
+/** A real 24h "HH:mm" (no "99:99", which the firmware would skip). Same regex as database.rules.json. */
 const ALARM_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** POST /boxes/:boxId/alarms */
 exports.createAlarmSchema = {

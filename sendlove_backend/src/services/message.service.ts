@@ -22,10 +22,7 @@ export class MessageService {
     private storageRepo: IStorageRepository = new FirebaseStorageRepository()
   ) {}
 
-  /**
-   * Step 1: the sender asks to send a message → the backend creates signed upload URLs,
-   * only for the file types the sender requested (saves GCS API calls).
-   */
+  /** Step 1: create signed upload URLs, only for the file types requested. */
   async initiateMessage(boxId: string, senderId: string, requestedTypes: string[]): Promise<{
     message_id: string;
     upload_urls: Record<string, string>;
@@ -58,10 +55,7 @@ export class MessageService {
     return { message_id: messageId, upload_urls };
   }
 
-  /**
-   * Step 2: uploads done → confirm writes the record to RTDB.
-   * Only now does the message actually exist in the database.
-   */
+  /** Step 2: uploads done → write the record to RTDB (only now does the message exist). */
   async confirmMessage(boxId: string, senderId: string, data: {
     message_id: string;
     type: 'video' | 'image' | 'gif' | 'voice' | 'text';
@@ -146,9 +140,8 @@ export class MessageService {
   /** List messages (history). */
   async getMessages(boxId: string, limit?: number): Promise<(Message & { thumbnail?: string })[]> {
     const messages = await this.msgRepo.listMessages(boxId, limit);
-    // Thumbnails for the list rows: sign only the thumbnail (small, ≤ 1 MB), in parallel.
-    // Each signature is one IAM signBlob call — at most `limit` (≤ 100) per request.
-    // If signing fails that row falls back to its icon; the list still loads.
+    // Sign only the thumbnails, in parallel (one IAM call each, at most `limit`).
+    // A failed signature leaves that row with its icon.
     return Promise.all(messages.map(async (msg) => {
       if (!msg.thumbnail_url) return msg;
       try {
@@ -161,11 +154,8 @@ export class MessageService {
   }
 
   /**
-   * One message's details, with signed read URLs so the web can replay it.
-   *
-   * The *_url fields in RTDB are raw storage paths (confirmMessage) the browser
-   * can't open, since storage.rules blocks everyone but the box. Only files the
-   * browser can play are signed — NOT bin_url (the box's own SLBX format).
+   * One message's details with signed read URLs (the *_url fields are raw storage
+   * paths the browser can't open). Only browser-playable files are signed, NOT bin_url.
    */
   async getMessageDetails(boxId: string, messageId: string): Promise<Message & { media: MessageMedia }> {
     const msg = await this.msgRepo.getMessage(boxId, messageId);

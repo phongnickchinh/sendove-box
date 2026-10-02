@@ -1,10 +1,5 @@
-// ==================================================
-// The box's standby-screen theme — node: boxes/{box_id}/config/theme
-// ==================================================
-//
-// The shape follows what the firmware's LayoutEngine reads
-// (sendlove_firmware/lib/LayoutEngine/LayoutEngine.cpp): a "widgets" array of
-// {type, x, y, w, h, color, align, font}.
+// Standby-screen theme — boxes/{box_id}/config/theme. The shape follows what the
+// firmware's LayoutEngine reads: a "widgets" array of {type, x, y, w, h, color, align, font}.
 
 /** Types the firmware can draw. "image" is excluded: the firmware has `case WIDGET_IMAGE: break;`. */
 export type ThemeWidgetType = 'clock_time' | 'clock_date' | 'battery_icon' | 'wifi_icon' | 'chip_temp';
@@ -43,19 +38,17 @@ export interface ThemeAsset {
 
 export interface BoxTheme {
   /**
-   * Package identity + revision. The box compares (theme_id, rev) with the copy
-   * in its `theme` flash partition to decide whether to download again;
-   * theme_flag alone isn't enough (the flag can be cleared before the box
-   * finishes installing). Themes saved before the SD-card design lack both fields.
+   * Package identity + revision: the box compares (theme_id, rev) with its flash
+   * copy to decide whether to download (theme_flag alone isn't enough). Old themes
+   * lack both fields.
    */
   theme_id?: string;
   rev?: number;
   theme_name: string;
   widgets: ThemeWidget[];
   /**
-   * Storage path of the background: raw 240×240 little-endian RGB565 = 115,200
-   * bytes, under media/{boxId}/theme/ so the box can read it under the existing
-   * storage.rules. null = black background (the firmware has no built-in one).
+   * Storage path of the background (raw 240×240 RGB565 LE, 115,200 bytes) under
+   * media/{boxId}/theme/, readable by the box. null = black background.
    */
   background: string | null;
   /** bg / f_time / f_date — what the box downloads to the card, then copies to flash. */

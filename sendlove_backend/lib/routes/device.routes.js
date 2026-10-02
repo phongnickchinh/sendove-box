@@ -13,9 +13,6 @@ function deviceRoutes(controller) {
     router.use(device_auth_middleware_1.requireDeviceAuth);
     router.get('/poll', controller.poll);
     router.post('/heartbeat', (0, validation_middleware_1.validate)(validation_middleware_1.heartbeatSchema), controller.heartbeat);
-    // Note: /download is usually handled by returning a signed URL in /poll
-    // but if you want to proxy it through functions:
-    // router.get('/download/:mediaType', controller.downloadMedia);
     return router;
 }
 //# sourceMappingURL=device.routes.js.map

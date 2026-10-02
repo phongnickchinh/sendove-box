@@ -4,19 +4,15 @@ exports.BoxService = void 0;
 const firebase_box_repository_1 = require("../repositories/firebase/firebase-box.repository");
 const firebase_user_repository_1 = require("../repositories/firebase/firebase-user.repository");
 const error_handler_middleware_1 = require("../middleware/error-handler.middleware");
-// Import the submodule; do NOT `import * as admin` and use `admin.database.ServerValue`:
-// TypeScript compiles that to __importStar, and firebase-admin 12 doesn't expose
-// `database` as an own key of the module -> undefined at runtime ("reading 'increment'").
+// Import the submodule; do NOT use `admin.database.ServerValue` via `import * as admin`:
+// with firebase-admin 12 it is undefined at runtime.
 const database_1 = require("firebase-admin/database");
 class BoxService {
     constructor(boxRepo = new firebase_box_repository_1.FirebaseBoxRepository(), userRepo = new firebase_user_repository_1.FirebaseUserRepository()) {
         this.boxRepo = boxRepo;
         this.userRepo = userRepo;
     }
-    /**
-     * Pairing: the user enters a pairing code → the user is linked to the box.
-     * scode starts with 'S', rcode with 'R'.
-     */
+    /** Pairing by code: scode starts with 'S', rcode with 'R'. */
     async pairBox(uid, pairingCode, boxName) {
         const isSender = pairingCode.startsWith('S');
         const codeType = isSender ? 'scode' : 'rcode';
@@ -78,10 +74,7 @@ class BoxService {
         await this.userRepo.unlinkBox(uid, boxId);
         return roleToUnpair;
     }
-    /**
-     * Box details (paired users only).
-     * device_secret and the Wi-Fi password are stripped before returning.
-     */
+    /** Box details (paired users only), without device_secret and the Wi-Fi password. */
     async getBoxDetails(uid, boxId) {
         const box = await this.boxRepo.getById(boxId);
         if (!box)
@@ -101,11 +94,8 @@ class BoxService {
         return { ...rest, config: safeConfig };
     }
     /**
-     * Update the box's Wi-Fi config.
-     * pwd undefined = the user didn't touch the password field → KEEP the stored
-     * password and change only the ssid. (The web can never read the password
-     * back, so it can't resend it.)
-     * pwd "" = an open network, chosen explicitly.
+     * Update the box's Wi-Fi config. pwd undefined = KEEP the stored password (the
+     * web can't read it back to resend it); pwd "" = an open network.
      */
     async updateWifi(uid, boxId, ssid, pwd) {
         await this.getBoxDetails(uid, boxId); // Validates ownership
@@ -118,10 +108,7 @@ class BoxService {
         }
         await this.boxRepo.update(boxId, updates);
     }
-    /**
-     * Update the box's led_state / display_brightness / playback_volume.
-     * Only the fields passed in are overwritten.
-     */
+    /** Update led_state / display_brightness / playback_volume (only the fields passed in). */
     async updateBoxConfig(uid, boxId, data) {
         await this.getBoxDetails(uid, boxId); // Validates ownership
         const updates = { updated_at: Date.now() };
@@ -131,9 +118,8 @@ class BoxService {
             updates['config/display_brightness'] = data.display_brightness;
         if (data.playback_volume !== undefined)
             updates['config/playback_volume'] = data.playback_volume;
-        // The box writes this number to status/config_rev once applied -> the web
-        // compares the two to show "applied" or "waiting for the box". Incremented
-        // atomically on the server, so two close saves never share a rev.
+        // The box echoes this to status/config_rev once applied. Incremented atomically
+        // on the server, so two close saves never share a rev.
         updates['config/config_rev'] = database_1.ServerValue.increment(1);
         await this.boxRepo.update(boxId, updates);
         // Set config_flag so the ESP32 re-reads its config

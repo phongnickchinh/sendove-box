@@ -6,16 +6,7 @@ import { config } from '../config';
 
 const rateLimitRepo = new FirebaseRateLimitRepository();
 
-/**
- * Rate limiter for sending messages: N messages / 24 hours per
- * (sender_id + box_id) pair.
- *
- * 1. Read rate_limits/{senderId}_{boxId}
- * 2. Missing → create (count=1, window_start=now) → allow
- * 3. Window expired (now - window_start > 24h) → reset → allow
- * 4. count >= LIMIT → 429
- * 5. Under the limit → increment → allow
- */
+/** Rate limiter for sending messages: N per 24-hour window per (sender, box) pair; 429 beyond. */
 export const messageSendRateLimit = async (
   req: AuthenticatedRequest,
   res: Response<ApiResponse>,

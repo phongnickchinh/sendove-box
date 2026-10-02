@@ -16,9 +16,6 @@ export default function deviceRoutes(controller: DeviceController) {
   router.get('/poll', controller.poll);
   router.post('/heartbeat', validate(heartbeatSchema), controller.heartbeat);
 
-  // Note: /download is usually handled by returning a signed URL in /poll
-  // but if you want to proxy it through functions:
-  // router.get('/download/:mediaType', controller.downloadMedia);
 
   return router;
 }

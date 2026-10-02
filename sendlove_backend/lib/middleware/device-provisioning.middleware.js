@@ -3,11 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireProvisioningKey = void 0;
 const error_handler_middleware_1 = require("./error-handler.middleware");
 /**
- * Authenticates a newly registering device with the provisioning key.
- * The ESP32 firmware must send it in the 'X-Provisioning-Key' header when
- * calling /device/register.
- *
- * The key is configured through the DEVICE_PROVISIONING_KEY env variable.
+ * Authenticates a registering device: the 'X-Provisioning-Key' header on
+ * /device/register must match the DEVICE_PROVISIONING_KEY env variable.
  */
 const requireProvisioningKey = (req, _res, next) => {
     const key = req.headers['x-provisioning-key'];

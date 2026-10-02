@@ -1,9 +1,4 @@
-/**
- * CRC-32 zlib/IEEE (poly 0xEDB88320) — the same formula the firmware
- * (SdStore::crc32Update) uses to verify files downloaded to the card (alarm
- * music, theme packages). The backend computes it from the file in Storage and
- * never trusts a value sent by the web.
- */
+/** CRC-32 zlib/IEEE (poly 0xEDB88320), the same formula the firmware uses to verify downloaded files. */
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {

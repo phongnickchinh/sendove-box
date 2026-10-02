@@ -61,9 +61,7 @@ const container = (0, container_1.createContainer)();
 // Middleware
 // Security headers (X-Content-Type-Options, X-Frame-Options, Strict-Transport-Security, etc.)
 app.use((0, helmet_1.default)());
-// TODO: Restrict CORS origins before production deployment.
-// Current config allows all origins for development/testing convenience.
-// Example: app.use(cors({ origin: ['https://iot-app-839a2.web.app'] }));
+// TODO: restrict CORS before production, e.g. cors({ origin: ['https://iot-app-839a2.web.app'] }).
 app.use((0, cors_1.default)({ origin: true }));
 // Parse JSON with explicit body size limit to prevent DoS via large payloads
 app.use(express_1.default.json({ limit: '10kb' }));

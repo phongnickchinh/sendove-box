@@ -36,10 +36,8 @@ export class FirebaseRateLimitRepository implements IRateLimitRepository {
   }
 
   /**
-   * Atomic check-and-increment in a Firebase transaction: read → check →
-   * increment as one step, so concurrent requests can't race.
-   *
-   * Returns { allowed: true } under the limit, { allowed: false, remainingMs } when limited.
+   * Atomic check-and-increment (Firebase transaction). Returns { allowed: true }
+   * or { allowed: false, remainingMs }.
    */
   async checkAndIncrement(
     senderId: string,

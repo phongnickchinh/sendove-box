@@ -3,9 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.FirebaseStorageRepository = void 0;
 const firebase_1 = require("../../firebase");
 class FirebaseStorageRepository {
-    /**
-     * Generates a signed POST policy for uploading a file directly to Firebase Storage with size limits.
-     */
+    /** Signed POST policy for a direct upload to Storage, with a size limit. */
     async generateUploadPolicy(filePath, contentType, maxSizeInBytes, expiresInMinutes = 60) {
         const bucket = firebase_1.storage.bucket();
         const file = bucket.file(filePath);
@@ -23,9 +21,7 @@ class FirebaseStorageRepository {
             fields: response.fields,
         };
     }
-    /**
-     * Generates a signed URL for downloading a file.
-     */
+    /** Signed download URL. */
     async generateDownloadUrl(filePath, expiresInMinutes = 60 * 24) {
         const bucket = firebase_1.storage.bucket();
         const file = bucket.file(filePath);
@@ -36,9 +32,6 @@ class FirebaseStorageRepository {
         });
         return url;
     }
-    /**
-     * Deletes a file from Firebase Storage.
-     */
     async deleteFile(filePath) {
         const bucket = firebase_1.storage.bucket();
         const file = bucket.file(filePath);
@@ -51,16 +44,10 @@ class FirebaseStorageRepository {
             }
         }
     }
-    /**
-     * Delete an entire directory recursively.
-     */
     async deleteDirectory(directoryPath) {
         const bucket = firebase_1.storage.bucket();
         await bucket.deleteFiles({ prefix: directoryPath });
     }
-    /**
-     * Downloads a file from Storage to a local temporary path.
-     */
     async downloadToLocal(filePath, localDestination) {
         const bucket = firebase_1.storage.bucket();
         const file = bucket.file(filePath);
@@ -70,9 +57,6 @@ class FirebaseStorageRepository {
         const [buf] = await firebase_1.storage.bucket().file(filePath).download();
         return buf;
     }
-    /**
-     * Uploads a local file to Storage.
-     */
     async uploadFromLocal(localFilePath, destinationPath, contentType) {
         const bucket = firebase_1.storage.bucket();
         await bucket.upload(localFilePath, {
@@ -80,18 +64,12 @@ class FirebaseStorageRepository {
             metadata: contentType ? { contentType } : undefined,
         });
     }
-    /**
-     * Retrieves metadata of a file.
-     */
     async getFileMetadata(filePath) {
         const bucket = firebase_1.storage.bucket();
         const file = bucket.file(filePath);
         const [metadata] = await file.getMetadata();
         return metadata;
     }
-    /**
-     * Checks if a file exists.
-     */
     async fileExists(filePath) {
         const bucket = firebase_1.storage.bucket();
         const file = bucket.file(filePath);

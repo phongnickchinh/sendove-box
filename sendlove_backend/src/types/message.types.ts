@@ -1,11 +1,8 @@
 import { BaseModel } from './base.types';
 
-// ==================================================
-// Message — Node: messages/{box_id}/{message_id}
-// ==================================================
-// There is no MessageStatus: by design the sender doesn't know a message's state.
-// The ESP32 finds new messages from timestamp + its local last_download_ts.
-// ==================================================
+// Message — messages/{box_id}/{message_id}
+// There is no MessageStatus by design: the box finds new messages from timestamp
+// + its local last_download_ts.
 export interface Message extends BaseModel {
   sender_id: string;
   box_id: string;

@@ -4,10 +4,9 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role-guard.middleware';
 
 /**
- * /boxes/:boxId/music — the box's alarm music library. Receiver only (product
- * decision), like alarms and themes. Two-step upload: POST /upload returns a
- * signed POST policy → the web uploads straight to Storage → POST /commit has
- * the backend validate the file and write the DB.
+ * /boxes/:boxId/music — alarm music library, receiver only (product decision).
+ * Two-step upload: POST /upload returns a signed policy, POST /commit validates
+ * the uploaded file and writes the DB.
  */
 export default function musicRoutes(controller: MusicController) {
   const router = Router({ mergeParams: true });

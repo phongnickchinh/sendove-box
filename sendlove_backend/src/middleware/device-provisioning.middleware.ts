@@ -2,11 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from './error-handler.middleware';
 
 /**
- * Authenticates a newly registering device with the provisioning key.
- * The ESP32 firmware must send it in the 'X-Provisioning-Key' header when
- * calling /device/register.
- *
- * The key is configured through the DEVICE_PROVISIONING_KEY env variable.
+ * Authenticates a registering device: the 'X-Provisioning-Key' header on
+ * /device/register must match the DEVICE_PROVISIONING_KEY env variable.
  */
 export const requireProvisioningKey = (req: Request, _res: Response, next: NextFunction) => {
   const key = req.headers['x-provisioning-key'] as string;

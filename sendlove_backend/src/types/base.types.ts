@@ -1,6 +1,4 @@
-// ==================================================
 // Base model: fields every entity inherits
-// ==================================================
 export interface BaseModel {
   id: string;
   created_at: number;

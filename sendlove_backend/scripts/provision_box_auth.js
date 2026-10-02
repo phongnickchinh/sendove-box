@@ -1,25 +1,18 @@
 #!/usr/bin/env node
 /**
- * Creates a dedicated Firebase Auth account for ONE box, with `uid` equal to BOX_ID.
+ * Creates the Firebase Auth account of ONE box, with `uid` equal to BOX_ID
+ * (database.rules.json grants access with `auth.uid === $box_id`). Run OFFLINE
+ * at flashing time; the box never calls it.
  *
- * Why uid must equal BOX_ID: `database.rules.json` grants access with
- * `auth.uid === $box_id`, so no uid -> box lookup table is needed.
- *
- * Run it OFFLINE at manufacturing/flashing time; it is NOT a background
- * service — the box never calls it. That is why the "direct RTDB" approach
- * needs no backend at runtime.
- *
- * Prerequisites:
- *   1. Firebase Console > Authentication > Sign-in method > enable **Email/Password**
- *      (while disabled, REST returns PASSWORD_LOGIN_DISABLED).
- *   2. `sendlove_backend/serviceAccountKey.json` exists (gitignored).
+ * Prerequisites: Email/Password sign-in enabled in the Firebase Console, and
+ * `sendlove_backend/serviceAccountKey.json` (gitignored).
  *
  * Usage:
  *   node scripts/provision_box_auth.js ESP32_A1B2C3D4E5F6
  *   node scripts/provision_box_auth.js ESP32_A1B2C3D4E5F6 --reset-password
  *
- * Prints the C++ snippet to paste into `sendlove_firmware/include/config_secrets.h`.
- * The password is shown EXACTLY ONCE, at creation — Firebase can't read it back.
+ * Prints the snippet for `sendlove_firmware/include/config_secrets.h`. The
+ * password is shown EXACTLY ONCE: Firebase can't read it back.
  */
 
 const admin = require('firebase-admin');

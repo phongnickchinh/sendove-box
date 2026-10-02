@@ -1,14 +1,10 @@
 import { BaseModel } from './base.types';
 
-// ==================================================
-// Alarm music — node: boxes/{boxId}/music/{musicId}
-// ==================================================
-// The library is per BOX and managed by the receiver only (product decision, see
-// firmware MEMORY.md §28).
-// Storage file: media/{boxId}/music/{musicId}_r{rev}.aud = AUDC(10) + WAV(44) + PCM
-// 16 kHz mono 16-bit, packaged by the web (decoding happens on the client).
-// Changing the content = new rev + new file; an old file is never overwritten
-// (a box still downloading the old revision must not read mixed data).
+// Alarm music — boxes/{boxId}/music/{musicId}. Per BOX, receiver only (product
+// decision, firmware MEMORY.md §28).
+// File: media/{boxId}/music/{musicId}_r{rev}.aud = AUDC(10) + WAV(44) + PCM 16 kHz
+// mono 16-bit, packaged by the web. New content = new rev + new file; an old file
+// is never overwritten (a box may still be downloading it).
 
 export interface AlarmMusic extends BaseModel {
   music_id: string;

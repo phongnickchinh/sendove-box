@@ -92,10 +92,7 @@ export class DeviceService {
     };
   }
 
-  /**
-   * Periodic ESP32 poll: check flags, fetch new messages, and the alarm list when needed.
-   * The ESP32 sends last_download_ts → the backend returns messages with a newer timestamp.
-   */
+  /** Periodic ESP32 poll: flags, messages newer than last_download_ts, alarms when flagged. */
   async poll(boxId: string, lastDownloadTs?: number, availableSlots: number = 3): Promise<any> {
     const box = await this.boxRepo.getById(boxId);
     if (!box) throw new AppError(404, 'box_not_found', 'Box not found');
@@ -180,9 +177,8 @@ export class DeviceService {
       await this.boxRepo.updateFlags(boxId, { config_flag: false });
     }
 
-    // theme_flag → return the standby layout + a signed URL for the background.
-    // (The current firmware reads RTDB directly and doesn't call /device/poll —
-    // this path is for when the firmware switches to polling.)
+    // theme_flag → standby layout + a signed background URL. (The current firmware
+    // reads RTDB directly and doesn't call /device/poll.)
     if (box.flags.theme_flag) {
       const theme = box.config?.theme;
       if (theme) {

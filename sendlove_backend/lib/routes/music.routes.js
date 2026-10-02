@@ -5,10 +5,9 @@ const express_1 = require("express");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const role_guard_middleware_1 = require("../middleware/role-guard.middleware");
 /**
- * /boxes/:boxId/music — the box's alarm music library. Receiver only (product
- * decision), like alarms and themes. Two-step upload: POST /upload returns a
- * signed POST policy → the web uploads straight to Storage → POST /commit has
- * the backend validate the file and write the DB.
+ * /boxes/:boxId/music — alarm music library, receiver only (product decision).
+ * Two-step upload: POST /upload returns a signed policy, POST /commit validates
+ * the uploaded file and writes the DB.
  */
 function musicRoutes(controller) {
     const router = (0, express_1.Router)({ mergeParams: true });

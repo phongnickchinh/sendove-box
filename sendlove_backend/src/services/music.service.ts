@@ -13,9 +13,8 @@ const ID_PATTERN = /^mus_\d{10,16}$/;
 export { crc32 };
 
 /**
- * Checks the file is in the format the box can play: "AUDC" + u16 sample rate
- * (LE) + u32 PCM size, then a 44-byte RIFF/WAVE header (AudioPlayer::parseAudc).
- * A bad file makes the box silent -> reject it here.
+ * Checks the box's format: "AUDC" + u16 sample rate (LE) + u32 PCM size, then a
+ * 44-byte RIFF/WAVE header. A bad file would leave the box silent.
  */
 function checkAudcFile(buf: Buffer): void {
   if (buf.length < 54 || buf.toString('ascii', 0, 4) !== 'AUDC') {
@@ -48,10 +47,8 @@ export class MusicService {
   }
 
   /**
-   * Step 1: issue a signed POST policy. With musicId = replace that track
-   * (rev + 1); without = a new track. NOTHING is written to the DB yet: if the
-   * upload dies midway there is no orphan record pointing at a missing file
-   * (which the box would fail to download forever).
+   * Step 1: issue a signed POST policy (musicId = replace that track, rev + 1).
+   * NOTHING is written to the DB yet, so a failed upload leaves no orphan record.
    */
   async initiateUpload(boxId: string, musicId?: string) {
     let id = musicId;
@@ -75,9 +72,8 @@ export class MusicService {
   }
 
   /**
-   * Step 2: the file is in Storage. The backend downloads it ITSELF to measure
-   * size + crc32 and check the header, never trusting values sent by the web:
-   * the box relies on exactly these two numbers to accept the file.
+   * Step 2: the backend downloads the file ITSELF to measure size + crc32 and
+   * check the header (the box relies on these numbers; the web's are not trusted).
    */
   async commit(boxId: string, uid: string, body: any): Promise<AlarmMusic> {
     const id = String(body?.music_id || '');

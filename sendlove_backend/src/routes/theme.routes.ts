@@ -4,9 +4,8 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role-guard.middleware';
 
 /**
- * /boxes/:boxId/theme — the standby-screen theme. Only the receiver (who holds
- * the box) can edit it, like alarms. The body is validated in
- * ThemeService.sanitizeWidgets (a nested array the flat validate() can't check).
+ * /boxes/:boxId/theme — standby-screen theme, receiver only. The body is
+ * validated in ThemeService.sanitizeWidgets (validate() can't check nested arrays).
  */
 export default function themeRoutes(controller: ThemeController) {
   const router = Router({ mergeParams: true });

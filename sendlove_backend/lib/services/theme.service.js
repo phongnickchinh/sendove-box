@@ -16,11 +16,10 @@ const MAX_WIDGETS = 8;
 exports.DATE_FORMATS = ['WD, DD.MM', 'WD DD.MM', 'DD/MM/YYYY'];
 const LOCALES = ['vi', 'en'];
 /**
- * Per-type rules — accept only the keys the firmware reads for that type.
- * Fonts: 'f_time'/'f_date' = VLW files in the theme package (the file must be
- * present in `fonts`), 'Font7'/'Font2' = fonts built into the firmware. The
- * compiled-in ChakraPetch/Orbitron/Roboto were REMOVED from the firmware; with
- * an old name it would silently draw with a built-in font -> reject it here.
+ * Per-type rules: only the keys the firmware reads for that type. Fonts:
+ * 'f_time'/'f_date' = VLW files in the package (must be present in `fonts`),
+ * 'Font7'/'Font2' = firmware built-ins. Any other name is rejected: the firmware
+ * would silently fall back to a built-in font.
  */
 const RULES = {
     clock_time: { color: true, align: true, fonts: ['f_time', 'Font7'] },
@@ -141,8 +140,7 @@ class ThemeService {
     }
     /**
      * Validate one package file (inside THIS box's theme folder, right extension),
-     * then measure size + crc32 from the actual file. The box relies on exactly
-     * these two numbers to accept the file.
+     * then measure size + crc32 from the actual file.
      */
     async measureAsset(boxId, path, ext, field) {
         const re = ext === 'bin' ? /^[\w./-]+\.bin$/ : /^[\w./-]+\.vlw$/;

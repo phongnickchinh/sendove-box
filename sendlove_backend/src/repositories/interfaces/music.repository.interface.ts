@@ -8,9 +8,9 @@ export interface IMusicRepository {
   /** Rename only: the box doesn't need to know -> no flag. */
   rename(boxId: string, musicId: string, name: string): Promise<void>;
   /**
-   * Delete a track + clear music_id on every alarm using it, IN ONE multi-path
-   * write (an alarm never points at a deleted track). Sets music_flag, and
-   * a_flag if any alarm changed. Returns the number of alarms detached.
+   * Delete a track and clear music_id on every alarm using it, IN ONE multi-path
+   * write. Sets music_flag (and a_flag if an alarm changed). Returns the number
+   * of alarms detached.
    */
   removeAndDetach(boxId: string, musicId: string): Promise<number>;
 }

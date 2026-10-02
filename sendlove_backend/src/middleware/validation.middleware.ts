@@ -17,11 +17,7 @@ interface FieldRule {
 
 export type ValidationSchema = Record<string, FieldRule>;
 
-/**
- * Validation middleware factory.
- * Only fields declared in the schema survive in req.body (whitelist);
- * undeclared fields are dropped → no mass assignment.
- */
+/** Validation middleware factory. Whitelist: fields not in the schema are dropped from req.body. */
 export const validate = (schema: ValidationSchema) => {
   return (req: Request, _res: Response, next: NextFunction) => {
     const errors: string[] = [];
@@ -101,9 +97,7 @@ export const validate = (schema: ValidationSchema) => {
   };
 };
 
-// ==========================================
-// Predefined Validation Schemas
-// ==========================================
+// ---- Predefined validation schemas ----
 
 /** POST /boxes/pair */
 export const pairBoxSchema: ValidationSchema = {
@@ -147,11 +141,7 @@ export const updateProfileSchema: ValidationSchema = {
   avatar_url: { type: 'string', maxLength: 2048 },
 };
 
-/**
- * A real 24h "HH:mm". A looser /^\d{2}:\d{2}$/ would accept "99:99": the
- * firmware (AlarmClock::isValidTime) skips such an alarm while the web still
- * shows it as on. Same regex as database.rules.json (the box's alarm_list write rule).
- */
+/** A real 24h "HH:mm" (no "99:99", which the firmware would skip). Same regex as database.rules.json. */
 const ALARM_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** POST /boxes/:boxId/alarms */

@@ -6,12 +6,8 @@
 #include "IStorageProvider.h"
 #include "config.h"
 
-// ============================================================================
-// AudioPlayer — plays raw 16-bit mono PCM over I2S DMA (MAX98357A)
-// ============================================================================
-// Non-blocking and tick-based: call tick() once per video frame to top up the
-// DMA buffer. The I2S DMA plays continuously in hardware without blocking the CPU.
-// ============================================================================
+// AudioPlayer — 16-bit mono PCM over I2S DMA (MAX98357A). Non-blocking: call
+// tick() regularly to top up the DMA buffer.
 
 class AudioPlayer {
 public:
@@ -24,13 +20,11 @@ public:
     /// Short beep to test the speaker at boot
     void testBeep();
 
-    /// A ~1.6kHz sine beep of durationMs; BLOCKS until it finishes (+200ms to drain
-    /// the DMA). Only call while not playing (it shares I2S with tick()).
+    /// A ~1.6kHz beep; BLOCKS for durationMs + 200ms. Only call while not playing.
     void beep(uint32_t durationMs);
 
-    /// Look for the AUDC header in storage starting at byte videoDataSize.
-    /// appendedSize = audio bytes recorded in the slot table (incl. the AUDC header), 0 = unknown.
-    /// Returns true if valid audio was found.
+    /// Look for the AUDC header at byte videoDataSize. appendedSize = audio bytes
+    /// per the slot table (0 = unknown). true = valid audio found.
     bool loadFromStorage(IStorageProvider* storage, uint32_t videoDataSize, uint32_t appendedSize = 0);
 
     /// Alarm music: a standalone file on the card (AUDC + WAV + PCM); holds
@@ -46,10 +40,8 @@ public:
     bool hasAudio()     const { return _hasAudio; }
     bool isInitialized() const { return _initialized; }
 
-    /// Volume 0..100 (Settings::volumeGainQ15). Changing it mid-playback slides the
-    /// gain over a few tens of ms (no pop). 100 = the unscaled path, no multiply.
-    /// immediate = true: jump straight to the new level (start of a track, before
-    /// any sample reaches the speaker).
+    /// Volume 0..100; 100 = the unscaled path. Mid-playback the gain slides (no
+    /// pop); immediate = jump to the level (start of a track).
     void setVolume(uint8_t vol, bool immediate = false);
 
 private:
@@ -82,17 +74,12 @@ private:
     /// Parse the AUDC header at audioStartOffset (+ WAV if present) and set _audioPcmOffset/_Size.
     bool parseAudc(uint32_t audioStartOffset, uint32_t appendedSize, uint32_t maxPcm);
 
-    // PCM read buffer. The READ size (AUDIO_READ_CHUNK_SIZE) is separate from the
-    // oversampling chunk (AUDIO_PCM_CHUNK_SIZE) because on an SD card every read
-    // is an fread through VFS/FATFS — see config.h.
+    // PCM read buffer (read size vs oversampling chunk: see config.h).
     uint8_t _chunk[AUDIO_READ_CHUNK_SIZE];
-    // Mono -> stereo (x2), then each sample repeated AUDIO_OVERSAMPLE times (I2S
-    // runs at the file rate x AUDIO_OVERSAMPLE, see config.h) so BCLK is high
-    // enough for the MAX98357A.
+    // Mono -> stereo, oversampled x AUDIO_OVERSAMPLE (see config.h).
     int16_t _stereo[AUDIO_PCM_CHUNK_SIZE / 2 * 2 * AUDIO_OVERSAMPLE];
 
-    /// Read one PCM chunk from the source and write it to I2S (mono → stereo).
-    /// Returns true if the DMA took the whole chunk (room left, keep filling).
+    /// Read one PCM chunk and write it to I2S. true = the DMA took it all (keep filling).
     bool fillChunk();
 };
 

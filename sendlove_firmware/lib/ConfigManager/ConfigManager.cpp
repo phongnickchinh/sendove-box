@@ -1,10 +1,6 @@
 #include "ConfigManager.h"
 #include "ScreenLogger.h"
 
-// ============================================================================
-// ConfigManager Implementation
-// ============================================================================
-
 bool ConfigManager::init(const char* namespaceName) {
     bool ok = _prefs.begin(namespaceName, false); // false = read-write
     if (!ok) {
@@ -125,14 +121,10 @@ size_t ConfigManager::loadAlarms(AlarmItem* alarms, size_t maxCount) {
     if (!alarms || maxCount == 0) return 0;
     uint32_t count = _prefs.getUInt(KEY_ALARM_COUNT, 0);
     if (count == 0) return 0;
-    // The blob must be exactly count * sizeof(AlarmItem). A mismatch means it was
-    // written by a firmware with a different AlarmItem size -> reading it would
-    // shift fields. Return 0: AlarmClock treats it as no alarms and the first sync
-    // downloads them from the cloud.
+    // A size mismatch means another firmware's AlarmItem layout: return 0 and let
+    // the first sync download the list.
     if (_prefs.getBytesLength(KEY_ALARM_DATA) != count * sizeof(AlarmItem)) {
-        // Clear the dirty flag too: with the blob dropped and the flag still set, the
-        // first sync would let "the box win" and push an EMPTY list over every alarm
-        // in the cloud.
+        // Clear the dirty flag too, or the first sync would push an EMPTY list over the cloud's.
         _prefs.putBool(KEY_ALARM_DIRTY, false);
         _prefs.putUInt(KEY_ALARM_COUNT, 0);
         return 0;

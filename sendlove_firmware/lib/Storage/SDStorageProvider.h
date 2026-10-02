@@ -5,22 +5,12 @@
 #include "SDCardManager.h"
 #include "config.h"
 
-// ============================================================================
-// On-card data layout
-// ============================================================================
-//   /media/index.bin      manifest: the queue + per-slot metadata
-//   /media/slot_00.bin    media — laid out EXACTLY like a NAND slot:
-//   ...                     [4B size][16B container header][payload][AUDC + audio]
-//   /media/slot_19.bin
-//   /media/slot_00.txt    caption (created only when the message has text)
-//
-// Captions go in a sidecar file, NOT in the manifest: 256B × 20 slots = 5KB of
-// resident RAM, too expensive on an ESP32-C3 where the TLS handshake fights for
-// every KB.
-//
-// One `unread` byte per slot instead of NandStorageProvider's uint8_t bitmask —
-// that is what lets 20 slots work without touching IStorageProvider.
-// ============================================================================
+// On-card layout:
+//   /media/index.bin      manifest: the queue + per-slot metadata (one unread byte per slot)
+//   /media/slot_NN.bin    media, laid out EXACTLY like a NAND slot:
+//                           [4B size][16B container header][payload][AUDC + audio]
+//   /media/slot_NN.txt    caption sidecar (only when the message has text); NOT in
+//                         the manifest, which would cost 5KB of resident RAM
 
 static constexpr uint32_t SD_MANIFEST_MAGIC = 0x324D4453; // "SDM2"
 static constexpr uint16_t SD_MANIFEST_VERSION = 1;
@@ -108,12 +98,10 @@ private:
     uint32_t _readCursor = 0;
     uint32_t _readCeil = 0;         // = dataSize; readAt() is NOT bound by it
 
-    /// Accepts both "7" and "slot_7" (like NandStorageProvider::parseSlotId).
-    /// Returns -1 if invalid / out of range.
+    /// Accepts "7" and "slot_7". -1 = invalid / out of range.
     int8_t parseIndex(const char* identifier) const;
 
-    /// Every path is built from the PARSED index, never from the raw string —
-    /// which rules out identifier mismatches ("0" and "slot_0" naming two files).
+    /// Paths are built from the PARSED index, never from the raw identifier.
     void buildPath(int8_t idx, char* out, size_t maxLen) const;
     void buildTextPath(int8_t idx, char* out, size_t maxLen) const;
 

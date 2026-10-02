@@ -9,23 +9,15 @@
 #include "Settings.h"
 #include "SdStore.h"
 
-// ============================================================================
-// MediaPlayer Implementation — VJPG/VIMG via IStorageProvider
-// ============================================================================
-
 static DisplayDriver* s_display = nullptr;
 
 static void dumpHexBytes(const char* tag, const uint8_t* data, size_t len) {
     if (tag == nullptr || data == nullptr || len == 0) return;
 }
 
-// ============================================================================
-// Vietnamese ASCII folding (temporary, until a real Unicode font) — strips
-// diacritics so text renders with FreeSansBold9pt7b (ASCII 32-126 glyphs only).
-// ============================================================================
+// ---- Vietnamese ASCII folding (temporary: the font only has ASCII 32-126) ----
 
-// The Vietnamese block U+1EA0-1EF9 (and the 4 Latin Extended-A pairs Ă/Đ/Ơ/Ư)
-// alternates even=upper/odd=lower within each run -> only the base letter is needed.
+// U+1EA0-1EF9 and the Ă/Đ/Ơ/Ư pairs alternate even=upper/odd=lower within a run.
 struct AsciiFoldAltRange { uint16_t start; uint16_t end; char base; };
 static const AsciiFoldAltRange ASCII_FOLD_ALT_RANGES[] = {
     {0x1EA0, 0x1EB7, 'A'}, {0x1EB8, 0x1EC7, 'E'}, {0x1EC8, 0x1ECB, 'I'},
@@ -33,8 +25,7 @@ static const AsciiFoldAltRange ASCII_FOLD_ALT_RANGES[] = {
     {0x0102, 0x0103, 'A'}, {0x0110, 0x0111, 'D'}, {0x01A0, 0x01A1, 'O'}, {0x01AF, 0x01B0, 'U'},
 };
 
-// Latin-1 Supplement: each run is a single case (upper/lower are separate runs),
-// so it maps straight to one fixed character, no even/odd logic.
+// Latin-1 Supplement: each run is a single case, mapped to one fixed character.
 struct AsciiFoldFlatRange { uint16_t start; uint16_t end; char out; };
 static const AsciiFoldFlatRange ASCII_FOLD_FLAT_RANGES[] = {
     {0x00C0, 0x00C3, 'A'}, {0x00E0, 0x00E3, 'a'},
@@ -45,7 +36,7 @@ static const AsciiFoldFlatRange ASCII_FOLD_FLAT_RANGES[] = {
     {0x00DD, 0x00DD, 'Y'}, {0x00FD, 0x00FD, 'y'},
 };
 
-// Decodes one UTF-8 character (1-3 bytes, enough for all of Vietnamese) to a codepoint.
+// Decodes one UTF-8 character of 1-3 bytes (covers all of Vietnamese).
 static uint16_t decodeUtf8Char(const char* s, size_t remaining, uint8_t* outBytesConsumed) {
     uint8_t b0 = (uint8_t)s[0];
     if (b0 < 0x80) { *outBytesConsumed = 1; return b0; }
@@ -57,12 +48,12 @@ static uint16_t decodeUtf8Char(const char* s, size_t remaining, uint8_t* outByte
         *outBytesConsumed = 3;
         return (uint16_t)(((b0 & 0x0F) << 12) | (((uint8_t)s[1] & 0x3F) << 6) | ((uint8_t)s[2] & 0x3F));
     }
-    // Malformed or 4-byte UTF-8 (outside Vietnamese) -> skip safely.
+    // Malformed or 4-byte UTF-8: skip.
     *outBytesConsumed = 1;
     return 0xFFFF;
 }
 
-// Returns 0 when unmappable (the character is dropped from the output).
+// 0 = unmappable (dropped).
 static char asciiFoldCodepoint(uint16_t cp) {
     if (cp < 0x80) return (char)cp;
     for (const auto& r : ASCII_FOLD_ALT_RANGES) {
@@ -77,8 +68,7 @@ static char asciiFoldCodepoint(uint16_t cp) {
     return 0;
 }
 
-/// Strips Vietnamese diacritics (UTF-8 -> closest ASCII). Unmappable characters
-/// are dropped entirely (no stray '?' in the caption).
+/// UTF-8 -> closest ASCII; unmappable characters are dropped.
 static void asciiFoldVietnamese(const char* utf8In, char* asciiOut, size_t maxOut) {
     if (asciiOut == nullptr || maxOut == 0) return;
     if (utf8In == nullptr) { asciiOut[0] = '\0'; return; }
@@ -120,10 +110,8 @@ bool MediaPlayer::init(IStorageProvider* storage, DisplayDriver* display) {
     if (_playerMutex == nullptr) {
         _playerMutex = xSemaphoreCreateRecursiveMutex();
     }
-    // _jpegBuffer (32KB) is allocated on demand in playItem() and freed in stop()
-    // to give the heap back to the MbedTLS handshake during standby.
-    // Same for I2S: NOT initialised here. playItem() and beep() init it when
-    // needed; initialising at boot would hold 24KB of DMA for the device's lifetime.
+    // _jpegBuffer (32KB) and I2S (24KB DMA) are NOT set up here: they are allocated
+    // on demand and freed in stop(), leaving the heap to the TLS handshake.
     return true;
 }
 
@@ -143,7 +131,7 @@ bool MediaPlayer::playItem(const char* identifier) {
     if (_jpegBuffer == nullptr) {
         _jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
         if (_jpegBuffer == nullptr) {
-            // First attempt failed: yield 100ms so the IDLE task can reclaim the just-deleted task (WakeSync, 12KB)
+            // Yield 100ms so the IDLE task can reclaim freed memory, then retry.
             DLOG("[PLAY] JPEG buf retry (yield IDLE)...");
             if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -158,7 +146,7 @@ bool MediaPlayer::playItem(const char* identifier) {
         }
     }
 
-    // The decoder (17.9KB) shares _jpegBuffer's lifetime — see MediaPlayer.h
+    // The decoder (17.9KB) shares _jpegBuffer's lifetime.
     if (_jpeg == nullptr) {
         _jpeg = new (std::nothrow) JPEGDEC();
         if (_jpeg == nullptr) {
@@ -201,11 +189,8 @@ bool MediaPlayer::playItem(const char* identifier) {
     strncpy(_currentId, identifier, sizeof(_currentId) - 1);
     _currentSlot = (identifier[0] >= '0' && identifier[0] <= '9') ? atoi(identifier) : -1;
 
-    // A still message with NO real image (audio/text only): NetworkManager writes
-    // an empty slot with the dataSize=4 sentinel (see checkAndDownloadNewMessages()).
-    // Skip the SLBX header probe and decodeOneFrame() below entirely — running them
-    // would read never-written NAND (0xFF), report "Bad jpegSize" and block the
-    // screen with delay(2000) for nothing.
+    // Audio/text-only message: an empty slot with the dataSize=4 sentinel. Skip the
+    // header probe and decodeOneFrame(), which would read unwritten storage.
     bool isStaticNoImage = (info.type == StorageItemType::IMAGE && _currentDataSize <= 4);
 
     _display->turnOn();
@@ -218,7 +203,7 @@ bool MediaPlayer::playItem(const char* identifier) {
         _frameBaseOffset = 0;
         _readFrameSizeHeader = true;
     } else {
-    // Detect the container from the header at offset 4 (SLBX / SLOT / VJPG / VIMG)
+    // Container magic at offset 4 (SLBX / SLOT / VJPG / VIMG)
     uint8_t hdrCheck[20] = {0};
     _storage->readData(hdrCheck, 20);
     dumpHexBytes("[MediaPlayer] Header dump:", hdrCheck, sizeof(hdrCheck));
@@ -237,13 +222,11 @@ bool MediaPlayer::playItem(const char* identifier) {
         _fps             = (fps > 0) ? fps : 15;
         _totalFrames     = (totalFrames > 0) ? totalFrames : 1;
 
-        // Tell JPEG from raw RGB565 by peeking 7 bytes at offset 20
-        // JPEG:   [4-byte size][FF D8 FF ...] -> bytes[4..6] == JPEG magic
-        // RGB565: raw pixel data, no JPEG magic
+        // JPEG payload = [4-byte size][FF D8 FF ...]; anything else is raw RGB565.
         uint8_t peek[7] = {0};
         _storage->seek(20);
         _storage->readData(peek, sizeof(peek));
-        _storage->seek(20); // rewind to the start of the payload
+        _storage->seek(20);
 
         const bool isJpegPayload = (peek[4] == 0xFF && peek[5] == 0xD8 && peek[6] == 0xFF);
 
@@ -261,12 +244,12 @@ bool MediaPlayer::playItem(const char* identifier) {
     } else if (memcmp(hdrCheck + 4, "SLOT", 4) == 0 ||
                memcmp(hdrCheck + 4, "VJPG", 4) == 0 ||
                memcmp(hdrCheck + 4, "VIMG", 4) == 0) {
-        // Pre-encoded container: skip the 4-byte prefix + 16-byte container header -> offset 20
+        // Container: payload starts after the 4-byte prefix + 16-byte header.
         _frameBaseOffset = 20;
         _readFrameSizeHeader = true;
         _storage->seek(20);
     } else {
-        // Raw JPEG: seek to offset 0 to read the 4-byte frame size header
+        // Raw JPEG: the 4-byte frame size is at offset 0.
         _frameBaseOffset = 0;
         _readFrameSizeHeader = true;
         _storage->seek(0);
@@ -275,56 +258,49 @@ bool MediaPlayer::playItem(const char* identifier) {
 
     DLOG("[PLAY] setup OK: frames=%d", _totalFrames);
 
-    // Init I2S if not already up.
-    // Volume is set BEFORE init(): at volume 0, init() leaves the amp off.
+    // Volume BEFORE init(): at volume 0, init() leaves the amp off.
     _audio.setVolume(Settings::volume.load(), true);
     if (!_audio.isInitialized()) {
         _audio.init();
     }
 
-    // Audio (AUDC header) sits right after the video data, at offset
-    // _currentDataSize (the video size, from SlotEntry.dataSize) from the slot start.
+    // The AUDC header sits right after the video data, at offset _currentDataSize.
     bool hasAudio = _audio.loadFromStorage(_storage, _currentDataSize, _currentAudioSize);
     if (hasAudio) {
-        _audio.prefill(); // fill the DMA first to avoid a click at the start
+        _audio.prefill(); // avoids a click at the start
     }
 
-    // Seek back to the start of the video to begin playback
     _storage->seek(_frameBaseOffset);
 
     if (info.type == StorageItemType::IMAGE) {
         _state = PlaybackState::SHOWING;
         if (isStaticNoImage) {
-            // Already _display->clear()ed above -> keep the black screen (NAND build).
-            // The SD card build will get its own default background in a later phase.
+            // Keep the cleared (black) screen.
         } else {
             decodeOneFrame(false);
         }
 
-        // Caption (if any) — strip Vietnamese diacritics for now, then draw it word-wrapped on top.
+        // Caption: ASCII-folded, word-wrapped, drawn on top.
         char rawCaption[300] = "";
         if (_storage->getItemText(identifier, rawCaption, sizeof(rawCaption))) {
             char asciiCaption[300];
             asciiFoldVietnamese(rawCaption, asciiCaption, sizeof(asciiCaption));
             if (isStaticNoImage) {
-                // No image: the caption takes almost the whole screen.
+                // No image: nearly the whole screen.
                 _display->showWrappedText(asciiCaption, 8, 8, SCREEN_WIDTH - 16, SCREEN_HEIGHT - 16);
             } else {
-                // With an image: a text band in the bottom third, leaving the top clear.
+                // With an image: a band in the bottom third.
                 int32_t bandY = (SCREEN_HEIGHT * 2) / 3;
                 _display->showWrappedText(asciiCaption, 8, bandY, SCREEN_WIDTH - 16, SCREEN_HEIGHT - bandY - 8);
             }
-            // MEASURE only, not fixed yet. showWrappedText() puts char lines[16][48] =
-            // 768B on the stack — a deep path for this task (the VLW glyph alloca in
-            // LayoutEngine is deeper and logs its own floor), so measure here (see
-            // MEMORY.md §9.7). Refactor to two passes only if this drops < ~1024.
-            // On ESP-IDF the call returns BYTES (not words as in stock FreeRTOS) —
-            // read it as is, don't multiply by 4.
+            // Measurement only: showWrappedText() puts 768B on the stack (MEMORY.md
+            // §9.7). Refactor to two passes only if this drops < ~1024. ESP-IDF returns
+            // BYTES here, not words.
             DLOG("[PLAY] stack hwm=%u", (unsigned)uxTaskGetStackHighWaterMark(nullptr));
         }
     } else {
         _state = PlaybackState::PLAYING;
-        ScreenLogger::setOverlayEnabled(false); // no log overlay on the LCD: the SPI bus is all for video
+        ScreenLogger::setOverlayEnabled(false); // the SPI bus is all for video
         uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
         _nextFrameDeadline = millis() + targetMs;
         _lastFrameSkipped = false;
@@ -336,23 +312,20 @@ bool MediaPlayer::playItem(const char* identifier) {
 void MediaPlayer::update() {
     if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
 
-    // Volume changed from the web mid-playback: only the target moves, fillChunk() ramps to it.
+    // Volume changed mid-playback: fillChunk() ramps to the new target.
     if (_state == PlaybackState::PLAYING || _state == PlaybackState::SHOWING) {
         _audio.setVolume(Settings::volume.load());
     }
 
     if (_state == PlaybackState::PLAYING) {
-        // 1. Tick audio before decoding (tops up the 192ms of DMA)
+        // Top up the DMA before decoding
         _audio.tick();
 
         uint32_t targetMs = (_fps > 0) ? (1000 / _fps) : FRAME_DURATION_MS;
 
-        // Already past this frame's own deadline => skip rendering it.
-        // Catching up by decoding two frames back to back (NAND read + JPEGDEC +
-        // a full frame over SPI at 100% CPU) creates a current peak right while the
-        // amp is drawing -> voltage sag -> crackling audio + backlight flicker.
-        // Skipping a frame is CHEAPER than decoding it, so when late the device
-        // draws LESS, not more, and the picture still tracks the audio timeline.
+        // Past this frame's deadline => skip rendering it. Decoding two frames back
+        // to back to catch up peaks the current while the amp draws (voltage sag,
+        // crackle, backlight flicker); skipping is cheaper and keeps A/V in sync.
         bool skipRender = !_lastFrameSkipped &&
                           (int32_t)(_nextFrameDeadline - millis()) < 0;
 
@@ -366,7 +339,7 @@ void MediaPlayer::update() {
         }
         _lastFrameSkipped = skipRender;
 
-        // 2. Tick audio right after decode & render to refill the DMA just consumed
+        // Refill the DMA consumed during decode + render
         _audio.tick();
 
         _currentFrame++;
@@ -383,34 +356,26 @@ void MediaPlayer::update() {
             _nextFrameDeadline = millis() + targetMs;
         }
 
-        // The pacer accumulates deadlines instead of "sleep if time is left": I2S
-        // runs off a hardware clock and never waits, so with per-frame sleeping
-        // every slow frame pushes video permanently behind audio. Accumulating
-        // lets the next frame make up for a slow one, as long as the average
-        // stays within budget.
+        // Accumulated deadlines, not "sleep if time is left": I2S never waits, so a
+        // slow frame must be made up by the next one or video drifts behind audio.
         _nextFrameDeadline += targetMs;
         uint32_t now = millis();
         int32_t remain = (int32_t)(_nextFrameDeadline - now);
 
-        // More than 4 frames late means the hardware really can't keep up; re-anchor
-        // to now instead of chasing forever (burning CPU without catching up).
+        // More than 4 frames late: re-anchor to now instead of chasing forever.
         if (remain < -(int32_t)(targetMs * 4)) {
             _nextFrameDeadline = now + targetMs;
             remain = 0;
         }
 
-        // Always leave an idle gap: even when skipping frames hasn't caught up,
-        // never run two decodes back to back.
+        // Always leave an idle gap: never two decodes back to back.
         if (remain < (int32_t)FRAME_MIN_IDLE_MS) remain = (int32_t)FRAME_MIN_IDLE_MS;
 
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS((uint32_t)remain));
     } else if (_state == PlaybackState::SHOWING) {
-        // A still image / still message has no frames to decode but may carry
-        // audio (voice / background music). Without a tick in this branch an
-        // image+voice message stays silent even though NetworkManager downloaded
-        // it correctly. Ticking at this period is fast enough for the DMA depth
-        // (~192ms) to never underrun.
+        // A still image may carry audio: without this tick it would stay silent.
+        // A 50ms period is within the DMA depth (96-192ms).
         if (_audio.hasAudio()) _audio.tick();
         if (_playerMutex) xSemaphoreGiveRecursive(_playerMutex);
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -429,12 +394,11 @@ void MediaPlayer::stop() {
     _state = PlaybackState::IDLE;
     _alarmMusic = false;
     _audio.stop();
-    // Free _jpegBuffer to return 32KB to the heap for standby / the TLS handshake
+    // Return the 32KB buffer and the 17.9KB decoder to the heap for the TLS handshake
     if (_jpegBuffer != nullptr) {
         free(_jpegBuffer);
         _jpegBuffer = nullptr;
     }
-    // ...and the decoder's 17.9KB, for the same reason (see MediaPlayer.h)
     if (_jpeg != nullptr) {
         delete _jpeg;
         _jpeg = nullptr;
@@ -461,7 +425,7 @@ bool MediaPlayer::startAlarmMusic(const char* path, uint8_t volume) {
     if (_playerMutex) xSemaphoreTakeRecursive(_playerMutex, portMAX_DELAY);
     _audio.setVolume(volume, true);
     bool ok = _audio.isInitialized() || _audio.init();
-    // Alarm music only needs the I2S DMA (~24KB) + a 3KB buffer; no JPEG decoder is allocated.
+    // Alarm music needs only I2S DMA + a 3KB buffer, no JPEG decoder.
     if (ok) ok = _audio.loadFromFile(SdStore::card(), path, true);
     if (ok) {
         _audio.prefill();
@@ -493,11 +457,11 @@ int8_t MediaPlayer::getCurrentSlot() const {
 bool MediaPlayer::decodeOneFrame(bool skipRender) {
     if (_jpegBuffer == nullptr || _jpeg == nullptr || _storage == nullptr) return false;
 
-    // Case 1: SLBX raw RGB565 (pixels pushed straight to the LCD, no JPEGDEC)
+    // Case 1: SLBX raw RGB565, pushed straight to the LCD
     if (_isSlbxRgb565) {
         uint32_t bytesPerLine = _slbxWidth * 2;
         uint32_t linesPerChunk = JPEG_BUFFER_SIZE / bytesPerLine;
-        if (linesPerChunk == 0) linesPerChunk = 1; // Safeguard
+        if (linesPerChunk == 0) linesPerChunk = 1;
 
         int x = (SCREEN_WIDTH > _slbxWidth) ? (SCREEN_WIDTH - _slbxWidth) / 2 : 0;
         int y = (SCREEN_HEIGHT > _slbxHeight) ? (SCREEN_HEIGHT - _slbxHeight) / 2 : 0;
@@ -508,17 +472,15 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
             uint32_t linesToRead = (remainingLines > linesPerChunk) ? linesPerChunk : remainingLines;
             uint32_t bytesToRead = linesToRead * bytesPerLine;
 
-            // Read storage first (the LCD hasn't locked SPI yet)
             int readBytes = _storage->readData(_jpegBuffer, bytesToRead);
             if ((uint32_t)readBytes < bytesToRead) {
                 DLOG("[PLAY] RGB short read");
                 return false;
             }
 
-            // Same reason as the JPEG branch below: top up the DMA before locking the bus.
+            // Top up the DMA before locking the bus (see the JPEG branch).
             _audio.tick();
 
-            // Hold the SPI mutex only while pushing to the LCD
             if (!skipRender) {
                 if (!_display->acquireSPI()) return false;
                 _display->pushImage(x, currentY, _slbxWidth, linesToRead, (const uint16_t*)_jpegBuffer);
@@ -532,11 +494,10 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
         return true;
     }
 
-    // Case 2: JPEG / MJPEG (decoded by JPEGDEC)
+    // Case 2: JPEG / MJPEG
     uint32_t jpegSize = 0;
 
     if (_readFrameSizeHeader) {
-        // 1. Read the JPEG frame size (4-byte header)
         uint8_t sizeBytes[4] = {0};
         int sizeRead = _storage->readData(sizeBytes, sizeof(sizeBytes));
         if (sizeRead < 4) {
@@ -566,7 +527,6 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
         if (jpegSize > JPEG_BUFFER_SIZE) jpegSize = JPEG_BUFFER_SIZE;
     }
 
-    // 2. Read the whole JPEG into the RAM buffer in a single call
     int readBytes = _storage->readData(_jpegBuffer, jpegSize);
     if ((uint32_t)readBytes < jpegSize) {
         if (_display) {
@@ -578,27 +538,21 @@ bool MediaPlayer::decodeOneFrame(bool skipRender) {
         return false;
     }
 
-    // The data is read, so the file cursor already sits at the next frame; return
-    // early to skip exactly the expensive part (JPEGDEC + a full frame over SPI).
+    // The cursor already sits at the next frame: skip only the decode + push.
     if (skipRender) return true;
 
-    // Top up the DMA RIGHT BEFORE the longest blind stretch. update() only ticks
-    // at both ends of a frame, so in between the DMA gets no bytes for the whole
-    // (SD read + decode + screen push). The DMA only lasts 192ms for 8kHz files
-    // and 96ms for 16kHz (12 × 512 frames, hardware runs x AUDIO_OVERSAMPLE) ->
-    // running dry is an audible crackle.
-    // HERE rather than after acquireSPI(): tick() reads the card, so it must stay
-    // outside the display transaction — the mutex is not recursive.
+    // Top up the DMA right before the longest stretch without ticks (it lasts only
+    // 96ms at 16kHz). BEFORE acquireSPI(): tick() reads the card and the mutex is
+    // not recursive.
     _audio.tick();
 
-    // 3. Lock the SPI bus and decode straight to the screen
     if (!_display->acquireSPI()) return false;
 
     if (_jpeg->openRAM(_jpegBuffer, jpegSize, jpegDrawCallback)) {
         _jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
         LGFX* tft = _display->getTFT();
 
-        tft->startWrite(); // one SPI transaction with the ST7789 for all MCU blocks
+        tft->startWrite(); // one SPI transaction for all MCU blocks
         int decodeRes = _jpeg->decode(0, 0, 0);
         tft->endWrite();
 

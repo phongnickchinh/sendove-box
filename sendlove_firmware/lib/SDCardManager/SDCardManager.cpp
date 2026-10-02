@@ -3,44 +3,30 @@
 #include "ScreenLogger.h"
 #include "config.h"
 
-// ============================================================================
-// SDCardManager Implementation
-// ============================================================================
 // MANDATORY RULES in this file:
-//  R1: DLOG() MUST stay OUTSIDE any region holding the mutex. ScreenLogger::render()
-//      takes this same _spiMutex (non-recursive, 50ms timeout) -> a stray DLOG in
-//      appendChunk() costs 50ms per 2KB chunk and looks exactly like a network fault.
-//  R2: Every SD.* / File.* call must sit inside acquireSPI()/releaseSPI(). The
-//      ST7789 has no CS pin -> unguarded SD traffic corrupts the frame being
-//      pushed to the screen.
-//  R3: No File may be destructed outside the mutex. Always close() explicitly
-//      inside the locked region; close() sets _f = null, so the later destructor
-//      is harmless.
-//  R4: Never nest acquireSPI() (the mutex is non-recursive).
-// ============================================================================
+//  R1: No DLOG() while holding the mutex: ScreenLogger::render() takes the same
+//      non-recursive _spiMutex (50ms timeout per call).
+//  R2: Every SD.* / File.* call sits inside acquireSPI()/releaseSPI(): the CS-less
+//      ST7789 sees unguarded SD traffic as display data.
+//  R3: close() every File explicitly inside the locked region, never by destructor.
+//  R4: Never nest acquireSPI().
 
 bool SDCardManager::init(uint8_t csPin, SemaphoreHandle_t spiMutex) {
     _csPin = csPin;
     _spiMutex = spiMutex;
     _mounted = false;
 
-    // A soft reset (RST button, OTA, WDT) does NOT power-cycle the card: the card
-    // may have been mid-read when the chip reset, so the first SD.begin() after a
-    // reset often fails although the card is fine. A failure leaves the box running
-    // empty until it is unplugged: isFull() = true and unread = 0 -> the log line
-    // "msg skip: het slot, unread=0" on every sync. A failed SD.begin() cleans up
-    // after itself (_pdrv = 0xFF), so it can be retried right away.
+    // A soft reset doesn't power-cycle the card, so the first SD.begin() often
+    // fails although the card is fine (MEMORY.md §26): retry.
     bool ok = false;
     uint32_t cardMB = 0;
     uint8_t attempt = 0;
     for (; attempt < 3 && !ok; attempt++) {
-        if (attempt > 0) delay(200); // the mutex isn't held while waiting
+        if (attempt > 0) delay(200); // mutex not held here
         if (!acquireSPI()) return false;
 
-        // SD.begin() defaults to 4MHz -> too slow for 15fps video. The library drops
-        // to 400kHz during init and then uses this value. max_files = 7: 4 resident
-        // handles (message write + sequential read + random read + general file
-        // write) plus the temporary handle of readFile/readFileAt/listDir.
+        // max_files = 7: 4 resident handles (message write, sequential read, random
+        // read, general write) plus temporaries.
         ok = SD.begin(_csPin, SPI, SD_SPI_FREQ_HZ, "/sd", 7, false);
         if (ok) cardMB = (uint32_t)(SD.cardSize() / (1024ULL * 1024ULL));
 
@@ -60,7 +46,7 @@ bool SDCardManager::init(uint8_t csPin, SemaphoreHandle_t spiMutex) {
 
 void SDCardManager::mkParentDirLocked(const char* path) {
     const char* lastSlash = strrchr(path, '/');
-    if (!lastSlash || lastSlash == path) return; // File nam o thu muc goc
+    if (!lastSlash || lastSlash == path) return; // file in the root directory
 
     char dir[64];
     size_t len = (size_t)(lastSlash - path);
@@ -121,10 +107,8 @@ bool SDCardManager::openFileForWrite(const char* path) {
     _writeFile = SD.open(path, FILE_WRITE);
     bool ok = (bool)_writeFile;
     if (ok) {
-        // A small, known buffer: a full or removed card surfaces from fwrite within
-        // 512B instead of at some unpredictable flush -> writeChunk's "returns a
-        // short count" contract becomes trustworthy.
-        // REMOVE THIS ONE LINE if download speed drops.
+        // Small buffer: a full or removed card shows up within 512B, so a short
+        // write count is trustworthy. Remove this line if download speed drops.
         _writeFile.setBufferSize(512);
     }
 
@@ -140,7 +124,7 @@ bool SDCardManager::openFileForAppend(const char* path, uint32_t atOffset) {
 
     if (_writeFile) _writeFile.close();
 
-    // "r+" opens read-write WITHOUT truncating (unlike FILE_WRITE = "w" = O_TRUNC).
+    // "r+": read-write WITHOUT truncating.
     _writeFile = SD.open(path, "r+");
     bool ok = (bool)_writeFile;
     if (ok) {
@@ -162,7 +146,7 @@ size_t SDCardManager::appendChunk(const uint8_t* data, size_t len) {
     size_t written = _writeFile.write(data, len);
 
     releaseSPI();
-    // NO DLOG here (R1): this runs every 2KB throughout a download.
+    // NO DLOG here (R1).
     return written;
 }
 
@@ -252,16 +236,14 @@ bool SDCardManager::openAtFile(const char* path) {
 int SDCardManager::readAtFile(uint32_t offset, uint8_t* buffer, uint32_t len) {
     if (!_atFile || !buffer || len == 0) return 0;
 
-    // The hard limit is the PHYSICAL file size, not dataSize — the audio region
-    // sits after dataSize, which is the very reason readAt() exists.
+    // Limit = the physical file size, not dataSize (the audio sits after it).
     if (offset >= _atSize) return 0;
     if ((uint64_t)offset + len > _atSize) len = _atSize - offset;
 
     if (!acquireSPI()) return 0;
 
     bool ok = true;
-    // Skip the seek when already in position: AudioPlayer reads monotonically in
-    // AUDIO_READ_CHUNK_SIZE steps, and seeking every time would defeat stdio's readahead.
+    // Skip the seek when already in position (keeps stdio's readahead).
     if (!_atPosKnown || offset != _atPos) {
         ok = _atFile.seek(offset);
         _atPosKnown = ok;
@@ -272,7 +254,7 @@ int SDCardManager::readAtFile(uint32_t offset, uint8_t* buffer, uint32_t len) {
         _atPos = offset + (uint32_t)n;
         _atPosKnown = true;
     } else {
-        _atPosKnown = false; // position no longer certain -> seek again next time
+        _atPosKnown = false; // seek again next time
     }
 
     releaseSPI();
@@ -341,7 +323,7 @@ int32_t SDCardManager::readFile(const char* path, uint8_t* buf, size_t maxLen) c
 // --- General files (theme, alarm music, log) ---
 
 bool SDCardManager::remount() {
-    // The caller guarantees no handle is in use (only called in STANDBY, not playing).
+    // Caller guarantees no handle is in use (STANDBY only).
     if (acquireSPI()) {
         if (_writeFile) _writeFile.close();
         if (_readFile) _readFile.close();
@@ -360,8 +342,7 @@ bool SDCardManager::remount() {
 bool SDCardManager::probe() {
     if (!_mounted) return false;
     if (!acquireSPI()) return false;
-    // Open + actually read one byte: SD.cardType()/totalBytes() only return values
-    // cached at mount and still look normal after the card is removed.
+    // Really read one byte: SD.cardType()/totalBytes() are cached at mount.
     bool ok = false;
     File f = SD.open("/sys/layout.json", FILE_READ);
     if (f) {
@@ -423,9 +404,9 @@ bool SDCardManager::removeDir(const char* path) {
 
 size_t SDCardManager::listDir(const char* dir, void (*cb)(const char*, bool, void*), void* ctx) {
     if (!_mounted || !cb) return 0;
-    // Copy the names out first, then call cb OUTSIDE the mutex (R4: cb may delete/rename files).
+    // Collect names first, then call cb OUTSIDE the mutex (R4).
     static constexpr size_t MAX_ENTRIES = 24;
-    static constexpr size_t NAME_LEN = 40;  // NOT named NAME_MAX: that clashes with a limits.h macro
+    static constexpr size_t NAME_LEN = 40;  // NAME_MAX would clash with limits.h
     char names[MAX_ENTRIES][NAME_LEN];
     bool dirs[MAX_ENTRIES];
     size_t n = 0;
@@ -457,8 +438,7 @@ size_t SDCardManager::listDir(const char* dir, void (*cb)(const char*, bool, voi
 uint32_t SDCardManager::freeMB() const {
     if (!_mounted) return 0;
     if (!acquireSPI()) return 0;
-    // usedBytes() scans the FAT when FSINFO is invalid -> it can take seconds on a
-    // large card. The caller (SdStore) only calls it at mount and after each download, then caches it.
+    // usedBytes() may scan the FAT (seconds on a large card): SdStore caches the result.
     uint64_t total = SD.totalBytes();
     uint64_t used = SD.usedBytes();
     releaseSPI();
@@ -472,7 +452,7 @@ bool SDCardManager::openGenWrite(const char* path, bool append) {
     mkParentDirLocked(path);
     _genFile = SD.open(path, append ? FILE_APPEND : FILE_WRITE);
     bool ok = (bool)_genFile;
-    if (ok) _genFile.setBufferSize(512);  // same reason as in openFileForWrite
+    if (ok) _genFile.setBufferSize(512);  // see openFileForWrite
     releaseSPI();
     if (!ok) DLOG("[SD] open G fail");
     return ok;
@@ -497,18 +477,12 @@ void SDCardManager::closeGenWrite() {
 // --- SPI Mutex + NOP Hack ---
 
 bool SDCardManager::acquireSPI() const {
-    if (_spiMutex == nullptr) return true; // no mutex → nothing to take
+    if (_spiMutex == nullptr) return true;
 
     if (xSemaphoreTake(_spiMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        // NOP hack for the ST7789 (it has no CS pin, so it sees every byte on the
-        // bus): send 2 NOP commands (0x00) with TFT_DC = LOW, then pull TFT_DC HIGH.
-        // The display enters data mode and swallows all SD traffic as the NOP's
-        // pixel data instead of mistaking it for commands. Mirrors
-        // NandStorage::acquireSPI().
-        //
-        // SPI_BUS_MODE, NOT a literal SPI_MODE3: a transaction in a mode different
-        // from LovyanGFX's would RECREATE the very CPOL flip this is here to avoid
-        // (SCK's idle level jumps -> one spurious rising edge -> byte framing lost).
+        // NOP hack for the CS-less ST7789: 2 NOPs with TFT_DC low, then DC high, so
+        // the display swallows SD traffic as data (mirrors NandStorage::acquireSPI()).
+        // Use SPI_BUS_MODE, the mode LovyanGFX uses: a CPOL flip breaks byte framing.
         SPI.beginTransaction(SPISettings(SD_SPI_FREQ_HZ, MSBFIRST, SPI_BUS_MODE));
         digitalWrite(PIN_TFT_DC, LOW);
         delayMicroseconds(2);
@@ -520,7 +494,7 @@ bool SDCardManager::acquireSPI() const {
 
         return true;
     }
-    // Safe: the mutex isn't held on this branch, so DLOG can't self-deadlock (R1).
+    // Mutex not held here, so DLOG is safe (R1).
     DLOG("[SD] ERR: SPI mutex timeout");
     return false;
 }

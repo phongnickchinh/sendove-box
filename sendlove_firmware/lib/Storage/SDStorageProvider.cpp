@@ -4,12 +4,10 @@
 #include "ScreenLogger.h"
 #include "config.h"
 
-// Enough for "/media/slot_19.bin" (19 chars) plus margin
+// Fits "/media/slot_19.bin"
 static constexpr size_t SD_PATH_MAX = 48;
 
-// ============================================================================
-// Helpers
-// ============================================================================
+// ---- Helpers ----
 
 int8_t SDStorageProvider::parseIndex(const char* identifier) const {
     if (!identifier || identifier[0] == '\0') return -1;
@@ -40,9 +38,7 @@ int8_t SDStorageProvider::writeIndexSafe() const {
     return (i < 0 || i >= SD_SLOT_COUNT) ? 0 : i;
 }
 
-// ============================================================================
-// Manifest
-// ============================================================================
+// ---- Manifest ----
 
 void SDStorageProvider::resetManifest() {
     memset(&_m, 0, sizeof(_m));
@@ -52,15 +48,12 @@ void SDStorageProvider::resetManifest() {
     _m.writeSlotIndex = 0;
 }
 
-// The manifest is written atomically: write a temp file, delete the old one, rename.
-// After a power loss midway (dead battery, charger pulled — a mandatory case,
-// MEMORY.md §28) exactly one of the two
-// files is complete at boot. Writing index.bin in place with "w" would truncate it
-// first -> a power loss at that moment loses the whole message queue.
+// Atomic write (temp file, delete old, rename): after a power loss midway exactly
+// one complete file exists at boot (mandatory case, MEMORY.md §28).
 static constexpr const char* SD_MANIFEST_TMP = "/media/index.tmp";
 
 bool SDStorageProvider::loadManifest() {
-    // The previous write died after deleting the old file, before the rename -> the temp file is the right one.
+    // The last write died between delete and rename: the temp file is the good one.
     if (!_sd.fileExists(SD_MANIFEST_PATH) && _sd.fileExists(SD_MANIFEST_TMP)) {
         _sd.renameFile(SD_MANIFEST_TMP, SD_MANIFEST_PATH);
     }
@@ -102,28 +95,22 @@ bool SDStorageProvider::remount() {
     return true;
 }
 
-// ============================================================================
-// Init
-// ============================================================================
+// ---- Init ----
 
 bool SDStorageProvider::init(SemaphoreHandle_t spiMutex) {
     _mounted = _sd.init(PIN_SD_CS, spiMutex);
 
     if (!_mounted) {
-        // NEVER return false: main.cpp hangs forever (while(1) delay) when
-        // storage->init() fails. NandStorage::init() never returns false, so that
-        // branch never ran — but SD.begin() returns false whenever the card is
-        // missing/loose/not FAT, which is NORMAL for a removable card.
+        // NEVER return false: main.cpp halts when init() fails, and a missing card
+        // is NORMAL for removable storage.
         resetManifest();
         DLOG("[SDP] khong co the -> chay rong");
         return true;
     }
 
     if (!loadManifest()) {
-        // Corrupt manifest: create a new one but do NOT delete existing files.
-        // Rebuilding the manifest by scanning files is impossible (dataSize can't
-        // be told apart from audioSize) and would produce confidently wrong
-        // playback — far worse than an honest "no messages".
+        // Corrupt manifest: start a new one but do NOT delete files. It can't be
+        // rebuilt by scanning (dataSize vs audioSize is unknowable).
         DLOG("[SDP] manifest moi (giu nguyen file cu)");
         resetManifest();
         saveManifest();
@@ -133,14 +120,10 @@ bool SDStorageProvider::init(SemaphoreHandle_t spiMutex) {
     return true;
 }
 
-// ============================================================================
-// Read
-// ============================================================================
+// ---- Read ----
 
 bool SDStorageProvider::openForRead(const char* identifier) {
-    // MediaPlayer leaves an item open on its error branches and then calls
-    // openForRead() again over it. NAND tolerates that because openSlot() only
-    // assigns variables; SD has real file descriptors, so close explicitly or leak one.
+    // MediaPlayer may reopen without closing: close explicitly or leak a descriptor.
     closeRead();
 
     if (!_mounted) return false;
@@ -156,15 +139,9 @@ bool SDStorageProvider::openForRead(const char* identifier) {
         return false;
     }
 
-    // The card is removable, so a file can be SHORTER than the manifest says
-    // (pulled mid-download, or edited on a computer) — damage fileExists() can't
-    // see. If ignored: _readCeil > the real length -> EVERY decodeOneFrame() hits
-    // MediaPlayer's "Read short" + showMessage() + delay(2000), frame after frame
-    // in Task_MediaPlayer, with that toast holding the SPI mutex.
-    // Returning false here sends the slot down the path NAND already has:
-    // getNextUnreadIdentifier() clears the unread flag and moves on. The NAND build
-    // is immune because openSlot() inspects the actual flash data, which can't
-    // diverge from the slot table this way.
+    // A file can be SHORTER than the manifest says (card pulled mid-download or
+    // edited on a computer). Reject it here, or every frame hits "Read short" +
+    // delay(2000); the caller then clears the unread flag and moves on.
     if (_sd.atFileSize() < _m.slots[idx].dataSize) {
         DLOG("[SDP] slot %d cut: file %lu < dataSize %lu", (int)idx,
              (unsigned long)_sd.atFileSize(), (unsigned long)_m.slots[idx].dataSize);
@@ -181,8 +158,7 @@ bool SDStorageProvider::openForRead(const char* identifier) {
 
 int SDStorageProvider::readData(uint8_t* buffer, uint32_t len) {
     if (_readIndex < 0 || !buffer || len == 0) return 0;
-    // The ceiling is dataSize (the video part). The audio region sits AFTER
-    // dataSize and only readAt() can reach it — same as NandStorage::readData().
+    // Ceiling = dataSize (video). The audio after it is reachable only via readAt().
     if (_readCursor >= _readCeil) return 0;
 
     uint32_t avail = _readCeil - _readCursor;
@@ -195,8 +171,7 @@ int SDStorageProvider::readData(uint8_t* buffer, uint32_t len) {
 
 void SDStorageProvider::seek(uint32_t offset) {
     if (_readIndex < 0) return;
-    // Skip when already in position: MediaPlayer calls seek(20) right after
-    // reading the 20 header bytes, and a real seek there only defeats stdio's readahead.
+    // Skip when already in position: a redundant seek defeats stdio's readahead.
     if (offset != _readCursor) {
         _sd.seekReadFile(offset);
     }
@@ -204,7 +179,7 @@ void SDStorageProvider::seek(uint32_t offset) {
 }
 
 int SDStorageProvider::readAt(uint32_t offset, uint8_t* buffer, uint32_t len) {
-    // A SEPARATE handle in SDCardManager — the sequential cursor is untouched.
+    // Separate handle: the sequential cursor is untouched.
     return _sd.readAtFile(offset, buffer, len);
 }
 
@@ -217,8 +192,7 @@ void SDStorageProvider::closeRead() {
 }
 
 StorageItemInfo SDStorageProvider::getItemInfo(const char* identifier) const {
-    // PURE RAM, ZERO I/O: main.cpp calls this on EVERY player.update() loop
-    // (i.e. every frame during video playback).
+    // RAM only, NO I/O: called on every player.update() loop.
     StorageItemInfo info;
     int8_t idx = parseIndex(identifier);
     if (idx < 0) idx = _readIndex;
@@ -232,7 +206,7 @@ StorageItemInfo SDStorageProvider::getItemInfo(const char* identifier) const {
     info.totalFrames = e.totalFrames;
     info.maxDisplayTime = e.maxDisplayTime > 0 ? e.maxDisplayTime : 60;
 
-    // Same magic -> type mapping as NandStorageProvider::getItemInfo()
+    // Same mapping as NandStorageProvider::getItemInfo()
     if (memcmp(e.magic, "VJPG", 4) == 0) {
         info.type = StorageItemType::VIDEO;
     } else if (memcmp(e.magic, "VIMG", 4) == 0 || memcmp(e.magic, "SLBX", 4) == 0) {
@@ -243,9 +217,7 @@ StorageItemInfo SDStorageProvider::getItemInfo(const char* identifier) const {
     return info;
 }
 
-// ============================================================================
-// Write
-// ============================================================================
+// ---- Write ----
 
 bool SDStorageProvider::openForWrite(const char* identifier) {
     _sd.closeWriteFile();
@@ -268,8 +240,8 @@ bool SDStorageProvider::openForWrite(const char* identifier) {
     buildPath(idx, path, sizeof(path));
     if (!_sd.openFileForWrite(path)) return false;
 
-    // A 4-byte placeholder for the size prefix, patched in closeWrite(). Keeps the
-    // NAND slot layout so MediaPlayer finds the magic at offset 4.
+    // 4-byte size prefix placeholder (patched in closeWrite()): keeps the NAND
+    // layout, with the magic at offset 4.
     const uint8_t zero4[4] = {0, 0, 0, 0};
     if (_sd.appendChunk(zero4, sizeof(zero4)) != sizeof(zero4)) {
         _sd.closeWriteFile();
@@ -290,10 +262,8 @@ bool SDStorageProvider::openForWrite(const char* identifier) {
 size_t SDStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     if (!_writeOpen || !data || len == 0) return 0;
 
-    // Capture the 16-byte container header into RAM as it passes, instead of
-    // reading it back from the file in closeWrite() like NAND does. NAND can read
-    // back because it writes straight to flash; on SD a stdio buffer sits in
-    // between, so reading back would need a flush first.
+    // Capture the 16-byte container header as it passes; reading it back in
+    // closeWrite() would need a flush first.
     if (_capturingHeader && _writeSize < 20) {
         uint32_t need = 20 - _writeSize;
         uint32_t take = (len < need) ? (uint32_t)len : need;
@@ -304,8 +274,7 @@ size_t SDStorageProvider::writeChunk(const uint8_t* data, size_t len) {
     size_t w = _sd.appendChunk(data, len);
     _writeSize += (uint32_t)w;
 
-    // NO DLOG here (R1): this runs every 2KB throughout a download.
-    // Returning w < len is the writeError signal NetworkManager relies on.
+    // NO DLOG here (R1). w < len is NetworkManager's write-error signal.
     return w;
 }
 
@@ -313,23 +282,19 @@ void SDStorageProvider::closeWrite(uint32_t maxDisplayTime) {
     int8_t idx = _activeIndex;
     if (idx < 0 || idx >= SD_SLOT_COUNT) return;
 
-    // 1. Patch the size prefix at offset 0.
-    //    Mode "w" is O_TRUNC — truncation happens at OPEN, so overwriting 4 bytes
-    //    at the start can't shorten the file.
+    // 1. Patch the size prefix at offset 0 (overwriting can't shorten the file).
     uint32_t rawSize = (_writeSize >= 4) ? (_writeSize - 4) : 0;
     const uint8_t sizeBytes[4] = {(uint8_t)(rawSize & 0xFF), (uint8_t)((rawSize >> 8) & 0xFF),
                                   (uint8_t)((rawSize >> 16) & 0xFF),
                                   (uint8_t)((rawSize >> 24) & 0xFF)};
     _sd.patchWriteFileAt0(sizeBytes);
 
-    // 2. Close (flush) the file BEFORE the manifest advertises it — same reasoning
-    //    as NAND writing the slot table before committing the unread bitmask to NVS.
+    // 2. Close (flush) the file BEFORE the manifest advertises it.
     _sd.closeWriteFile();
     _writeOpen = false;
     _capturingHeader = false;
 
-    // 3. Classify the container from _hdrPeek — same branch logic as
-    //    NandStorageProvider::closeWrite().
+    // 3. Classify the container (same logic as NandStorageProvider::closeWrite()).
     SdSlotEntry& e = _m.slots[idx];
     memset(&e, 0, sizeof(e));
     e.maxDisplayTime = maxDisplayTime;
@@ -364,19 +329,15 @@ void SDStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         e.fps = (fps > 0) ? fps : 10;
         e.totalFrames = totalFrames;
     } else {
-        // Raw JPEG, or the image-less "still message" path (0 payload bytes ->
-        // _hdrPeek all zero) -> dataSize = 4 is the SENTINEL
-        // MediaPlayer::playItem() looks for (type==IMAGE && dataSize<=4).
+        // Raw JPEG, or an image-less message: dataSize = 4 is the SENTINEL
+        // MediaPlayer::playItem() looks for.
         memcpy(e.magic, "VIMG", 4);
         e.dataSize = _writeSize;
         e.fps = 1;
         e.totalFrames = 1;
     }
 
-    // 4. Delete the slot's old caption. NAND is immune because setSlotInfo()
-    //    memsets the whole SlotEntry (killing textLen); a sidecar file has no such
-    //    coupling, so an old message's caption would show on a new message
-    //    reusing the slot.
+    // 4. Delete the slot's old caption sidecar, or it would show on the new message.
     char tpath[SD_PATH_MAX];
     buildTextPath(idx, tpath, sizeof(tpath));
     _sd.deleteFile(tpath);
@@ -410,10 +371,8 @@ void SDStorageProvider::discardWrite() {
         bool wasUnread = (_m.slots[idx].unread != 0);
         memset(&_m.slots[idx], 0, sizeof(SdSlotEntry));
 
-        // The "no image" write path already ran closeWrite() to commit a placeholder
-        // BEFORE knowing whether the audio downloads -> the unread flag and
-        // writeSlotIndex may ALREADY be set/advanced. Step back to this slot so the
-        // next sync retries it instead of burning a new slot on every failure.
+        // The image-less path committed a placeholder before its audio download:
+        // undo the unread flag and step the cursor back so the next sync reuses this slot.
         if (wasUnread) _m.writeSlotIndex = idx;
 
         saveManifest();
@@ -427,9 +386,7 @@ bool SDStorageProvider::openForAppend(const char* identifier) {
     if (idx < 0) idx = _lastWrittenIndex;
     if (idx < 0 || idx >= SD_SLOT_COUNT || !_mounted) return false;
 
-    // Seek to dataSize, NOT EOF: the AUDC header then lands at the exact offset
-    // AudioPlayer::loadFromStorage() probes (readAt(dataSize, ...)), including the
-    // dataSize == 4 sentinel of an image-less still message.
+    // Seek to dataSize, NOT EOF: that is where AudioPlayer looks for the AUDC header.
     uint32_t at = _m.slots[idx].dataSize;
 
     char path[SD_PATH_MAX];
@@ -448,8 +405,7 @@ bool SDStorageProvider::openForAppend(const char* identifier) {
 void SDStorageProvider::closeAppend() {
     uint32_t finalSize = _writeSize;
 
-    // Close the handle BEFORE any guard: SD has real file descriptors; NAND
-    // doesn't, so its version can early-return without leaking.
+    // Close the handle BEFORE any guard (real file descriptor).
     _sd.closeWriteFile();
     _writeOpen = false;
 
@@ -468,8 +424,7 @@ void SDStorageProvider::setItemText(const char* identifier, const char* text) {
 
     uint16_t len = (uint16_t)strlen(text);
     uint16_t copyLen = (len < SD_TEXT_MAX_LEN - 1) ? len : (uint16_t)(SD_TEXT_MAX_LEN - 1);
-    // Truncate safely at a UTF-8 boundary — same as NandStorage::setSlotText(), so
-    // captions on SD display exactly as on NAND.
+    // Truncate at a UTF-8 boundary (same as NandStorage::setSlotText()).
     while (copyLen > 0 && (((uint8_t)text[copyLen]) & 0xC0) == 0x80) {
         copyLen--;
     }
@@ -501,16 +456,12 @@ bool SDStorageProvider::getItemText(const char* identifier, char* outBuf, size_t
     return true;
 }
 
-// ============================================================================
-// Queue
-// ============================================================================
+// ---- Queue ----
 
 bool SDStorageProvider::isFull() const {
-    // PURE RAM: main.cpp calls this every UI tick.
-    // No card -> report full so the system doesn't try to download into nothing.
+    // RAM only (called every UI tick). No card -> report full, so nothing is downloaded.
     if (!_mounted) return true;
-    // Equivalent to NAND's (allUnread || unread[writeSlotIndex]): if every slot is
-    // unread then unread[writeSlotIndex] is necessarily 1, so the left term is redundant.
+    // Equivalent to NAND's (allUnread || unread[writeSlotIndex]).
     return _m.slots[writeIndexSafe()].unread != 0;
 }
 
@@ -520,7 +471,7 @@ bool SDStorageProvider::getNextWriteSlotIdentifier(char* outId, size_t maxLen) {
         DLOG("[SDP] FULL");
         return false;
     }
-    // Plain decimal, at most 2 chars -> fits NetworkManager's char writeSlotId[16].
+    // Decimal, at most 2 chars.
     snprintf(outId, maxLen, "%d", (int)writeIndexSafe());
     return true;
 }
@@ -546,7 +497,7 @@ bool SDStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
     if (!_mounted || !outId || maxLen == 0) return false;
 
     bool healed = false;
-    // OLDEST unread first, scanning circularly from the write cursor.
+    // Oldest unread first, scanning from the write cursor.
     for (uint8_t i = 0; i < SD_SLOT_COUNT; i++) {
         int8_t idx = (int8_t)((writeIndexSafe() + i) % SD_SLOT_COUNT);
         if (!_m.slots[idx].unread) continue;
@@ -554,7 +505,7 @@ bool SDStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
         char path[SD_PATH_MAX];
         buildPath(idx, path, sizeof(path));
         if (!isSlotValid(idx) || !_sd.fileExists(path)) {
-            // Self-healing: the card is removable, so the file may have been deleted on a computer.
+            // Self-healing: the file may have been deleted on a computer.
             DLOG("[SDP] WARN: slot %d mat file -> bo co", (int)idx);
             _m.slots[idx].unread = 0;
             healed = true;
@@ -628,8 +579,7 @@ bool SDStorageProvider::formatStorage() {
     _writeSize = 0;
     saveManifest();
 
-    // Reset last_download_ts to 0 so messages download from scratch — same as
-    // NandStorageProvider::formatStorage().
+    // Reset last_download_ts so messages download from scratch.
     ConfigManager cfg;
     if (cfg.init(NVS_NAMESPACE)) {
         cfg.saveLastDownloadTimestamp(0);

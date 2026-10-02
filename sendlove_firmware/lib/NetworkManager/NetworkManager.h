@@ -38,11 +38,8 @@ public:
     /// Force RF reconnect if Wi-Fi is disconnected (with fallback & timeout)
     bool ensureConnected(uint32_t timeoutMs = 5000);
 
-    /// Tell the manager the chip just woke from light sleep. The next
-    /// ensureConnected() will FORCE a re-association instead of trusting
-    /// WiFi.status() — after sleep it usually still says WL_CONNECTED although the
-    /// association died on the AP side (the CPU was asleep, so the driver couldn't
-    /// process beacon-loss/deauth events). See ensureConnected().
+    /// The chip just woke from light sleep: the next ensureConnected() FORCES a
+    /// re-association instead of trusting WiFi.status() (see ensureConnected()).
     void notifyWakeFromSleep() { _forceReassociate = true; }
 
     /// Get current formatted time string ("14:30")
@@ -143,20 +140,17 @@ private:
     bool pushFirebaseAlarms();
     /// true until alarm_list is first downloaded after boot (or after a failed download)
     bool _alarmsNeedFetch = true;
-    /// User settings (brightness, volume): GET config (key range config_rev..playback_volume)
-    /// when config_flag is set, or on the first sync after boot (the web may have changed
-    /// them while the box was off). Retried on failure.
+    /// User settings (brightness, volume): fetched when config_flag is set or on the
+    /// first sync after boot. Retried on failure.
     bool syncFirebaseSettings();
     bool _settingsNeedFetch = true;
     /// PATCH the set flags back to false, ONE request for all flags (each request = 1 TLS handshake).
     void resetFlags(bool alarm, bool config, bool theme, bool music);
     bool checkAndDownloadNewMessages(class IStorageProvider* storage);
 
-    /// Download a Firebase Storage file to the card (theme, alarm music). Writes to
-    /// dst.part; a .part left from a previous attempt is resumed with
-    /// `Range: bytes=N-` (MEMORY.md §29, proposal #3). Once `size` bytes are in,
-    /// crc32 is checked and only then is it renamed to dst. Messages do NOT take
-    /// this path (slots are written through SDStorageProvider, with no .part to resume).
+    /// Download a Storage file to the card (theme, alarm music; not messages) via
+    /// dst.part, resumed with `Range` (MEMORY.md §29, proposal #3); renamed to dst
+    /// only after size + crc32 match.
     enum class DlResult : uint8_t { OK, ABORTED, FAILED };
     DlResult downloadFile(const char* storagePath, const char* dstPath, uint32_t size, uint32_t crc);
 
@@ -164,20 +158,17 @@ private:
     /// (MEMORY.md §29, proposal #2).
     void pushLogTail();
 
-    /// Alarm music: download tracks that alarms use and the card lacks (at most
-    /// ALARM_MUSIC_PER_SYNC per cycle, soonest alarm first) and delete tracks removed
-    /// from the library. The music list is fetched only when needed: flag set, a
-    /// track missing, first time. false = interrupted because an alarm/message
-    /// started playing (retried next cycle).
+    /// Alarm music: download tracks alarms use and the card lacks (at most
+    /// ALARM_MUSIC_PER_SYNC per cycle, soonest alarm first), delete removed ones.
+    /// false = interrupted by playback (retried next cycle).
     bool syncAlarmMusic();
     bool _musicNeedFetch = true;      // first time after boot / after a card remount / flag set
     uint32_t _seenMountEpoch = 0;     // the SdStore::mountEpoch already handled
 
-    /// Theme: GET config/theme when the flag is set / first time / the card was just
-    /// remounted; if rev differs from the copy in flash, download the package to
-    /// /theme/t_<id>_r<rev>/ and ask Task_MediaPlayer to install it (ThemeStore).
-    /// theme_flag is cleared only once the copy IN FLASH has the right rev (not when
-    /// the download finishes). false = interrupted because an alarm/message started playing.
+    /// Theme: when flagged (or first time / card remounted) and the rev differs from
+    /// flash, download the package and ask Task_MediaPlayer to install it. theme_flag
+    /// is cleared only once the copy IN FLASH has the right rev. false = interrupted
+    /// by playback.
     bool syncTheme(bool themeFlag);
     bool _themeNeedFetch = true;
     uint32_t _seenThemeEpoch = 0;
@@ -187,44 +178,34 @@ private:
 
     static void wakeupSyncTaskWorker(void* param);
 
-    /// The resident sync task: created once, then sleeps waiting for a notify.
-    /// Creating/deleting a task every cycle would keep allocating and freeing 12KB
-    /// of contiguous memory -> heap fragmentation (MEMORY.md §21).
+    /// The sync task: created once, then waits for notifies (MEMORY.md §21).
     TaskHandle_t _syncTask = nullptr;
     uint8_t _syncBattery = 0;
     bool _syncCharging = false;
     class IStorageProvider* _syncStorage = nullptr;
 
     // --- Firebase Auth: the box's own idToken instead of the Database Secret ---
-    // Holds the RAW JWT, no prefix: RTDB accepts NO auth header at all — only
-    // `?auth=` (verified, see MEMORY.md §17). Inside the #if so the legacy mode
-    // doesn't carry 1.4KB of BSS for nothing.
+    // The RAW JWT, no prefix: RTDB only takes `?auth=` (MEMORY.md §17).
 #if FIREBASE_USE_IDTOKEN
     char   _idToken[FIREBASE_ID_TOKEN_MAX_LEN] = "";
     time_t _idTokenExpiry = 0;
 #endif
 
-    /// URL build buffer SHARED by every Firebase request. A member, not a local,
-    /// because the ~945-byte idToken has to go in the URL. Safe: all these calls
-    /// run sequentially on the one network task, and HTTPClient::begin() copies
-    /// the URL into its own String, so overwriting it afterwards is harmless.
+    /// URL buffer SHARED by every Firebase request (the idToken goes in the URL).
+    /// Safe: requests run sequentially on one task and begin() copies the URL.
     char _url[FIREBASE_URL_MAX_LEN] = "";
 
-    /// Ensure a valid idToken. Prefers the refresh token in NVS (no password
-    /// resent); signs in with the password only when there is none or the refresh fails.
+    /// Ensure a valid idToken: refresh token first, password sign-in as fallback.
     bool ensureIdToken(bool force = false);
     bool authWithPassword();
     bool authWithRefreshToken(const char* refreshToken);
 
-    /// Append the auth parameter to `_url`: `?auth=<secret>` in legacy mode,
-    /// `?auth=<idToken>` in the new mode. `sep` is '?' or '&' depending on whether
-    /// the URL already has a query. There is NO header variant for RTDB — it
-    /// rejects both `Bearer` and `Firebase` (MEMORY.md §17).
+    /// Append `auth=<idToken | secret>` to `_url`; `sep` is '?' or '&'. RTDB takes
+    /// NO auth header (MEMORY.md §17).
     void appendAuth(char sep);
 
-    /// Firebase Storage is the OPPOSITE: it takes the header `Authorization:
-    /// Firebase <idToken>`. Different service, different scheme. No-op while the
-    /// Database Secret is in use.
+    /// Storage takes the header `Authorization: Firebase <idToken>`. No-op in
+    /// Database Secret mode.
     void addStorageAuthHeader(class HTTPClient& http);
 
     /// Call after every request: a 401 means the token is dead -> force a refresh next cycle
@@ -265,20 +246,17 @@ private:
 
     void handleCaptiveRoot();
     void handleCaptiveSubmit();
-    /// Returns the nearby Wi-Fi networks as JSON. The scan is asynchronous so it
-    /// doesn't block the web server: the first call returns {"status":"scanning"}
-    /// and the client polls again.
+    /// Nearby Wi-Fi networks as JSON. Asynchronous: {"status":"scanning"} until
+    /// done, the client polls.
     void handleCaptiveScan();
-    /// The URLs operating systems probe to check for internet access. Answer 302
-    /// to the portal page so the device pops up its sign-in window.
+    /// OS connectivity probes: answer 302 so the device opens its sign-in window.
     void handleCaptiveProbe();
-    /// Alarms on the portal (AP mode, no internet). An edit here sets AlarmClock's
-    /// dirty flag -> the first sync once online pushes over the cloud copy.
+    /// Alarms on the portal. An edit sets AlarmClock's dirty flag, so the first
+    /// sync online pushes over the cloud copy.
     void handleAlarmList();    // GET  /alarms
     void handleAlarmSave();    // POST /alarms/save   id?, time, en, rep
     void handleAlarmDelete();  // POST /alarms/delete id
-    /// POST /time epoch — takes the phone's time when the box has never had NTP
-    /// (AP mode right after power-up); without it alarms could never ring.
+    /// POST /time: takes the phone's time while the box has no NTP time, so alarms can ring.
     void handleSetTime();
     String buildCaptivePortalHTML();
 };

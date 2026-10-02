@@ -33,11 +33,9 @@ TouchEvent UIController::getTouchEvent() {
             DLOG("[UI] LONG_PRESS");
         }
 
-        // A second threshold within the SAME hold (6s, the last step of the OTA
-        // sequence). _longPressEmitted blocks every event after the 3s mark until
-        // release, so _veryLongEmitted is checked separately to fire exactly once.
-        // NEVER set a threshold ≥ ~7s: the TTP223 recalibrates after 7-8s of
-        // continuous touch and reports a release (see TOUCH_OTA_HOLD_MS in config.h).
+        // Second threshold within the SAME hold (OTA sequence), fired exactly once.
+        // NEVER set a threshold ≥ ~7s: the TTP223 recalibrates and reports a release
+        // (see TOUCH_OTA_HOLD_MS).
         if (_touchConfirmed && (now - _touchStartTime) >= TOUCH_OTA_HOLD_MS && !_veryLongEmitted) {
             _veryLongEmitted = true;
             result = TouchEvent::VERY_LONG_PRESS;

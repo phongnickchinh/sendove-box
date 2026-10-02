@@ -24,8 +24,7 @@ void NandStorageProvider::loadNvsState() {
     _writeSlotIndex = _prefs.getChar("write_idx", 0);
     _prefs.end();
 
-    // NVS may still hold state from the old 5-slot layout: bits 3-4 and write_idx
-    // 3/4 have no slot anymore. Left as-is, isFull() would stay true forever.
+    // Drop NVS state left from the old 5-slot layout, or isFull() stays true forever.
     _unreadBitmask &= SLOT_ALL_MASK;
     if (_writeSlotIndex < 0 || _writeSlotIndex >= NAND_SLOT_COUNT) _writeSlotIndex = 0;
     _activeSlot = _writeSlotIndex;
@@ -37,16 +36,14 @@ void NandStorageProvider::saveNvsState() {
     _prefs.putUChar("unread_mask", _unreadBitmask);
     _prefs.putChar("write_idx", _writeSlotIndex);
     _prefs.end();
-    // DLOG saved every time -> dropped
 }
 
 bool NandStorageProvider::init(SemaphoreHandle_t spiMutex) {
     bool ok = _nand.init(spiMutex);
     loadNvsState();
 
-    // A magic change wipes the slot table on flash but not unread_mask in NVS.
-    // Without this cleanup, the first boot after a firmware upgrade would report
-    // "unread message" pointing at an empty slot -> a blank message.
+    // A magic change wipes the slot table but not unread_mask in NVS: clear it too,
+    // or "unread" would point at an empty slot.
     if (ok && !_nand.isTableValid() && (_unreadBitmask != 0 || _writeSlotIndex != 0)) {
         DLOG("[NANDP] bang slot moi -> reset hang cho NVS");
         _unreadBitmask  = 0;
@@ -112,7 +109,7 @@ bool NandStorageProvider::openForWrite(const char* identifier) {
         slot = _writeSlotIndex; // default: the queue cursor
     }
 
-    // The slot at the queue cursor still holds an unread message -> refuse to write (storage full)
+    // The cursor's slot is still unread: storage full
     if (_unreadBitmask & (1 << slot)) {
         DLOG("[NANDP] ERR: slot %d unread full", slot);
         return false;
@@ -122,10 +119,8 @@ bool NandStorageProvider::openForWrite(const char* identifier) {
     _writeOffset = 4;
     _slotCapacity = slotSpan(slot);
 
-    // Erase-as-you-write: erase only the first 64KB block (~150-2000ms) instead of
-    // the whole ~5.3MB slot (15-25s of synchronous blocking). Erasing the whole
-    // slot stalls the already-open HTTP socket too long -> TCP zero-window -> CDN
-    // backoff -> the download times out midway (confirmed from real logs).
+    // Erase-as-you-write: only the first 64KB block now. Erasing the whole slot
+    // (15-25s) stalls the open HTTP socket until the download times out.
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_activeSlot];
     uint32_t initialEraseLen = (_slotCapacity < 65536U) ? _slotCapacity : 65536U;
     if (!_nand.eraseRange(slotStartAddr, initialEraseLen)) {
@@ -151,10 +146,9 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
         return 0;
     }
 
-    // Erase the next 64KB block when the write cursor is about to reach unerased
-    // space. INVARIANT: always erase starting at _erasedUpToAddr, NEVER at
-    // startAddr — eraseRange() with an address not aligned to 4096 rounds down to
-    // the start of its sector, so the wrong base can erase data just written.
+    // Erase the next 64KB block before the cursor reaches unerased space.
+    // INVARIANT: erase from _erasedUpToAddr, NEVER from startAddr — eraseRange()
+    // rounds an unaligned address down and would erase data just written.
     uint32_t slotEndAddr = slotStartAddr + _slotCapacity;
     while (_erasedUpToAddr < endAddr && _erasedUpToAddr < slotEndAddr) {
         uint32_t toErase = 65536U;
@@ -163,14 +157,13 @@ size_t NandStorageProvider::writeChunk(const uint8_t* data, size_t len) {
         }
         if (!_nand.eraseRange(_erasedUpToAddr, toErase)) {
             DLOG("[NANDP] ERR: erase-ahead FAILED @ %lu", (unsigned long)_erasedUpToAddr);
-            return 0;   // NetworkManager sees written < len -> writeError -> discardWrite()
+            return 0;   // short count = write error for NetworkManager
         }
         _erasedUpToAddr += toErase;
     }
 
-    // Report the real result — never `return len` unconditionally: one failed SPI
-    // mutex take (1000ms timeout while the priority-3 Task_MediaPlayer renders
-    // standby) would produce a "successful" download with holes in its data.
+    // Report the real result, never `return len`: a failed mutex take would
+    // leave holes in a "successful" download.
     if (!_nand.writeRaw(startAddr, data, len)) {
         DLOG("[NANDP] ERR: write failed @ %lu", (unsigned long)startAddr);
         return 0;
@@ -185,13 +178,13 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
 
     DLOG("[NANDP] closeWrite slot %d", _activeSlot);
 
-    // Write the data size (4 bytes) at offset 0
+    // Data size (4 bytes) at offset 0
     uint32_t rawJpegSize = (_writeOffset >= 4) ? (_writeOffset - 4) : 0;
     if (!_nand.writeRaw(slotStartAddr, (const uint8_t*)&rawJpegSize, 4)) {
         DLOG("[NANDP] ERR: size header write FAILED slot %d", _activeSlot);
     }
 
-    // Check the 16-byte container header at offset 4 (SLBX / SLOT / VJPG / VIMG)
+    // Container header at offset 4 (SLBX / SLOT / VJPG / VIMG)
     uint8_t header[16];
     _nand.readRaw(slotStartAddr + 4, header, 16);
 
@@ -205,11 +198,9 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         if (mediaType == 0x02 || totalFrames <= 1) {
             totalFrames = 1;
             _nand.setSlotInfo(_activeSlot, "VIMG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
-            // Dropped Detected SLBX image
         } else {
             if (totalFrames == 0) totalFrames = 1;
             _nand.setSlotInfo(_activeSlot, "VJPG", _writeOffset, finalFps, totalFrames, maxDisplayTime);
-            // Dropped Detected SLBX video
         }
     } else if (memcmp(header, "SLOT", 4) == 0 || memcmp(header, "VJPG", 4) == 0 || memcmp(header, "VIMG", 4) == 0) {
         uint32_t dataSize = *(uint32_t*)(header + 4);
@@ -218,26 +209,23 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
         if (dataSize == 0 || dataSize > _writeOffset) dataSize = _writeOffset;
         const char* magic = (totalFrames > 1) ? "VJPG" : "VIMG";
         _nand.setSlotInfo(_activeSlot, magic, dataSize, (fps > 0) ? fps : 10, totalFrames, maxDisplayTime);
-        // Dropped Detected pre-encoded
     } else {
         _nand.setSlotInfo(_activeSlot, "VIMG", _writeOffset, 1, 1, maxDisplayTime);
-        // Dropped Raw JPEG
     }
 
-    // 1. Mark the queue cursor's bit as unread (1)
+    // 1. Mark the slot unread
     _unreadBitmask |= (1 << _activeSlot);
 
-    // 2. Remember the slot and offset for openForAppend (audio appended next)
+    // 2. Remember slot + offset for openForAppend (audio)
     _lastWrittenSlot   = _activeSlot;
     _lastWrittenOffset = _writeOffset;
 
-    // 3. Advance the queue cursor to the next slot
+    // 3. Advance the queue cursor
     int8_t writtenSlot = _activeSlot;
     _writeSlotIndex = (_activeSlot + 1) % NAND_SLOT_COUNT;
     _slotCapacity = 0;
 
-    // Write the slot table to flash BEFORE committing the unread bitmask to NVS:
-    // after a reset midway, flash has valid data before NVS calls the slot unread.
+    // Slot table to flash BEFORE the unread bitmask to NVS (safe across a reset midway).
     _nand.writeSlotTable();
     saveNvsState();
     DLOG("[NANDP] written slot %d next %d", writtenSlot, _writeSlotIndex);
@@ -246,20 +234,13 @@ void NandStorageProvider::closeWrite(uint32_t maxDisplayTime) {
 void NandStorageProvider::discardWrite() {
     if (_activeSlot >= 0 && _activeSlot < NAND_SLOT_COUNT) {
         DLOG("[NANDP] discardWrite slot %d (bo %lu byte do)", _activeSlot, (unsigned long)_writeOffset);
-        // The physical area was partly erased by openForWrite(); clear the magic in
-        // the slot table so isSlotValid()/findFirstValidSlot() don't mistake this
-        // garbage for a valid item.
+        // Clear the slot's magic so the partly erased area isn't taken for a valid item.
         const char emptyMagic[4] = {0, 0, 0, 0};
         _nand.setSlotInfo(_activeSlot, emptyMagic, 0, 0, 0, 0);
         _nand.writeSlotTable();
 
-        // On the "no image" write path (audio/text only), closeWrite() already ran
-        // FIRST to commit a placeholder (openForAppend() needs it to compute the
-        // offset) before the audio/text download is known to succeed -> the unread
-        // bit and _writeSlotIndex may ALREADY be set/advanced when discardWrite()
-        // is called. Clear the bit + pull _writeSlotIndex back to this slot so the
-        // next sync retries the slot that failed instead of burning a new one.
-        // Harmless if the bit was never set.
+        // The image-less path committed a placeholder before its audio download:
+        // undo the unread bit and step the cursor back so the next sync reuses this slot.
         if (_unreadBitmask & (1 << _activeSlot)) {
             _unreadBitmask &= ~(1 << _activeSlot);
             _writeSlotIndex = _activeSlot;
@@ -294,17 +275,13 @@ bool NandStorageProvider::openForAppend(const char* identifier) {
     }
     if (slot < 0) return false;
 
-    // No re-erase — keep writing from where the video write ended.
-    // Set ONLY _activeSlot: _writeSlotIndex is the queue cursor and closeWrite
-    // already advanced it. Pulling it back here would make isFull() see an unread
-    // slot -> report full.
+    // No re-erase: continue where the video write ended. Set ONLY _activeSlot;
+    // pulling _writeSlotIndex back would make isFull() report full.
     _activeSlot   = slot;
     _writeOffset  = _lastWrittenOffset;
     _slotCapacity = slotSpan(slot);
 
-    // Recompute _erasedUpToAddr from _writeOffset (rounded up to the next 64KB
-    // block) instead of trusting the value left by the previous openForWrite()
-    // session — self-healing, correct whatever the actual call order.
+    // Recompute _erasedUpToAddr from _writeOffset rather than trust the last session's value.
     uint32_t slotStartAddr = NAND_SLOT_ADDRS[_activeSlot];
     uint32_t currentPos = slotStartAddr + _writeOffset;
     _erasedUpToAddr = ((currentPos + 65535U) / 65536U) * 65536U;
@@ -357,9 +334,8 @@ uint8_t NandStorageProvider::getUnreadCount() const {
 bool NandStorageProvider::getNextUnreadIdentifier(char* outId, size_t maxLen) {
     if (!hasUnreadMessage() || !outId || maxLen == 0) return false;
 
-    // Find the OLDEST unread message, scanning circularly from the queue cursor.
-    // If a slot is marked unread but its data can't be read (the write was
-    // interrupted), clear its bit and skip it so the box never gets stuck on it.
+    // Oldest unread first, scanning from the queue cursor. An unread slot that
+    // can't be read is cleared and skipped, so the box never gets stuck on it.
     for (int i = 0; i < NAND_SLOT_COUNT; i++) {
         int8_t slot = (_writeSlotIndex + i) % NAND_SLOT_COUNT;
         if (!(_unreadBitmask & (1 << slot))) continue;
@@ -382,7 +358,7 @@ void NandStorageProvider::markAsRead(const char* identifier) {
     int8_t slot = parseSlotId(identifier);
     if (slot >= 0 && slot < NAND_SLOT_COUNT) {
         uint8_t oldUnread = _unreadBitmask;
-        _unreadBitmask &= ~(1 << slot); // clear this slot's bit (read)
+        _unreadBitmask &= ~(1 << slot);
         saveNvsState();
         DLOG("[NANDP] marked slot %d READ", slot);
     }
@@ -415,7 +391,7 @@ bool NandStorageProvider::formatStorage() {
     _erasedUpToAddr = 0;
     saveNvsState();
 
-    // Reset last_download_ts in NVS to 0 so messages download from scratch
+    // Reset last_download_ts so messages download from scratch
     ConfigManager cfg;
     if (cfg.init(NVS_NAMESPACE)) {
         cfg.saveLastDownloadTimestamp(0);

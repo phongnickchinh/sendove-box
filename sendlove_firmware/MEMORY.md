@@ -2532,6 +2532,14 @@ sau khi dịch và sau khi gom file. **Chưa nạp máy thật** — không cầ
 - `codebase_review.md`, `code_review_2_9_gemini_38.md`, `fix_download_timeout_plan.md`,
   `SHOULD_READ.md` **giữ nguyên chỗ cũ** vì file này và `sendlove_kicad/BOM.md` còn dẫn tới.
 
+**Lượt hai cùng ngày — rút gọn comment (user: "mới dịch, chưa rút gọn").** Comment firmware từ
+2.307 xuống 1.390 dòng: bỏ comment lặp lại dòng code bên dưới, code cũ bị comment lại (kể cả
+SSID/mật khẩu Wi-Fi mặc định cũ trong `config.h`), khung tiêu đề; mặc định một dòng, chỉ giữ lý
+do không hiển nhiên, cảnh báo "do NOT", con số cần thiết và tham chiếu `§N`. Phần diễn giải dài
+(số đo, lịch sử, phương án đã loại) **chỉ còn ở file này** — comment trong code giờ dẫn về đây.
+Xác minh như trên (so sau khi bỏ comment + `pio run`), số dòng lại lệch thêm một lần nữa.
+Comment của `addStorageAuthHeader()` từng ghi "chưa verify được" đã sửa theo §19 (đã đo thật).
+
 **Ghi nhận, chưa làm (cần user quyết).** `checkAndDownloadNewMessages()` lặp đoạn đọc `timestamp`
 4 lần; đoạn đổi đường dẫn Storage → URL lặp ở 3 hàm (`downloadFile`, `downloadVoiceSegment`,
 `checkAndDownloadNewMessages`); `dumpHexBytes()` trong `MediaPlayer.cpp` là hàm rỗng. Gộp lại được nhưng là sửa code firmware nên không làm trong đợt "chỉ đổi hình thức" này.

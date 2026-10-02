@@ -166,9 +166,8 @@ uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
 uint32_t crc32File(const char* path, uint32_t size, bool* ok) {
     if (ok) *ok = false;
     if (!ready()) return 0;
-    // Do NOT use the random-read handle (_atFile): alarm music holds that very handle
-    // while ringing, and an alarm can start during a crc check. Open-read-close per
-    // 4KB block (~500 times for 2MB) is a bit slower but disturbs nobody.
+    // Do NOT use the random-read handle: a ringing alarm holds it. Open-read-close
+    // per 4KB block is slower but disturbs nobody.
     static constexpr size_t BUF = 4096;
     uint8_t* buf = (uint8_t*)malloc(BUF);
     if (!buf) return 0;

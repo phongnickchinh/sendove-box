@@ -7,25 +7,20 @@
 class IStorageProvider;
 class SDCardManager;
 
-// ============================================================================
-// SdStore — general file layer on the SD card (theme, alarm music, log)
-// ============================================================================
-// Messages still go through SDStorageProvider (slots + manifest). All other heavy
-// data lives under this tree (SD-card design, MEMORY.md §28):
-//   /sys/layout.json     {"schema":1} — version of the card layout
+// SdStore — general files on the SD card (messages go through SDStorageProvider).
+// Tree (MEMORY.md §28):
+//   /sys/layout.json     {"schema":1}, the card layout version
 //   /sys/log/log0.txt    the log (SdLog); log1.txt = the previous one
 //   /theme/...           theme packages (ThemeStore)
 //   /alarm/...           alarm music (MusicStore)
 //
-// Power-loss-safe write rules:
-//   - Small files: writeAtomic() = write X.tmp -> delete X -> rename. At boot: an
-//     X.tmp without X is renamed; with both present, X.tmp is deleted.
-//   - Large downloads: write X.part, verify size + crc32, then rename. The .part is
-//     KEPT across reboots to resume with HTTP Range (NetworkManager::downloadFile).
+// Power-loss-safe writes:
+//   - small files: writeAtomic() = X.tmp -> delete X -> rename (repaired at boot)
+//   - large downloads: X.part, verified by size + crc32, then renamed; the .part is
+//     KEPT across reboots for HTTP Range resume
 //
-// A removed card has NO dedicated handling (edge-case policy, §28): on an I/O
-// error probe(); if the card doesn't answer, go ABSENT and remount on the next sync.
-// ============================================================================
+// A removed card has NO dedicated handling (§28): on an I/O error probe(); if it
+// doesn't answer, go ABSENT and remount on the next sync.
 
 namespace SdStore {
 
@@ -35,8 +30,7 @@ enum class State : uint8_t {
     READY,
 };
 
-/// Call once after storage->init(): creates the directory tree, cleans up .tmp
-/// files, measures free space.
+/// Once after storage->init(): directory tree, .tmp cleanup, free space.
 void begin(IStorageProvider* storage);
 
 State state();
@@ -49,15 +43,13 @@ SDCardManager* card();
 /// Bumped on every successful remount -> theme/music know to re-check and re-download.
 extern std::atomic<uint32_t> mountEpoch;
 
-/// Try to remount while ABSENT. ONLY call while not playing a message/music and
-/// with no file open. true = just remounted.
+/// Try to remount while ABSENT. ONLY while nothing plays and no file is open.
 bool tryRemount();
 
 /// Report a failed card operation -> probe(); an unresponsive card becomes ABSENT.
 void noteIoError();
 
-/// Free space (MB), measured at mount and after refreshFree() (a real measurement
-/// can take a few seconds).
+/// Cached free space (MB); refreshFree() re-measures (may take seconds).
 uint32_t freeMB();
 void refreshFree();
 

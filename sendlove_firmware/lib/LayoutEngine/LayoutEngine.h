@@ -29,19 +29,13 @@ struct WidgetConfig {
     String locale;  // clock_date: "vi" | "en"
 };
 
-/// Dynamic UI layout engine for rendering JSON-configured widgets
-///
-/// The background, fonts and layout are NOT compiled in (SD-card design, MEMORY.md
-/// §28): loadTheme() takes them from ThemeStore (the `theme` flash partition,
-/// through an mmap). Without a theme it draws the fallback screen: black
-/// background, 7-segment time, unaccented ASCII date, white text.
-/// Only Task_MediaPlayer calls this class (single owner, no mutex needed).
+/// Renders the standby screen from the JSON theme in ThemeStore (MEMORY.md §28),
+/// or a black fallback without one. Task_MediaPlayer only (single owner, no mutex).
 class LayoutEngine {
 public:
     LayoutEngine() = default;
 
-    /// Load the theme currently in ThemeStore (or the fallback). Call again after
-    /// each theme install. false = showing the fallback screen.
+    /// Load the theme in ThemeStore; call again after each install. false = fallback.
     bool loadTheme();
 
     /// Render standby UI screen widgets
@@ -62,8 +56,7 @@ private:
 
     // Theme assets in flash (mmap). nullptr = absent -> black background / built-in fonts.
     const uint16_t* _bg = nullptr;
-    // VLW fonts read straight from flash pointers. The wrappers must live as long
-    // as the fonts: VLWfont reads glyphs through them ON EVERY DRAW, not only at load.
+    // VLW fonts read from flash; the wrappers must outlive the fonts (read on EVERY draw).
     lgfx::PointerWrapper _pwTime, _pwDate;
     lgfx::VLWfont _vlwTime, _vlwDate;
     bool _hasVlwTime = false;

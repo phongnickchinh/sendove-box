@@ -51,9 +51,8 @@ void flush() {
     if (busy.exchange(true)) return;
     struct Release { ~Release() { busy = false; } } release;
 
-    // Snapshot the unwritten lines into a temp buffer before touching the card (keeps
-    // the critical section short). The buffer is on the heap: 2KB on the stack would
-    // be over half of Task_UIController's 4KB stack.
+    // Snapshot the unwritten lines first (short critical section). Heap buffer: 2KB
+    // would be half of Task_UIController's stack.
     char* buf = (char*)malloc(LINES * (COLS + 1));
     if (!buf) return;
     size_t len = 0;
@@ -79,9 +78,7 @@ void flush() {
         card->deleteFile(LOG1);
         card->renameFile(LOG0, LOG1);
     }
-    // Do NOT use openGenWrite: that handle belongs to WakeSync, and opening it here
-    // would close the music/theme file being downloaded (seen in real logs: "ghi the
-    // FAIL" right after "tai").
+    // Do NOT use openGenWrite: it would close the file WakeSync is downloading.
     if (card->appendFile(LOG0, (const uint8_t*)buf, len) == (int32_t)len) s_flushed = upTo;
     free(buf);
 }

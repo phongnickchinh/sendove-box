@@ -10,8 +10,7 @@
 #include "esp_sntp.h"
 #include "ScreenLogger.h"
 
-// Minimum valid Unix time (2020-09-13). Below it the RTC has never been set —
-// mbedTLS would reject certificates with BADCERT_FUTURE.
+// 2020-09-13. Below this the RTC is unset and mbedTLS rejects certs (BADCERT_FUTURE).
 static constexpr time_t MIN_VALID_EPOCH = 1600000000;
 
 static const byte DNS_PORT = 53;
@@ -27,10 +26,8 @@ void NetworkManager::init() {
     WiFi.setAutoReconnect(true);
     WiFi.persistent(false);
 
-    // Get notified when SNTP sync succeeds
     sntp_set_time_sync_notification_cb(onNtpSyncCallback);
 
-    // Timezone + SNTP servers via the Arduino API
     configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 }
 
@@ -76,23 +73,16 @@ bool NetworkManager::isConnected() const {
 }
 
 bool NetworkManager::ensureConnected(uint32_t timeoutMs) {
-    // Captive portal running: the "full WiFi restart" branch below switches to
-    // WIFI_STA, tearing down the SoftAP serving the user -> the AP comes up then dies.
+    // Reconnecting would switch to WIFI_STA and kill the portal's SoftAP.
     if (isProvisioningActive()) {
         DLOG("[NET] ensureConnected skip: provisioning AP");
         return false;
     }
 
-    // Do NOT trust WiFi.status() alone. After light sleep it VERY OFTEN still says
-    // WL_CONNECTED although the association is dead on the AP side: the CPU slept
-    // for 5 minutes, so the driver never processed beacon-loss/deauth events and
-    // the status keeps its old value. Trusting it -> reconnect skipped -> every
-    // http.GET() afterwards returns -1 ("WiFi connected but HTTP GET gives -1").
-    // Worse: after a timer wake the box is only awake 2s, too short for the driver
-    // to notice the lost beacons (~6s+) and auto-reconnect -> stuck for hundreds of
-    // cycles. So right after waking ALWAYS re-associate instead of trusting old state.
-    // Also check the IP: WL_CONNECTED only means associated + authenticated, not
-    // that DHCP has handed out an IP; HTTP without an IP also returns -1.
+    // After light sleep WiFi.status() can still say WL_CONNECTED though the AP dropped
+    // us (the driver missed the deauth; a 2s timer wake is too short to auto-reconnect),
+    // and every http.GET() then returns -1. So always re-associate after waking, and
+    // require an IP: WL_CONNECTED doesn't mean DHCP is done.
     if (!_forceReassociate && WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0) {
         return true;
     }
@@ -107,8 +97,7 @@ bool NetworkManager::ensureConnected(uint32_t timeoutMs) {
 
     uint32_t start = millis();
 
-    // WiFi.reconnect() is not enough: it relies on the very driver state that is
-    // wrong. Drop the old association and begin() cleanly.
+    // WiFi.reconnect() trusts the same stale driver state: disconnect and begin() anew.
     WiFi.disconnect(false);
     delay(50);
     WiFi.mode(WIFI_STA);
@@ -151,18 +140,15 @@ bool NetworkManager::syncNtpTime(uint32_t timeoutMs) {
         }
     }
 
-    // Synced within the last 60 seconds: skip
     if (_isTimeSynced && (millis() - _lastTimeSync < 60000)) {
         return true;
     }
 
     _isNtpSyncing = true;
 
-    // Reset the callback flag and restart SNTP
     s_ntpSyncDone = false;
     configTzTime(TIMEZONE_ENV, NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 
-    // Wait for the LWIP SNTP daemon to call onNtpSyncCallback()
     uint32_t start = millis();
     while (!s_ntpSyncDone && (millis() - start < timeoutMs)) {
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -191,7 +177,7 @@ void NetworkManager::getTimeString(char* buffer, size_t maxLen) const {
     }
 
     struct tm timeinfo;
-    // Non-blocking read from internal ESP32 RTC (timeout = 0)
+    // timeout 0: non-blocking
     if (!getLocalTime(&timeinfo, 0)) {
         snprintf(buffer, maxLen, "00:00");
         return;
@@ -205,13 +191,9 @@ int NetworkManager::getWifiRSSI() const {
     return WiFi.RSSI();
 }
 
-// Paths operating systems request to probe for internet access. Answering 302
-// here makes the device report "sign-in required" and open the portal itself.
-//   Android : /generate_204, /gen_204
-//   Apple   : /hotspot-detect.html, /library/test/success.html
-//   Windows : /connecttest.txt, /ncsi.txt, /redirect, /fwlink
-// Do NOT return the content Windows expects (Microsoft NCSI...) on these paths:
-// Windows would conclude the network has real internet.
+// OS connectivity-probe paths (Android, Apple, Windows). A 302 makes the device
+// show "sign-in required" and open the portal. Do NOT serve the content Windows
+// expects (NCSI): it would conclude there is real internet.
 static const char* const CAPTIVE_PROBE_PATHS[] = {
     "/generate_204", "/gen_204",
     "/hotspot-detect.html", "/library/test/success.html",
@@ -219,25 +201,21 @@ static const char* const CAPTIVE_PROBE_PATHS[] = {
 };
 
 void NetworkManager::startProvisioningAP(const char* apSsid, const char* apPassword) {
-    // Mark provisioning as active FIRST. isProvisioningActive() relies on
-    // _captiveServer being non-null; allocating it further down would leave a
-    // window during AP setup where ensureConnected() thinks provisioning is off
-    // and drags Wi-Fi back to STA mode.
+    // Allocate FIRST: isProvisioningActive() checks _captiveServer, and ensureConnected()
+    // must not drag Wi-Fi back to STA while the AP is coming up.
     if (_captiveServer == nullptr) _captiveServer = new WebServer(80);
     _provisioningDone = false;
 
-    // Without disabling auto-reconnect the ESP Wi-Fi layer keeps retrying the old
-    // credentials and pulls the chip out of AP mode within seconds.
+    // Otherwise the ESP keeps retrying old credentials and drops out of AP mode.
     WiFi.setAutoReconnect(false);
     WiFi.disconnect(true, true);
     delay(100);
 
-    // AP_STA rather than AP: Wi-Fi scanning needs a live STA interface. Set the mode
-    // AFTER the disconnect() above so STA comes up idle and doesn't connect by itself.
+    // AP_STA: scanning needs a live STA. Set AFTER disconnect() so STA stays idle.
     WiFi.mode(WIFI_AP_STA);
     WiFi.softAP(apSsid, apPassword);
 
-    // Every DNS query resolves to the box's IP -> any domain opens the portal.
+    // Captive DNS: every name resolves to the box.
     dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
     dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 
@@ -251,13 +229,12 @@ void NetworkManager::startProvisioningAP(const char* apSsid, const char* apPassw
     for (size_t i = 0; i < sizeof(CAPTIVE_PROBE_PATHS) / sizeof(CAPTIVE_PROBE_PATHS[0]); i++) {
         _captiveServer->on(CAPTIVE_PROBE_PATHS[i], [this]() { handleCaptiveProbe(); });
     }
-    // Unknown paths get the portal page directly (200). A 302 here would bounce
-    // the portal page's own sub-requests around.
+    // 200, not 302: a redirect would bounce the portal page's own sub-requests.
     _captiveServer->onNotFound([this]() { handleCaptiveRoot(); });
 
     _captiveServer->begin();
 
-    // Scan once up front so the list is ready when the user opens the page.
+    // Pre-scan so the list is ready when the page opens.
     WiFi.scanNetworks(true, false);
 }
 
@@ -269,14 +246,12 @@ void NetworkManager::handleCaptiveProbe() {
     _captiveServer->send(302, "text/plain", "");
 }
 
-// SSIDs may contain quotes and backslashes -> escape before embedding in JSON
-// instead of concatenating raw.
+// SSIDs may contain quotes and backslashes.
 static String jsonEscape(const String& s) {
     String out;
     out.reserve(s.length() + 8);
     for (size_t i = 0; i < s.length(); i++) {
-        // unsigned: SSIDs are UTF-8; as signed char a byte > 127 goes negative
-        // and gets wrongly stripped by the control-character branch below.
+        // unsigned: UTF-8 bytes > 127 must not fall into the control-char branch as negatives.
         unsigned char ch = (unsigned char)s[i];
         if (ch == '"' || ch == 0x5C) { out += (char)0x5C; out += (char)ch; }
         else if (ch < 0x20)            { out += ' '; }
@@ -311,8 +286,7 @@ void NetworkManager::handleCaptiveScan() {
     }
     json += "]}";
 
-    // Deleting the results resets scanComplete() to -2, so the next poll starts a
-    // fresh scan — the intended behaviour for the "rescan" button.
+    // Resets scanComplete() to -2, so the next poll rescans (the "rescan" button).
     WiFi.scanDelete();
     _captiveServer->send(200, "application/json", json);
 }
@@ -361,10 +335,8 @@ void NetworkManager::handleCaptiveSubmit() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Alarms on the portal. Runs in the NetworkController task (handleClient), so it
-// only touches AlarmClock (which has its own mutex), never SPI/the display.
-// ---------------------------------------------------------------------------
+// Portal alarm handlers. They run in the NetworkController task: touch only
+// AlarmClock (own mutex), never SPI/the display.
 
 static void sendJsonResult(WebServer* srv, int code, bool ok, const char* err = nullptr) {
     JsonDocument doc;
@@ -430,8 +402,7 @@ void NetworkManager::handleAlarmDelete() {
 void NetworkManager::handleSetTime() {
     if (!_captiveServer) return;
     long long epoch = atoll(_captiveServer->arg("epoch").c_str());
-    // Accept the phone's time only while the box has no NTP time. NTP is more
-    // trustworthy — and no arbitrary web page on the AP gets to move the clock back.
+    // Phone time only while there is no NTP time: no page on the AP may move the clock back.
     if (_isTimeSynced || time(nullptr) >= MIN_VALID_EPOCH) {
         sendJsonResult(_captiveServer, 200, true);
         return;
@@ -442,8 +413,7 @@ void NetworkManager::handleSetTime() {
     }
     struct timeval tv = { .tv_sec = (time_t)epoch, .tv_usec = 0 };
     settimeofday(&tv, nullptr);
-    // Lets the standby screen show real time instead of 00:00 (getTimeString reads
-    // this flag). syncNtpTime() still runs once online and corrects it.
+    // Standby shows real time instead of 00:00; NTP corrects it once online.
     _isTimeSynced = true;
     DLOG("[NET] gio lay tu portal: %lld", epoch);
     sendJsonResult(_captiveServer, 200, true);
@@ -481,9 +451,7 @@ bool NetworkManager::isWebServerRunning() const {
     return _webServerRunning;
 }
 
-// ============================================================================
-// Firebase REST API Integration (Wakeup Lifecycle Sync)
-// ============================================================================
+// ---- Firebase REST sync ----
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -501,24 +469,12 @@ bool NetworkManager::isWebServerRunning() const {
 // Guards the claim of the _isSyncing flag between tasks of different priority.
 static portMUX_TYPE s_syncMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Every WiFiClientSecure to Firebase must go through here. Calling setInsecure()
-// at each call site would disable certificate checks entirely: anyone on the
-// network path could read/alter traffic and grab FIREBASE_AUTH_SECRET.
-//
-// setCACert(), NOT setCACertBundle(): in Arduino core 2.0.17,
-// arduino_esp_crt_bundle_attach() returns early with log_e("Failed to attach
-// bundle") unless arduino_esp_crt_bundle_set() was called first — the Arduino
-// wrapper does NOT embed a default bundle; you'd have to generate the blob with
-// gen_crt_bundle.py. setCACert with an explicit PEM is the reliable path.
-//
-// Do NOT set setHandshakeTimeout() here (default 120s). Tightening it adds no
-// security, and on a weak Wi-Fi link (associate + DHCP already take 3-8s, see
-// MEMORY.md "Fix vong 4") it creates a failure that looks like a certificate
-// error but isn't.
+// Every WiFiClientSecure to Firebase goes through here (never setInsecure() at a
+// call site). setCACert(), NOT setCACertBundle(): the Arduino core embeds no default
+// bundle. Do NOT shorten setHandshakeTimeout(): on weak Wi-Fi it produces failures
+// that look like certificate errors.
 #ifndef FIREBASE_TLS_VERIFY
-// Fail closed: if the flag goes missing (renamed, config.h not included), `#if`
-// on an undefined macro silently evaluates to 0 -> falls back to setInsecure()
-// unnoticed. Fail at compile time instead of silently allowing MITM.
+// Fail closed: `#if` on an undefined macro is 0, i.e. a silent setInsecure().
 #error "FIREBASE_TLS_VERIFY chua duoc dinh nghia (xem include/config.h)"
 #endif
 
@@ -530,8 +486,7 @@ static void configureTlsClient(WiFiClientSecure& client) {
 #endif
 }
 
-// The real mbedTLS error, read from the client after HTTPClient returned only a
-// generic -1. Tells "invalid certificate" apart from "can't reach the server".
+// HTTPClient only returns -1; this logs the real mbedTLS error (bad cert vs unreachable).
 static void logTlsError(WiFiClientSecure& client, const char* where) {
     char buf[100] = "";
     int err = client.lastError(buf, sizeof(buf));
@@ -540,17 +495,9 @@ static void logTlsError(WiFiClientSecure& client, const char* where) {
     }
 }
 
-// Appends the auth parameter to the END of _url: `?auth=<idToken>` in idToken
-// mode, `?auth=<Database Secret>` in legacy mode. `sep` is the separator that
-// fits the URL: '?' when it has no query yet, '&' when it already has parameters.
-//
-// Why not a header: measured with the box's own valid idToken (945 bytes,
-// localId matching BOX_ID) on /boxes/<BOX_ID>/status.json:
-//     Authorization: Bearer <idToken>    -> 401 "Unauthorized request."
-//     Authorization: Firebase <idToken>  -> 401
-//     ?auth=<idToken>                    -> 200
-// RTDB accepts `Bearer` only for a service account's OAuth2 access token, not a
-// Firebase idToken. See MEMORY.md §17. Don't change this back.
+// Appends `auth=<idToken | Database Secret>` to _url; `sep` is '?' or '&'.
+// A query, NOT a header: RTDB answers 401 to `Authorization: Bearer/Firebase <idToken>`
+// (see MEMORY.md §17). Don't change this back.
 void NetworkManager::appendAuth(char sep) {
     size_t len = strlen(_url);
     if (len >= sizeof(_url)) return;
@@ -560,32 +507,25 @@ void NetworkManager::appendAuth(char sep) {
 #else
     int n = snprintf(_url + len, sizeof(_url) - len, "%cauth=%s", sep, FIREBASE_AUTH_SECRET);
 #endif
-    // A truncated token yields a 401 that looks EXACTLY like a rule rejection.
-    // That ambiguity already caused one wrong conclusion (MEMORY.md §11). Be loud.
+    // A truncated token gives a 401 that looks like a rule rejection (MEMORY.md §11): be loud.
     if (n < 0 || (size_t)n >= sizeof(_url) - len) {
         DLOG("[NET] auth query BI CAT CUT (url %u)", (unsigned)strlen(_url));
     }
 }
 
-// How long without a new byte before the stream counts as dead.
-// http.setTimeout(30000) only covers a single read, not the whole loop.
+// No byte for this long = dead stream (http.setTimeout covers one read only).
 static const uint32_t DOWNLOAD_STALL_TIMEOUT_MS = 30000;
 
-// The WakeSync task is PERMANENT: created once, then sleeps waiting for a notify.
-//
-// Creating and deleting a 12KB-stack task per sync cycle means allocating and
-// freeing a contiguous 12KB block every few dozen seconds, right when mbedTLS
-// needs a contiguous ~16KB block — the surest way to fragment the heap, i.e. the
-// `SSL - Memory allocation` symptom in MEMORY.md §21. The stack is allocated once.
+// WakeSync is created once and then waits for notifies: allocating and freeing a
+// 12KB stack every cycle fragments the heap mbedTLS needs (MEMORY.md §21).
 void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
     if (isPlaybackActive()) {
         DLOG("[NET] sync skip: video playing");
         return;
     }
 
-    // Two tasks of different priority (UIController=5, MediaPlayer=3) both call
-    // this. With the read and write of _isSyncing as separate steps both could
-    // slip through and start 2 syncs overwriting the same flash slot.
+    // Called from two tasks (UIController, MediaPlayer): claim _isSyncing atomically,
+    // or two syncs could write the same slot.
     bool claimed = false;
     portENTER_CRITICAL(&s_syncMux);
     if (!_isSyncing) {
@@ -595,8 +535,7 @@ void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, 
     portEXIT_CRITICAL(&s_syncMux);
     if (!claimed) return;
 
-    // Parameters travel via member variables, not an allocated pointer: only one
-    // sync runs at a time (the _isSyncing flag above guarantees it).
+    // Members suffice: only one sync runs at a time.
     _syncBattery  = batteryPercent;
     _syncCharging = isCharging;
     _syncStorage  = storage;
@@ -608,7 +547,7 @@ void NetworkManager::triggerWakeupSync(uint8_t batteryPercent, bool isCharging, 
             _isSyncing = false;
             DLOG("[NET] WakeSync task RAM!");
         }
-        return;  // a freshly created task runs its first pass immediately, no notify needed
+        return;  // a new task runs its first pass right away
     }
 
     xTaskNotifyGive(_syncTask);
@@ -620,8 +559,7 @@ void NetworkManager::wakeupSyncTaskWorker(void* param) {
         if (self != nullptr) {
             self->syncWakeup(self->_syncBattery, self->_syncCharging, self->_syncStorage);
         }
-        // Wait for the next round. A notify arriving before this point makes
-        // ulTaskNotifyTake return immediately (the count is kept), so none is lost.
+        // An earlier notify is kept in the count, so no round is lost.
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
 }
@@ -629,7 +567,7 @@ void NetworkManager::wakeupSyncTaskWorker(void* param) {
 bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorageProvider* storage) {
     _isSyncing = true;
 
-    // Keep the previous cycle's diagnostics (most useful when it failed or went to sleep early)
+    // Keep the previous cycle's diagnostics
     strncpy(_prevWakeCause, _currentWakeCause, sizeof(_prevWakeCause) - 1);
     _prevWakeCause[sizeof(_prevWakeCause) - 1] = '\0';
     strncpy(_prevDiagStep, _diagStep, sizeof(_prevDiagStep) - 1);
@@ -646,18 +584,13 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 0. Card absent (not mounted at boot, or the probe just reported it gone): try
-    // to remount. Safe here because nothing is playing (checked above) and this
-    // task is the only one opening download files. Once remounted, the later
-    // steps (theme, music, messages) sync by themselves.
+    // 0. Card absent: try a remount. Safe here: nothing is playing and only this task
+    // opens download files.
     if (SdStore::state() == SdStore::State::ABSENT) {
         SdStore::tryRemount();
     }
 
-    // 1. Reconnect Wi-Fi. 12s rather than 5s: after light sleep this is a brand-new
-    // associate + 4-way handshake + DHCP (see ensureConnected), 3-8s in practice.
-    // Cutting at 5s aborts right before it completes.
-    // No battery wasted: Task_UIController can't sleep while isSyncing().
+    // 1. Wi-Fi. 12s: a fresh associate + handshake + DHCP after light sleep takes 3-8s.
     uint32_t wifiStart = millis();
     if (!ensureConnected(12000)) {
         _lastWifiMs = millis() - wifiStart;
@@ -676,32 +609,25 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // Each TLS session to Firebase needs ~35-45KB of heap for the mbedTLS handshake
-    // (in/out content buffers default to 16KB each way — NOT adjustable:
-    // setBufferSizes() is an ESP8266 API that WiFiClientSecure on ESP32 lacks).
-    // If http.GET() = -1 shows up while Wi-Fi is clearly alive, this is the first
-    // number to look at to tell OOM from a link error.
-    // maxblk = largest contiguous block: tells fragmentation from out-of-RAM (MEMORY.md §21).
+    // A TLS session needs ~35-45KB of heap (16KB buffers each way, not adjustable on
+    // ESP32). http.GET() = -1 with Wi-Fi alive: check these numbers first. maxblk tells
+    // fragmentation from out-of-RAM (MEMORY.md §21).
     DLOG("[NET] sync start heap=%u maxblk=%u", (unsigned)ESP.getFreeHeap(),
          (unsigned)ESP.getMaxAllocHeap());
 
-    // 2. Sync NTP time first so later timestamps are accurate
+    // 2. NTP
     syncNtpTime(5000);
 
-    // Time gate — REQUIRED alongside setCACert(), not optional. With setInsecure()
-    // a broken NTP still works. With VERIFY_REQUIRED, time(nullptr) ≈ 0 on a cold
-    // boot -> mbedTLS returns BADCERT_FUTURE -> EVERY handshake fails. Dropping
-    // this step turns "flaky NTP" into "cloud gone entirely".
+    // Time gate, REQUIRED with setCACert(): with time ≈ 0 mbedTLS returns BADCERT_FUTURE
+    // and every handshake fails.
     if (time(nullptr) < MIN_VALID_EPOCH) {
-        // Clear the flag: syncNtpTime() short-circuits for 60s while _isTimeSynced
-        // is set, so a plain retry would return true without requesting NTP again.
+        // Clear the flag, or syncNtpTime() short-circuits for 60s without asking NTP again.
         _isTimeSynced = false;
         DLOG("[NET] time invalid -> NTP retry 15s");
         syncNtpTime(15000);
     }
     if (time(nullptr) < MIN_VALID_EPOCH) {
-        // A DISTINCT marker, not to be confused with http.GET() = -1: no connection
-        // has been opened yet. This line means an NTP failure, not TLS/network.
+        // Distinct marker: an NTP failure, not TLS/network (no connection opened yet).
         DLOG("[NET] sync abort: time invalid");
         strncpy(_diagStep, "ntp_fail", sizeof(_diagStep) - 1);
         strncpy(_diagErr, "time_invalid", sizeof(_diagErr) - 1);
@@ -716,10 +642,8 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 2b. Get/renew the idToken BEFORE any Firebase call. After the time gate
-    // because expiry is compared against time(nullptr) — with a wrong RTC a fresh
-    // token would count as expired at once. Tokens live 1 hour, so most sync
-    // cycles just reuse the one in RAM at no request cost.
+    // 2b. idToken BEFORE any Firebase call, and after the time gate (expiry is compared
+    // with time(nullptr)). Usually reused from RAM.
     if (!ensureIdToken()) {
         DLOG("[NET] sync abort: khong lay duoc idToken");
         strncpy(_diagStep, "token_fail", sizeof(_diagStep) - 1);
@@ -729,7 +653,7 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     }
     strncpy(_diagStep, "token_ok", sizeof(_diagStep) - 1);
 
-    // 3. Check flags (alarms, OTA, pairing) FIRST so status carries the latest alarm data
+    // 3. Flags FIRST, so status carries the latest alarm data
     checkFirebaseFlags();
     vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -739,9 +663,9 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 4. Update status (heartbeat + diagnostic telemetry pushed to the cloud)
+    // 4. Status (heartbeat + diagnostics)
     updateFirebaseStatus(batteryPercent, isCharging);
-    // Log tail, ONLY on a new error (or first time after boot) -> usually costs nothing.
+    // Log tail: only on a new error or the first sync after boot.
     pushLogTail();
     vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -751,40 +675,29 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
         return false;
     }
 
-    // 4a. Theme (small ~150KB bundle, downloaded only when the flag is set / rev differs from the one in flash).
+    // 4a. Theme (only when flagged or the rev differs)
     if (!syncTheme(_themeFlag) || isPlaybackActive()) {
         strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
     }
 
-    // 4b. Alarm music — BEFORE messages: alarms have a deadline, messages don't.
+    // 4b. Alarm music BEFORE messages: alarms have a deadline.
     if (!syncAlarmMusic() || isPlaybackActive()) {
         strncpy(_diagErr, "playback_active", sizeof(_diagErr) - 1);
         _isSyncing = false;
         return false;
     }
 
-    // 5. Check and download new messages.
-    //
-    // The "slots full" gate belongs HERE, not around the whole cycle. Gating the
-    // whole cycle makes a full box go completely silent: no heartbeat, no flag
-    // reads, no alarm sync, no OTA or pairing flag. The intent is only "don't
-    // waste a download when full" — which applies to THIS step alone.
+    // 5. Messages. The "slots full" gate belongs HERE only: gating the whole cycle
+    // would silence heartbeat, flags and alarm sync on a full box.
     if (storage != nullptr) {
         if (storage->isFull()) {
-            // _numOfNewMsg is ONLY assigned in checkAndDownloadNewMessages(), i.e.
-            // BEHIND this gate. After a reset while full it is 0 with no way to
-            // restore it -> the box says "No new messages" on touch and "slots
-            // full" on sync, stuck forever because slots are only freed by reading.
-            // Raise the floor every sync cycle.
+            // _numOfNewMsg is only set behind this gate; after a reset while full it would
+            // stay 0 forever ("No new messages" yet "slots full"). Raise the floor here.
             uint8_t unread = storage->getUnreadCount();
             if (_numOfNewMsg < unread) _numOfNewMsg = unread;
-            // Log the unread count too: it tells "really full" (unread > 0) from
-            // "SD card not mounted" (full with unread == 0: when !_mounted,
-            // SDStorageProvider::isFull() returns true and getUnreadCount()
-            // returns 0). The write cursor is clamped by writeIndexSafe(), so it
-            // can't be the cause (see MEMORY.md §26).
+            // Full with unread == 0 means the SD card isn't mounted (MEMORY.md §26).
             DLOG("[NET] msg skip: het slot, unread=%u", (unsigned)unread);
         } else {
             checkAndDownloadNewMessages(storage);
@@ -796,23 +709,12 @@ bool NetworkManager::syncWakeup(uint8_t batteryPercent, bool isCharging, IStorag
     return true;
 }
 
-// ============================================================================
-// Firebase Auth — the box's own idToken instead of the admin Database Secret
-// ============================================================================
-// Both endpoints below chain to GTS Root R4 (measured on identitytoolkit and
-// securetoken) — already in firebase_root_ca.h, no extra certificate to embed.
+// ---- Firebase Auth: the box's own idToken instead of the admin Database Secret ----
+// Both auth endpoints chain to GTS Root R4 (already in firebase_root_ca.h).
 
-// Firebase Storage is the OPPOSITE of RTDB: it DOES accept a header, with scheme
-// "Firebase <idToken>" (not "Bearer"). Different service, different convention.
-//
-// NOT VERIFIED on a real device: Storage is currently open, so a garbage token
-// also returns 200 and "accepted" can't be told from "not needed". Measurable
-// only once storage.rules is deployed. This is the same trap that led to the
-// wrong conclusion about RTDB headers (MEMORY.md §11) — don't repeat that reasoning.
-//
-// A String instead of a ~1.4KB stack buffer: TASK_STACK_NETWORK is only 6144 and
-// this sits deep in the call chain. addHeader() takes const String&, so a
-// temporary String exists anyway — declaring it explicitly costs nothing.
+// Storage, unlike RTDB, takes a header: "Firebase <idToken>" (measured on the real
+// bucket, MEMORY.md §19).
+// A String rather than a ~1.4KB stack buffer: TASK_STACK_NETWORK is only 6144.
 void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
 #if FIREBASE_USE_IDTOKEN
     if (_idToken[0] != '\0') {
@@ -828,10 +730,8 @@ void NetworkManager::addStorageAuthHeader(HTTPClient& http) {
 void NetworkManager::noteAuthFailure(int httpCode, const char* where) {
 #if FIREBASE_USE_IDTOKEN
     if (httpCode == 401 || httpCode == 403) {
-        // Dead token or rule rejection. Zero the expiry so the next sync cycle gets a
-        // new token. No retry here: a token lives 1 hour and a sync cycle a few
-        // seconds, so 401 almost always means a RULE rejection, not expiry —
-        // retrying right away just costs another TLS handshake for the same 401.
+        // Zero the expiry so the next cycle gets a new token. No retry here: a 401 almost
+        // always means a rule rejection, not expiry.
         DLOG("[NET] auth %d @ %s -> se lay token moi", httpCode, where);
         _idTokenExpiry = 0;
     }
@@ -845,14 +745,12 @@ bool NetworkManager::ensureIdToken(bool force) {
     (void)force;
     return true;   // still on the Database Secret, no token needed
 #else
-    // 60s margin: a token with under a minute left counts as expired, so it can't
-    // expire in the middle of a sync cycle.
+    // 60s margin so the token can't expire mid-sync.
     if (!force && _idToken[0] != '\0' && time(nullptr) < _idTokenExpiry - 60) {
         return true;
     }
 
-    // A refresh token doesn't expire with time -> prefer it, so the password
-    // isn't sent over the wire every time.
+    // Prefer the refresh token: it doesn't expire and keeps the password off the wire.
     char refresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
     bool haveRefresh = false;
     {
@@ -866,7 +764,7 @@ bool NetworkManager::ensureIdToken(bool force) {
     if (haveRefresh && authWithRefreshToken(refresh)) return true;
 
     if (haveRefresh) {
-        // Refresh token broken (revoked / password changed) -> discard it and sign in from scratch.
+        // Refresh token revoked -> discard it, sign in from scratch.
         DLOG("[NET] refresh token hong -> dang nhap lai");
         ConfigManager cfg;
         if (cfg.init(NVS_NAMESPACE)) {
@@ -880,16 +778,10 @@ bool NetworkManager::ensureIdToken(bool force) {
 }
 
 #if FIREBASE_USE_IDTOKEN
-// Reads idToken/refreshToken/expiresIn from the response into the caller's buffers.
-// An ArduinoJson filter allocates ONLY the 3 fields needed — the
-// signInWithPassword response also carries email/localId/kind..., and allocating
-// it all wastes heap right before the next TLS handshake needs ~45KB.
-// Takes a String, NOT a Stream (measured, see MEMORY.md §18): both identitytoolkit
-// and securetoken answer "Transfer-Encoding: chunked" with no Content-Length.
-// http.getStreamPtr() yields the RAW stream still carrying the hex chunk-size
-// lines, e.g. "4a1\r\n{...}". ArduinoJson reads "4a1" -> parses "4" as a NUMBER,
-// finishes SUCCESSFULLY, then doc["idToken"] = null -> "missing idToken" with no
-// JSON error at all. Only http.getString() decodes chunked encoding.
+// Parses idToken/refreshToken/expiresIn (filtered: only these 3 fields are allocated).
+// Takes a String, NOT a Stream: both endpoints answer chunked, and the raw stream's
+// hex chunk-size line parses as a number -> "missing idToken" with no JSON error
+// (MEMORY.md §18). Only http.getString() decodes chunked encoding.
 static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLen,
                               time_t& outExpiry, char* outRefresh, size_t refreshLen,
                               bool snakeCase) {
@@ -911,20 +803,18 @@ static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLe
     const char* expires = doc[snakeCase ? "expires_in"    : "expiresIn"];
 
     if (idTok == nullptr || idTok[0] == '\0') {
-        // Log the head of the response: without it "missing idToken" says nothing.
-        // The first 60 chars only hold the "kind"/"error" part, never a token.
+        // The first 60 chars hold only "kind"/"error", never a token.
         DLOG("[NET] auth: thieu idToken; body=%s", body.substring(0, 60).c_str());
         return false;
     }
-    // Firebase returns expiresIn as a STRING of seconds ("3600"), not a number.
+    // expiresIn is a STRING of seconds ("3600").
     long ttl = (expires != nullptr) ? atol(expires) : 3600;
     if (ttl <= 0) ttl = 3600;
 
-    // Store the RAW JWT (no "Bearer " prefix): RTDB doesn't accept the header —
-    // the token goes into the `?auth=` query (see MEMORY.md §17).
+    // Raw JWT, no "Bearer " prefix: it goes into `?auth=` (MEMORY.md §17).
     int n = snprintf(outToken, tokenLen, "%s", idTok);
     if (n < 0 || (size_t)n >= tokenLen) {
-        // A truncated token = every later request 401s for no visible reason. Fail instead.
+        // A truncated token would 401 every later request: fail instead.
         DLOG("[NET] auth: idToken qua dai (%d)", n);
         outToken[0] = '\0';
         return false;
@@ -940,8 +830,6 @@ static bool parseAuthResponse(const String& body, char* outToken, size_t tokenLe
     return true;
 }
 
-// The two auth endpoints differ only in URL, content type and field naming
-// (camelCase vs snake_case); parseAuthResponse() handles both.
 bool NetworkManager::authWithRefreshToken(const char* refreshToken) {
     WiFiClientSecure client;
     configureTlsClient(client);
@@ -967,12 +855,10 @@ bool NetworkManager::authWithRefreshToken(const char* refreshToken) {
     }
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
-    // getString() (NOT getStreamPtr): the response is chunked — see
-    // parseAuthResponse. end() right after reading to release the connection early.
+    // getString(): the response is chunked (see parseAuthResponse).
     String resp = http.getString();
     http.end();
 
-    // snakeCase = true: the securetoken endpoint uses id_token/refresh_token/expires_in
     bool ok = parseAuthResponse(resp, _idToken,
                                 sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), true);
@@ -1020,12 +906,10 @@ bool NetworkManager::authWithPassword() {
     }
 
     char newRefresh[FIREBASE_REFRESH_TOKEN_MAX_LEN] = "";
-    // getString() (NOT getStreamPtr): the response is chunked — see
-    // parseAuthResponse. end() right after reading to release the connection early.
+    // getString(): the response is chunked (see parseAuthResponse).
     String resp = http.getString();
     http.end();
 
-    // snakeCase = false: the identitytoolkit endpoint uses idToken/refreshToken/expiresIn
     bool ok = parseAuthResponse(resp, _idToken,
                                 sizeof(_idToken), _idTokenExpiry,
                                 newRefresh, sizeof(newRefresh), false);
@@ -1059,9 +943,7 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     http.setTimeout(FIREBASE_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
-    // 640: a payload with full diag is ~480 bytes. On overflow snprintf truncates
-    // SILENTLY -> broken JSON -> the PATCH is rejected and the heartbeat dies
-    // (checked right below).
+    // 640: a full payload is ~480 bytes. A truncated one is broken JSON (checked below).
     char payload[640];
     uint32_t now = (uint32_t)time(nullptr);
     int plen = snprintf(payload, sizeof(payload),
@@ -1105,13 +987,11 @@ bool NetworkManager::updateFirebaseStatus(uint8_t batteryPercent, bool isChargin
     int httpCode = http.PATCH((uint8_t*)payload, strlen(payload));
     noteAuthFailure(httpCode, "status");
     if (httpCode < 0) {
-        // This is the FIRST TLS session of every sync cycle -> the cheapest place
-        // to learn whether the handshake passes with setCACert() on.
+        // First TLS session of the cycle: shows whether the handshake passes at all.
         DLOG("[NET] status PATCH %d, heap=%u", httpCode, (unsigned)ESP.getFreeHeap());
         logTlsError(client, "status");
     } else {
-        // DEBUG_SCREEN: only verifies Phase A (handshake passes, heap left after
-        // parsing the 2 roots). Remove once settled.
+        // DEBUG_SCREEN: heap left after the handshake. Remove once settled.
         DLOG("[NET] status OK heap=%u", (unsigned)ESP.getFreeHeap());
     }
     http.end();
@@ -1151,12 +1031,8 @@ bool NetworkManager::checkFirebaseFlags() {
     String payload = http.getString();
     http.end();
 
-    // The alarm flag is `a_flag` — the name the backend writes
-    // (firebase-alarm.repository.ts); see MEMORY.md §20.
-    // There are no OTA flags: nothing writes them (no backend, web or rules), and
-    // remote-triggered OTA would keep the box awake 10 minutes for something that
-    // may never come. OTA is its own mode, entered by the user with the touch-hold
-    // sequence 3s, 3s, 6s (STATE_OTA in main.cpp).
+    // `a_flag` is the name the backend writes (MEMORY.md §20). There are no OTA
+    // flags: OTA is a mode the user enters by touch (STATE_OTA in main.cpp).
     bool alarmFlag = false;
     bool configFlag = false;
     bool musicFlag = false;
@@ -1173,24 +1049,19 @@ bool NetworkManager::checkFirebaseFlags() {
         _themeFlag = doc["theme_flag"] | false;
     }
     _lastAFlag = alarmFlag;
-    // Alarms changed (maybe a different track) or the music library changed -> refetch the music list.
+    // Alarms or the music library changed -> refetch the music list.
     if (alarmFlag || musicFlag) _musicNeedFetch = true;
 
-    // Reset flags BEFORE downloading: an edit from the web during the download
-    // re-raises the flag and is caught next cycle. Resetting afterwards would wipe
-    // that edit's flag. PATCH only when a flag is set — one per sync cycle would be
-    // a wasted TLS handshake. Lowering config_flag here is safe even if the fetch
-    // fails: _settingsNeedFetch keeps the retry.
+    // Reset flags BEFORE downloading, so a web edit made meanwhile re-raises them.
+    // A failed fetch is retried through the *NeedFetch members.
     resetFlags(alarmFlag, configFlag, false, musicFlag);
 
     if (configFlag || _settingsNeedFetch) {
         _settingsNeedFetch = !syncFirebaseSettings();
     }
 
-    // Two-way alarm sync (full rules in AlarmClock.h):
-    //  - the box has unpushed edits -> PUT the whole list, ignore a_flag (box wins)
-    //  - otherwise download when a_flag is set, or on the first sync after boot
-    //    (NVS may be empty/stale, e.g. after flashing firmware that resized AlarmItem)
+    // Two-way alarm sync (rules in AlarmClock.h): unpushed box edits -> PUT the whole
+    // list (box wins); otherwise download on a_flag or on the first sync after boot.
     uint32_t alarmRev = 0;
     bool isDirty = AlarmClock::instance().isDirty(&alarmRev);
     _lastAlarmsDirty = isDirty;
@@ -1205,7 +1076,6 @@ bool NetworkManager::checkFirebaseFlags() {
         }
     } else if (alarmFlag || _alarmsNeedFetch) {
         DLOG("[NET] flags: sync alarms");
-        // On a failed fetch keep _alarmsNeedFetch so the next cycle retries although the flag was reset.
         bool fetchOk = syncFirebaseAlarms();
         _alarmsNeedFetch = !fetchOk;
         if (fetchOk) {
@@ -1224,10 +1094,8 @@ bool NetworkManager::checkFirebaseFlags() {
     return true;
 }
 
-// Box -> cloud: PUT replaces ALL of boxes/<id>/config/alarm_list. The rules let
-// the box write exactly this branch (database.rules.json). a_flag is not raised:
-// the box itself just wrote, so raising it would only make the next cycle
-// download what was just pushed.
+// Box -> cloud: PUT replaces ALL of boxes/<id>/config/alarm_list. a_flag is not
+// raised, or the next cycle would download what was just pushed.
 bool NetworkManager::pushFirebaseAlarms() {
     AlarmItem alarms[MAX_ALARMS];
     size_t count = AlarmClock::instance().list(alarms, MAX_ALARMS);
@@ -1241,18 +1109,17 @@ bool NetworkManager::pushFirebaseAlarms() {
         a["time"] = alarms[i].time;
         a["is_enable"] = alarms[i].isEnable;
         a["repeatable"] = alarms[i].repeatable;
-        // The box pushes the WHOLE list (box wins), so the music fields must be sent too,
-        // or the PUT wipes the music/volume choice the recipient made on the web
+        // Send the music fields too, or the PUT wipes the choice made on the web
         // (mandatory case, MEMORY.md §28).
         if (alarms[i].musicId[0]) a["music_id"] = alarms[i].musicId;
         a["volume"] = alarms[i].volume;
         a["ramp"] = alarms[i].ramp;
-        // The web doesn't read created_at; written to match the backend schema (BaseModel).
+        // Matches the backend schema (BaseModel).
         a["created_at"] = nowMs;
         a["updated_at"] = nowMs;
     }
     String body;
-    serializeJson(doc, body);  // {} when empty -> RTDB deletes the node, i.e. "delete all"
+    serializeJson(doc, body);  // {} -> RTDB deletes the node ("delete all")
 
     WiFiClientSecure client;
     configureTlsClient(client);
@@ -1302,14 +1169,9 @@ void NetworkManager::resetFlags(bool alarm, bool config, bool theme, bool music)
     http.end();
 }
 
-// User settings. A key-range query orderBy="$key" from "config_rev" to
-// "playback_volume": alphabetically exactly the 4 keys config_rev, display_brightness,
-// led_state, playback_volume. One request, without pulling the Wi-Fi password
-// (wifi_config), the alarm list (alarm_list) or the theme. orderBy="$key" needs no .indexOn.
-//
-// Do NOT use `?shallow=true`: it returns `true` for EVERY child key instead of numeric
-// values -> is<int>() fails -> the box silently skips them and never receives
-// brightness / volume.
+// User settings: a key-range query ("config_rev".."playback_volume") fetches just
+// the 4 setting keys, without wifi_config, alarm_list or the theme.
+// Do NOT use `?shallow=true`: it returns `true` instead of the values.
 bool NetworkManager::syncFirebaseSettings() {
     WiFiClientSecure client;
     configureTlsClient(client);
@@ -1339,12 +1201,12 @@ bool NetworkManager::syncFirebaseSettings() {
     if (payload != "null" && payload.length() > 2) {
         JsonDocument doc;
         if (deserializeJson(doc, payload)) return false;
-        // is<int>() rejects odd values (string, null) -> -1 = keep the old value.
+        // -1 = keep the old value
         if (doc["display_brightness"].is<int>()) bl = doc["display_brightness"].as<int>();
         if (doc["playback_volume"].is<int>()) vol = doc["playback_volume"].as<int>();
         rev = doc["config_rev"] | 0u;
     }
-    // Nothing to change -> no NVS write (every boot passes through here).
+    // Nothing changed -> no NVS write.
     if (bl < 0 && vol < 0) return true;
     if (rev == Settings::appliedRev.load() && rev != 0 &&
         (bl < 0 || bl == (int)Settings::brightness.load()) &&
@@ -1382,8 +1244,7 @@ bool NetworkManager::syncFirebaseAlarms() {
     AlarmItem alarms[MAX_ALARMS];
     size_t count = 0;
 
-    // "null" = the web deleted every alarm. Don't return early: the box would keep
-    // the old list in NVS and still ring deleted alarms.
+    // "null" = every alarm deleted: don't return early, the old list must be cleared.
     if (payload != "null" && payload.length() > 2) {
         JsonDocument doc;
         DeserializationError err = deserializeJson(doc, payload);
@@ -1394,9 +1255,7 @@ bool NetworkManager::syncFirebaseAlarms() {
             if (count >= MAX_ALARMS) break;
             JsonObject alarmObj = kv.value().as<JsonObject>();
             const char* tStr = alarmObj["time"] | "";
-            // An id longer than the buffer would be truncated -> pushing it back
-            // creates a different key. Skip and log instead of silently duplicating
-            // the alarm in the cloud.
+            // A truncated id would be pushed back as a new key (duplicate alarm): skip it.
             if (strlen(kv.key().c_str()) >= sizeof(alarms[count].id) ||
                 !AlarmClock::isValidTime(tStr)) {
                 DLOG("[NET] alarm bo qua: %s", kv.key().c_str());
@@ -1426,8 +1285,7 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
     SDCardManager* card = SdStore::card();
     if (!card || !storagePath || !dstPath || size == 0) return DlResult::FAILED;
 
-    // Already complete from an earlier run (crc was checked at rename) -> skip. Happens when
-    // a theme bundle is reinstalled, or a track already on the card is picked again.
+    // Already on the card (crc was checked at rename).
     if (card->getFileSize(dstPath) == (int32_t)size) return DlResult::OK;
 
     char part[96];
@@ -1435,13 +1293,13 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
 
     int32_t have = card->getFileSize(part);
     if (have < 0) have = 0;
-    if ((uint32_t)have > size) {  // .part of a different, longer version -> discard
+    if ((uint32_t)have > size) {  // .part of another version
         card->deleteFile(part);
         have = 0;
     }
 
     if ((uint32_t)have < size) {
-        // Storage path -> download URL: every '/' must be encoded as %2F (like voice_url).
+        // Storage path -> download URL ('/' encoded as %2F)
         String url = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/";
         for (const char* p = storagePath; *p; p++) {
             if (*p == '/') url += "%2F";
@@ -1468,12 +1326,12 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
         if (code == 206 && have > 0) {
             append = true;
         } else if (code == HTTP_CODE_OK) {
-            append = false;  // server ignored Range -> download from the start
+            append = false;  // server ignored Range
             have = 0;
         } else {
             DLOG("[NET] file GET %d: %s", code, dstPath);
             http.end();
-            // 416 = .part already complete/mismatched -> discard, restart next time.
+            // 416: .part complete or mismatched -> restart next time.
             if (code == 416) card->deleteFile(part);
             return DlResult::FAILED;
         }
@@ -1491,7 +1349,7 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
         uint32_t lastData = millis();
         bool writeErr = false, aborted = false;
         while (got < size && http.connected()) {
-            // An alarm (with music) started ringing midway: stop, keep .part to resume later.
+            // An alarm started ringing: stop, keep .part to resume.
             if (isPlaybackActive()) {
                 aborted = true;
                 break;
@@ -1504,8 +1362,7 @@ NetworkManager::DlResult NetworkManager::downloadFile(const char* storagePath, c
             }
             size_t want = avail < sizeof(buffer) ? avail : sizeof(buffer);
             if (want > size - got) want = size - got;
-            // read(), NOT readBytes(): WiFiClientSecure doesn't override readBytes(), so it
-            // falls back to Stream::readBytes() reading BYTE BY BYTE (see the message download loop below).
+            // read(), NOT readBytes() (see the message download loop).
             int n = stream->read(buffer, want);
             if (n <= 0) continue;
             if (card->genWrite(buffer, (size_t)n) != (size_t)n) {
@@ -1551,7 +1408,7 @@ bool NetworkManager::syncTheme(bool themeFlag) {
         _seenThemeEpoch = epoch;
         _themeNeedFetch = true;
     }
-    // Task_MediaPlayer still has to install the bundle just downloaded: don't download again, wait.
+    // A downloaded bundle is waiting for Task_MediaPlayer to install it.
     if (ThemeStore::installPending()) return true;
     if (!themeFlag && !_themeNeedFetch) return true;
 
@@ -1581,8 +1438,7 @@ bool NetworkManager::syncTheme(bool themeFlag) {
     if (deserializeJson(doc, payload)) return true;
     const char* id = doc["theme_id"] | "";
     uint32_t rev = doc["rev"] | 0u;
-    // A theme saved by an old web build has no theme_id/rev/assets: the box can't tell
-    // what to download. The recipient saving the theme once more on the web fixes it.
+    // Theme from an old web build (no theme_id/rev/assets): saving it again on the web fixes it.
     if (!id[0] || rev == 0 || strlen(id) > 20) {
         DLOG("[NET] theme cu, can luu lai tren web");
         _themeNeedFetch = false;
@@ -1594,7 +1450,7 @@ bool NetworkManager::syncTheme(bool themeFlag) {
     snprintf(dir, sizeof(dir), "/theme/%s_r%lu", id, (unsigned long)rev);
 
     if (ThemeStore::valid() && ThemeStore::rev() == rev && strcmp(ThemeStore::themeId(), id) == 0) {
-        // The copy in flash is current: only now lower the flag, and clean old bundles off the card.
+        // Flash is current: lower the flag only now, and clean old bundles off the card.
         _themeNeedFetch = false;
         if (themeFlag) resetFlags(false, false, true, false);
         SDCardManager* card = SdStore::card();
@@ -1609,7 +1465,6 @@ bool NetworkManager::syncTheme(bool themeFlag) {
         return true;
     }
 
-    // Download each asset into the bundle directory. Size + crc32 are checked in downloadFile().
     static const struct { const char* key; const char* file; } ASSETS[] = {
         {"bg", "bg.bin"}, {"f_time", "f_time.vlw"}, {"f_date", "f_date.vlw"}};
     JsonObject assets = doc["assets"].as<JsonObject>();
@@ -1626,11 +1481,10 @@ bool NetworkManager::syncTheme(bool themeFlag) {
         if (r == DlResult::ABORTED) return false;
         if (r != DlResult::OK) {
             DLOG("[NET] theme asset %s FAIL", a.key);
-            return true;  // _themeNeedFetch stays set -> retried next cycle
+            return true;  // retried next cycle
         }
     }
-    // layout.json = the theme verbatim from the cloud (widgets + asset names). Written AFTER
-    // the assets: a bundle is only "complete" once it has layout.json (required by ThemeStore).
+    // layout.json is written LAST: its presence marks the bundle complete.
     char path[80];
     snprintf(path, sizeof(path), "%s/layout.json", dir);
     if (!SdStore::writeAtomic(path, (const uint8_t*)payload.c_str(), payload.length())) return true;
@@ -1641,9 +1495,9 @@ bool NetworkManager::syncTheme(bool themeFlag) {
 }
 
 bool NetworkManager::syncAlarmMusic() {
-    if (!SdStore::card()) return true;  // no card: alarms just beep, nothing to do
+    if (!SdStore::card()) return true;  // no card: alarms just beep
 
-    // Card just remounted: the index on a new card may differ entirely -> reload it, refetch the list.
+    // Card remounted (maybe a different one): reload the index, refetch the list.
     uint32_t epoch = SdStore::mountEpoch.load();
     if (epoch != _seenMountEpoch) {
         _seenMountEpoch = epoch;
@@ -1657,7 +1511,7 @@ bool NetworkManager::syncAlarmMusic() {
     for (size_t i = 0; i < nNeed; i++) {
         if (!MusicStore::has(need[i])) missing = true;
     }
-    // A normal cycle (no flag, all tracks present) costs NO request.
+    // A normal cycle costs no request.
     if (!_musicNeedFetch && !missing) return true;
 
     WiFiClientSecure client;
@@ -1681,7 +1535,7 @@ bool NetworkManager::syncAlarmMusic() {
     if (payload != "null" && payload.length() > 2 && deserializeJson(doc, payload)) return true;
     JsonObject lib = doc.as<JsonObject>();
 
-    // Tracks removed from the library -> delete them from the card. Only after a successful list GET.
+    // Delete tracks removed from the library (only after a successful list GET).
     char keep[ALARM_MUSIC_MAX_TRACKS][24];
     size_t nKeep = 0;
     for (JsonPair kv : lib) {
@@ -1697,7 +1551,7 @@ bool NetworkManager::syncAlarmMusic() {
     uint8_t done = 0;
     for (size_t i = 0; i < nNeed; i++) {
         JsonObject m = lib[need[i]];
-        if (m.isNull()) continue;  // alarm points at a deleted track: it beeps
+        if (m.isNull()) continue;  // deleted track: the alarm beeps
         uint32_t rev = m["rev"] | 0u;
         uint32_t size = m["size"] | 0u;
         uint32_t crc = m["crc32"] | 0u;
@@ -1705,7 +1559,7 @@ bool NetworkManager::syncAlarmMusic() {
         if (MusicStore::has(need[i], rev)) continue;
         if (size == 0 || size > ALARM_MUSIC_MAX_BYTES || !sp[0]) continue;
         if (done >= ALARM_MUSIC_PER_SYNC) {
-            _musicNeedFetch = true;  // tracks left to download -> continue next cycle
+            _musicNeedFetch = true;  // continue next cycle
             break;
         }
         char path[48];
@@ -1738,7 +1592,7 @@ void NetworkManager::pushLogTail() {
     doc["log_tail"] = (const char*)tail;
     doc["log_at"] = (uint32_t)time(nullptr);
     String body;
-    serializeJson(doc, body);  // ArduinoJson escapes ", \ and newlines itself
+    serializeJson(doc, body);  // escapes ", \ and newlines
     free(tail);
 
     WiFiClientSecure client;
@@ -1754,13 +1608,8 @@ void NetworkManager::pushLogTail() {
     http.end();
 }
 
-// Downloads voice_url/bg_music_url and appends it to the slot just written (right
-// after the image/video, or at offset 4 for an empty slot — see
-// checkAndDownloadNewMessages()). Shared by the image/video path (audio is
-// secondary, a failed download doesn't cancel the message) and the image-less
-// "still message" path (audio may be the main content).
-// Returns true when there is NO voice URL (nothing to download, not an error) or
-// the download completed; false when a URL exists but it failed/fell short/stalled.
+// Downloads voice_url/bg_music_url and appends it to the slot just written.
+// true = no URL (nothing to do) or fully downloaded; false = failed/short/stalled.
 bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientSecure& client,
                                            IStorageProvider* storage, const char* writeSlotId) {
     if (rawVoiceUrl.length() == 0) return true;
@@ -1781,7 +1630,7 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
     bool ok = false;
     if (httpAudio.begin(client, voiceUrl.c_str())) {
         httpAudio.setTimeout(30000);
-        // Required once storage.rules is locked down: without this header Storage returns 403.
+        // Without this header Storage returns 403 (storage.rules).
         addStorageAuthHeader(httpAudio);
         int aCode = httpAudio.GET();
         noteAuthFailure(aCode, "voice");
@@ -1789,28 +1638,21 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
             int aLen = httpAudio.getSize();
             WiFiClient* aStream = httpAudio.getStreamPtr();
 
-            // openForAppend continues writing without erasing the sectors
-            // that already hold the video
             if (storage->openForAppend(writeSlotId)) {
-                // Write the AUDC header (10 bytes)
                 uint8_t audcHeader[10];
                 memcpy(audcHeader, "AUDC", 4);
                 uint16_t sr      = (uint16_t)AUDIO_SAMPLE_RATE;
                 uint32_t pcmSize = (aLen > 0) ? (uint32_t)aLen : 0;
                 memcpy(audcHeader + 4, &sr,      2);
                 memcpy(audcHeader + 6, &pcmSize, 4);
-                // With a short header write AudioPlayer won't match the
-                // "AUDC" magic -> the video plays silently. Log it anyway,
-                // or storage errors on the audio branch are invisible.
+                // A short header write means silent playback (no "AUDC" magic): log it.
                 bool aWriteError =
                     storage->writeChunk(audcHeader, sizeof(audcHeader)) < sizeof(audcHeader);
                 if (aWriteError) {
                     DLOG("[NET] Audio hdr write SHORT");
                 }
 
-                // Stream PCM data into the slot (no closeWrite: metadata is unchanged).
-                // 2048B rather than 256B — same reason as the video loop: a small
-                // buffer + unconditional delay(1) caps the download speed and stalls easily.
+                // Stream PCM into the slot. 2048B buffer: same reason as the video loop.
                 uint8_t abuf[2048];
                 int     aTotalRead = 0;
                 uint32_t aLastProgressMs = millis();
@@ -1818,8 +1660,7 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                     size_t av = aStream->available();
                     if (av) {
                         size_t tr = (av < sizeof(abuf)) ? av : sizeof(abuf);
-                        // read(), not readBytes() — full explanation at the video
-                        // download loop in checkAndDownloadNewMessages().
+                        // read(), NOT readBytes() (see the video download loop).
                         int c = aStream->read(abuf, tr);
                         if (c > 0) {
                             size_t aw = storage->writeChunk(abuf, c);
@@ -1832,8 +1673,7 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                             aTotalRead += c;
                             if (aLen > 0) aLen -= c;
                             aLastProgressMs = millis();
-                            // Hard cap — sets aWriteError (not writeError) so the
-                            // half-written slot is rejected by this loop's own check.
+                            // Hard cap
                             if (aTotalRead > (int)MAX_MEDIA_BYTES) {
                                 DLOG("[NET] audio dl ABORT: over cap %d", aTotalRead);
                                 aWriteError = true;
@@ -1841,25 +1681,18 @@ bool NetworkManager::downloadVoiceSegment(const String& rawVoiceUrl, WiFiClientS
                             }
                         }
                     }
-                    // Same infinite-hang risk as the video loop.
                     if (millis() - aLastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
                         DLOG("[NET] audio dl STALL %d bytes", aTotalRead);
-                        // Must set aWriteError here, or the log says "OK" for a short
-                        // download. For an image-less still message the audio may be
-                        // the ONLY content, so it has to be reported accurately.
+                        // A stall is a failure: the audio may be the message's only content.
                         aWriteError = true;
                         break;
                     }
-                    // Yield the CPU only when there is REALLY no data (see the video
-                    // download loop in checkAndDownloadNewMessages()).
+                    // Yield only when there is no data (see the video download loop).
                     if (av == 0) {
                         delay(1);
                     }
                 }
-                // Commit the append session: writes audioSize to the slot
-                // table. Without it the audio sits in storage but
-                // AudioPlayer doesn't know where it is or how long ->
-                // the box is silent.
+                // Records audioSize; without it AudioPlayer can't find the audio.
                 storage->closeAppend();
                 DLOG("[NET] Audio DL %s: %d bytes",
                      aWriteError ? "SHORT" : "OK", aTotalRead);
@@ -1892,8 +1725,6 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
 
     uint64_t nextTs = (lastTs > 0) ? (lastTs + 1) : 0;
     if (nextTs > 0) {
-        // auth goes LAST: orderBy/startAt already took the '?', so the auth parameter
-        // is joined with '&'. True in both modes — Database Secret and idToken.
         snprintf(_url, sizeof(_url),
                  "https://%s/messages/%s.json?orderBy=%%22timestamp%%22&startAt=%llu",
                  FIREBASE_HOST, BOX_ID, (unsigned long long)nextTs);
@@ -1914,13 +1745,9 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     int httpCode = http.GET();
     noteAuthFailure(httpCode, "msg");
     if (httpCode < 0) {
-        // -1 = HTTPC_ERROR_CONNECTION_REFUSED: TCP/TLS connect failed. A plain retry
-        // on the same client is nearly useless when the cause is a dead Wi-Fi link
-        // or stale DNS — FORCE a re-association first, which also fetches a fresh
-        // DNS server from DHCP.
+        // Connect failed: a plain retry is useless on a dead link or stale DNS, so
+        // force a re-association first.
         DLOG("[NET] msg GET %d, heap=%u -> re-assoc", httpCode, (unsigned)ESP.getFreeHeap());
-        // "Invalid certificate" vs "can't reach the server": both are -1 at the
-        // HTTPClient layer; only lastError tells them apart.
         logTlsError(client, "msg");
         _forceReassociate = true;
         if (ensureConnected(12000)) {
@@ -1942,7 +1769,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         return false;
     }
 
-    // Parse JSON straight from the stream (no large temporary String fragmenting the heap)
+    // Parse from the stream: no large temporary String
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, *stream);
     http.end();
@@ -1956,7 +1783,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         return true;
     }
 
-    // Collect messages from a JsonObject or JsonArray (Firebase returns either, depending on the keys)
+    // Firebase returns an object or an array, depending on the keys
     std::vector<JsonObject> msgList;
     if (doc.is<JsonObject>()) {
         JsonObject obj = doc.as<JsonObject>();
@@ -1974,7 +1801,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         }
     }
 
-    // Keep msgList sorted by ascending timestamp (oldest -> newest)
+    // Oldest first
     std::sort(msgList.begin(), msgList.end(), [](const JsonObject& a, const JsonObject& b) {
         uint64_t tsA = 0, tsB = 0;
         JsonVariantConst vA = a["timestamp"];
@@ -2029,11 +1856,8 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
     bool downloadedAnyMedia = false;
     _hasPendingMessages = false;
 
-    // Keep the radio fully on for the whole download — the default modem sleep
-    // (WIFI_PS_MIN_MODEM) adds latency/drops TCP window updates, contributing to
-    // downloads breaking off at high speed. Power saving is re-enabled right after
-    // the loop (every exit from the loop below is a `break`, never a `return`, so
-    // that line is always reached).
+    // Modem sleep off while downloading (it drops TCP window updates). Re-enabled
+    // after the loop, which is only ever left by `break`, never `return`.
     WiFi.setSleep(false);
 
     for (JsonObject msg : msgList) {
@@ -2051,7 +1875,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
-        // No timestamp from Firebase (ts == 0): fall back to NTP time, or the millis() counter
+        // No timestamp: fall back to NTP time, else millis()
         if (ts == 0) {
             time_t nowSec = time(nullptr);
             ts = (nowSec > 1600000000) ? ((uint64_t)nowSec * 1000ULL) : (uint64_t)millis();
@@ -2069,7 +1893,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             if (maxDisplayTime == 0) maxDisplayTime = 60;
         }
 
-        // Accept every key naming variant (snake_case, camelCase...)
+        // Accept every key naming variant
         String rawMediaUrl = "";
         const char* candidateKeys[] = {
             "bin_url", "binUrl", 
@@ -2090,8 +1914,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
-        // Voice URL (attached audio) — bg_music_url shares voice_url's download/append
-        // path (both PCM/WAV, differing only in UX role: speech vs background music).
+        // Attached audio: voice and background music share one path
         String rawVoiceUrl = "";
         const char* voiceKeys[] = { "voice_url", "voiceUrl", "audio_url", "audioUrl", "bg_music_url", "bgMusicUrl" };
         for (const char* k : voiceKeys) {
@@ -2106,10 +1929,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
         }
 
-        // Caption text — check that the field EXISTS rather than rely on "type"
-        // (known minor web bug: the text field isn't cleared when switching modes,
-        // so a message of another type may still carry old text; reading the
-        // actual field is the most accurate).
+        // Caption: go by the field itself, not by "type"
         String rawText = "";
         {
             JsonVariantConst v = msg["text"];
@@ -2125,14 +1945,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         if (rawMediaUrl.length() > 0) {
             String fullUrl = rawMediaUrl;
             
-            // Convert a relative path or gs:// URL to a Firebase Storage HTTP download URL
+            // Relative path or gs:// -> Storage download URL
             if (!fullUrl.startsWith("http")) {
                 if (fullUrl.startsWith("gs://")) {
                     int slashIdx = fullUrl.indexOf('/', 5);
                     if (slashIdx > 0) fullUrl = fullUrl.substring(slashIdx + 1);
                 }
                 if (fullUrl.startsWith("/")) fullUrl.remove(0, 1);
-                fullUrl.replace("/", "%2F"); // encode / as %2F
+                fullUrl.replace("/", "%2F");
                 fullUrl = "https://firebasestorage.googleapis.com/v0/b/iot-app-839a2.firebasestorage.app/o/" + fullUrl + "?alt=media";
             }
 
@@ -2141,7 +1961,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             
             if (http.begin(client, fullUrl.c_str())) {
                 http.setTimeout(30000);
-                // Required once storage.rules is locked down: without this header Storage returns 403.
+                // Without this header Storage returns 403 (storage.rules).
                 addStorageAuthHeader(http);
                 int code = http.GET();
                 if (code < 0) logTlsError(client, "media");
@@ -2150,9 +1970,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                     int len = http.getSize();
                     int initialLen = len;
                     int totalRead = 0;
-                    // The heap figure most worth watching with setCACert() on: this
-                    // TLS session lives longest (it spans the nested audio download)
-                    // and has a history of OOM.
+                    // Longest-lived TLS session (spans the audio download): watch this heap figure.
                     DLOG("[NET] GET OK len=%d heap=%u", len, (unsigned)ESP.getFreeHeap());
                     char writeSlotId[16] = "";
                     if (!storage->getNextWriteSlotIdentifier(writeSlotId, sizeof(writeSlotId))) {
@@ -2160,29 +1978,22 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         http.end();
                         _isDownloadingMedia = false;
                         _hasPendingMessages = true;
-                        break; // stop when storage is full
+                        break;
                     }
 
                     WiFiClient* stream = http.getStreamPtr();
                     if (storage->openForWrite(writeSlotId)) {
                         DLOG("[NET] writing slot %s", writeSlotId);
-                        // 2048B rather than 256B: a small buffer + unconditional delay(1)
-                        // per iteration caps the download at ~20-25KB/s (256B drained
-                        // per 10ms tick). Still rolling streaming: RAM use is constant
-                        // whatever the file size.
+                        // 2048B: a 256B buffer capped the download at ~20-25KB/s.
                         uint8_t buffer[2048];
                         bool writeError = false;
-                        // With len == -1 (chunked, no Content-Length) the loop condition
-                        // never turns false by itself: it exits only when the server
-                        // closes the connection. A half-open stream sending nothing
-                        // would hang here forever. Bound it by time since real progress.
+                        // len == -1 (chunked) never ends the loop by itself: bound it by
+                        // time since the last byte.
                         uint32_t lastProgressMs = millis();
                         int lastLoggedRead = 0;
                         while (http.connected() && (len > 0 || len == -1)) {
-                            // An alarm (with music) started ringing: yield the card to the
-                            // music stream (mandatory case, MEMORY.md §28). Treated as a
-                            // failed download -> discardWrite();
-                            // the message isn't marked downloaded, so the next cycle retries.
+                            // An alarm started ringing: yield the card to the music
+                            // (mandatory case, MEMORY.md §28). Counts as a failed download.
                             if (isPlaybackActive()) {
                                 DLOG("[NET] dl dung: bao thuc dang keu");
                                 writeError = true;
@@ -2191,15 +2002,9 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             size_t sizeAvail = stream->available();
                             if (sizeAvail) {
                                 size_t toRead = (sizeAvail < sizeof(buffer)) ? sizeAvail : sizeof(buffer);
-                                // read(), NOT readBytes(): WiFiClientSecure doesn't override
-                                // readBytes(), so it falls back to Stream::readBytes() reading ONE
-                                // BYTE AT A TIME (Stream.cpp:41), each byte calling available() ->
-                                // mbedtls_ssl_read() twice. A 2048B chunk = ~4096 mbedTLS calls; a
-                                // 2.2MB file = over 4 MILLION calls -> a ~20-25KB/s ceiling. Worse:
-                                // when the mbedTLS buffer runs dry mid-chunk, timedRead() busy-spins
-                                // for up to 30 SECONDS (Stream.cpp:31, _timeout = 30s) without
-                                // yielding the CPU or draining the socket. read(buf,len) costs one
-                                // available() + one mbedtls_ssl_read for the whole block.
+                                // read(), NOT readBytes(): WiFiClientSecure falls back to
+                                // Stream::readBytes(), which reads byte by byte (2 mbedTLS calls
+                                // each, ~20-25KB/s ceiling) and can busy-spin for 30s in timedRead().
                                 int c = stream->read(buffer, toRead);
                                 if (c > 0) {
                                     size_t written = storage->writeChunk(buffer, c);
@@ -2210,13 +2015,12 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                                     totalRead += c;
                                     if (len > 0) len -= c;
                                     lastProgressMs = millis();
-                                    // Hard cap: stop now instead of downloading for minutes and failing elsewhere.
+                                    // Hard cap
                                     if (totalRead > (int)MAX_MEDIA_BYTES) {
                                         DLOG("[NET] dl ABORT: over cap %d", totalRead);
                                         writeError = true;
                                         break;
                                     }
-                                    // Log sparsely (every 16KB) so the loop's pace isn't affected.
                                     if (totalRead - lastLoggedRead >= 16384) {
                                         lastLoggedRead = totalRead;
                                         DLOG("[NET] dl %d/%d", totalRead, initialLen);
@@ -2225,34 +2029,24 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                             }
                             if (millis() - lastProgressMs > DOWNLOAD_STALL_TIMEOUT_MS) {
                                 DLOG("[NET] dl STALL %d/%d", totalRead, initialLen);
-                                // writeError = true so the half-written slot is rejected by
-                                // the check below. Without it a partial download with
-                                // initialLen <= 0 would slip through -> a garbage slot.
+                                // A stall is a failure even when the length is unknown.
                                 writeError = true;
                                 break;
                             }
-                            // Yield the CPU only when there is REALLY no data — yielding
-                            // unconditionally every iteration is the main cause of capped
-                            // download speed and of stalls on a flaky network.
+                            // Yield ONLY when there is no data: an unconditional delay caps
+                            // the speed and causes stalls.
                             if (sizeAvail == 0) {
                                 delay(1);
                             }
                         }
-                        // Leaving the loop on !http.connected() (not a stall, not all bytes)
-                        // = the connection dropped midway. Logged separately: the "DL err"
-                        // line alone can't tell "connection dropped" from "short download".
+                        // Connection dropped midway: logged apart from a short download.
                         if (!writeError && !http.connected() &&
                             (initialLen > 0 && totalRead < initialLen)) {
                             DLOG("[NET] conn DROPPED @ %d/%d", totalRead, initialLen);
                         }
-                        // Settle the outcome BEFORE deciding to commit or discard. closeWrite()
-                        // writes the slot table + sets the unread bit; calling it unconditionally
-                        // would turn a mid-download stall/timeout into a "valid unread message"
-                        // with truncated data -> it plays the first seconds (the 20-byte header
-                        // is there) then fails with Bad jpegSize on reaching the unwritten area.
-                        // On a real error -> discardWrite(): the slot table/unread bitmask stay
-                        // untouched and _writeSlotIndex is kept, so the next sync retries this
-                        // slot instead of burning a new one per failure.
+                        // Commit only a complete download: closeWrite() on a truncated one would
+                        // publish it as a valid unread message ("Bad jpegSize" a few seconds in).
+                        // discardWrite() leaves the slot table alone, so the next sync retries this slot.
                         bool downloadComplete = !writeError && (initialLen <= 0 || totalRead >= initialLen);
                         if (downloadComplete) {
                             storage->closeWrite(maxDisplayTime);
@@ -2263,15 +2057,11 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         if (downloadComplete) {
                             DLOG("[NET] DL OK slot %s", writeSlotId);
 
-                            // Close the video HTTP session BEFORE opening the audio one —
-                            // downloadVoiceSegment() shares the same WiFiClientSecure, and a
-                            // session not yet .end()ed can make the new one handshake in the
-                            // wrong state. The second http.end() at the end of the block is a
-                            // safe no-op.
+                            // End the video session BEFORE the audio one: both share one
+                            // WiFiClientSecure. The later http.end() is a no-op.
                             http.end();
 
-                            // Voice/bg_music is secondary to the image/video: a failed
-                            // download is only logged, the message is not cancelled.
+                            // Audio is secondary here: a failed download doesn't cancel the message.
                             downloadVoiceSegment(rawVoiceUrl, client, storage, writeSlotId);
                             if (rawVoiceUrl.length() == 0) {
                                 DLOG("[NET] No voice_url in msg");
@@ -2298,12 +2088,8 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
             }
             _isDownloadingMedia = false;
         } else if (rawVoiceUrl.length() > 0 || rawText.length() > 0) {
-            // A still message with NO image/video: audio (voice/background music)
-            // and/or text only. openForWrite()/closeWrite() are still needed to
-            // create a valid "empty" slot (the dataSize=4 sentinel — matches how
-            // NandStorageProvider::openForAppend() computes the next audio offset).
-            // MediaPlayer recognises the sentinel and shows a black screen instead
-            // of trying to decode a JPEG that doesn't exist.
+            // Audio/text only, no image: openForWrite()/closeWrite() create an "empty" slot
+            // (dataSize=4 sentinel) that MediaPlayer shows as a black screen.
             char writeSlotId[16] = "";
             if (!storage->getNextWriteSlotIdentifier(writeSlotId, sizeof(writeSlotId))) {
                 DLOG("[NET] skip dl: FULL");
@@ -2326,8 +2112,7 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
                         _onDownloadComplete();
                     }
                 } else {
-                    // Here audio is the MAIN CONTENT (no image) — a failed download must
-                    // cancel the whole message, unlike the image/video branch above.
+                    // Audio is the main content here: a failed download cancels the message.
                     DLOG("[NET] DL err: voice/bg_music failed (discarded)");
                     storage->discardWrite();
                 }
@@ -2340,14 +2125,14 @@ bool NetworkManager::checkAndDownloadNewMessages(IStorageProvider* storage) {
         }
 
 
-        // Advance the timestamp ONLY when this message was fully processed
+        // Advance the timestamp only for a fully processed message
         if (messageSuccess) {
             if (ts > successfullyProcessedMaxTs) {
                 successfullyProcessedMaxTs = ts;
             }
         } else {
             DLOG("[NET] ts fail");
-            break; // stop here so message order is never skipped
+            break; // never skip ahead of a failed message
         }
     }
 

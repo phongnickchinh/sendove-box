@@ -11,14 +11,8 @@
 
 class DisplayDriver;
 
-// ============================================================================
-// MediaPlayer — plays VJPG video / VIMG images from IStorageProvider (NAND / SD)
-// ============================================================================
-// Serves Task_MediaPlayer:
-// - reads JPEG frames from IStorageProvider
-// - decodes with JPEGDEC → the callback pushes pixels to DisplayDriver
-// - two modes: VJPG (video, looping) and VIMG (still image)
-// ============================================================================
+// MediaPlayer — plays VJPG video (looping) / VIMG still images from
+// IStorageProvider, decoded with JPEGDEC straight to DisplayDriver.
 
 /// Playback state
 enum class PlaybackState : uint8_t {
@@ -51,8 +45,8 @@ public:
     /// One alarm beep (blocks ~0.6s) at volume 0..100. Call while the player is IDLE.
     void alarmBeep(uint8_t volume);
 
-    /// Play alarm music (looping) from a file on the card. false = it couldn't be
-    /// opened/read -> the caller falls back to the beep (the single fallback path; mandatory case, MEMORY.md §28).
+    /// Play alarm music (looping) from the card. false = the caller falls back to
+    /// the beep, the single fallback path (mandatory case, MEMORY.md §28).
     bool startAlarmMusic(const char* path, uint8_t volume);
     /// Call every loop while ringing: updates the volume (ramp) + refills the DMA. Non-blocking.
     void tickAlarmMusic(uint8_t volume);
@@ -68,8 +62,7 @@ public:
 private:
     static constexpr size_t JPEG_BUFFER_SIZE = 32 * 1024;
 
-    // Minimum idle time between two decodes. Prevents back-to-back frames — that
-    // is when the current draw spikes and the supply sags.
+    // Minimum idle time between two decodes (back-to-back frames sag the supply).
     static constexpr uint32_t FRAME_MIN_IDLE_MS = 2;
 
     IStorageProvider* _storage = nullptr;
@@ -77,14 +70,9 @@ private:
     PlaybackState     _state   = PlaybackState::IDLE;
     SemaphoreHandle_t _playerMutex = nullptr;
 
-    // 17,884 bytes — the largest piece of the whole appCtx (24,508 bytes of static
-    // RAM), yet only alive inside _jpeg->decode(). As a direct member it would hold
-    // 17.9KB of BSS for the box's whole uptime — exactly the RAM mbedTLS needs as a
-    // ~16KB contiguous block while the box sits on standby doing a TLS handshake
-    // (MEMORY.md §21). It is allocated/freed together with _jpegBuffer: peak RAM
-    // during playback is unchanged, and the idle state gets the memory back.
-    // Safe: openRAM() starts with memset(&_jpeg, 0, sizeof(JPEGIMAGE)), so a
-    // heap object with garbage is fine — it doesn't rely on zeroed BSS.
+    // 17.9KB, needed only while decoding: heap-allocated together with _jpegBuffer
+    // instead of sitting in BSS, so standby keeps that RAM for TLS (MEMORY.md §21).
+    // openRAM() zeroes the state itself, so an uninitialised heap object is fine.
     JPEGDEC* _jpeg          = nullptr;
     uint8_t* _jpegBuffer    = nullptr;
     int8_t   _currentSlot   = -1;
@@ -105,9 +93,8 @@ private:
     uint16_t _slbxWidth     = 128;
     uint16_t _slbxHeight    = 160;
 
-    /// Decode and render single JPEG frame.
-    /// skipRender = true: still consume the frame's bytes to keep the file position,
-    /// but skip the expensive part: decoding the JPEG and pushing the frame over SPI.
+    /// Decode and render one frame. skipRender = consume the frame's bytes but skip
+    /// the decode + push.
     bool decodeOneFrame(bool skipRender);
 
     /// Callback function for JPEGDEC pixel output

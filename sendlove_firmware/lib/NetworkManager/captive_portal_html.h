@@ -3,29 +3,20 @@
 
 #include <pgmspace.h>
 
-// ============================================================================
-// HTML page for the SoftAP captive portal (Wi-Fi setup)
-// ============================================================================
-// Stored in flash (PROGMEM) to save RAM.
+// Captive portal page (Wi-Fi setup + alarms), stored in flash. Same palette and
+// type scale as the web (sendlove_web/src/styles). No web fonts: the box has NO
+// Internet when this page opens.
 //
-// The UI follows the Figma file's "Warm Minimalism" design system — same palette,
-// type scale and corner radii as the web (sendlove_web/src/styles).
-// No web fonts: when this page opens the box has NO Internet yet, so an external
-// font would fail to load and the text would flash to the fallback font.
-//
-// The Wi-Fi <script> below must stay EXACTLY as is, character for character:
+// Do NOT change the Wi-Fi <script> flow (CSS is fine):
 //   - the /scan poll loop (scanning -> done, 10 tries, 1200ms)
-//   - textContent when printing network names (an SSID is an untrusted string)
-//   - the POST /save contract with the two fields ssid / password
-// Changing the CSS is fine; changing this flow can leave the box unable to get online.
+//   - textContent for network names (an SSID is untrusted)
+//   - POST /save with the fields ssid / password
 //
-// The "Bao thuc" (alarm) tab uses its OWN <script> at the end of the page and
-// shares no variables/functions with the Wi-Fi script above. Contract:
+// The alarm tab has its OWN <script>, sharing nothing with the Wi-Fi one:
 //   GET  /alarms          -> {now, max, dirty, items:[{id,time,en,rep}]}
 //   POST /alarms/save     id (empty = add), time "HH:MM", en 0/1, rep 0/1
 //   POST /alarms/delete   id
-//   POST /time            epoch (seconds) — sends the phone's time while the box has no NTP
-// ============================================================================
+//   POST /time            epoch (seconds): the phone's time while the box has no NTP
 
 const char CAPTIVE_PORTAL_HTML[] PROGMEM = R"raw(
 <!DOCTYPE html>

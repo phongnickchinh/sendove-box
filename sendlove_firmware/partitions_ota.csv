@@ -1,21 +1,9 @@
-# 4MB flash (0x400000). No `spiffs` partition: nothing in the firmware uses
-# SPIFFS/LittleFS, so its 0x6F000 (444KB) went to the app partitions.
-#
-# SD-card design (MEMORY.md §28, product decision: option B): each app is 0x1D0000
-# (1.81MB; the firmware is ~1.43MB), which leaves 256KB for the `theme` partition:
-# a projection of the theme bundle on the SD card (240x240 background + fonts +
-# layout), read with esp_partition_mmap like a PROGMEM array. The SD card stays
-# the source of truth.
-# app1 sits at 0x1E0000 (it used to be 0x200000): a cable flash rewrites
-# boot_app0.bin into otadata (PlatformIO does this) -> the box boots from app0
-# instead of following stale otadata.
-#
-# nvs KEEPS offset 0x9000 and size 0x5000 -> Wi-Fi creds, alarms and last_dl_ts
-# survive a reflash. `nvs_keys` is only needed with NVS encryption (off), so
-# sitting at the end is harmless.
-#
-# Changing this table REQUIRES a cable flash (the partition table lies outside
-# the area OTA can write).
+# 4MB flash, no spiffs. Two 1.81MB app slots (the firmware is ~1.43MB) leave 256KB
+# for `theme`: the active theme copied from the SD card, read through mmap
+# (MEMORY.md §28, product decision: option B).
+# nvs KEEPS offset 0x9000 / size 0x5000, so Wi-Fi creds, alarms and last_dl_ts
+# survive a reflash.
+# Changing this table REQUIRES a cable flash (OTA can't write the partition table).
 # Name,     Type, SubType,  Offset,   Size
 nvs,        data, nvs,      0x9000,   0x5000
 otadata,    data, ota,      0xe000,   0x2000

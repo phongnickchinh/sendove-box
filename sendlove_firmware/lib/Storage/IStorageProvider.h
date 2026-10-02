@@ -41,10 +41,8 @@ public:
     /// Move the read cursor to an offset
     virtual void seek(uint32_t offset) = 0;
 
-    /// Read at an absolute offset in the open item, NOT limited by dataSize and
-    /// WITHOUT touching the sequential read cursor. Needed for the audio region
-    /// appended after the video — with seek()+readData(), AudioPlayer and
-    /// MediaPlayer would trample each other. Default: returns 0 (unsupported).
+    /// Read at an absolute offset, NOT limited by dataSize and WITHOUT moving the
+    /// sequential cursor (audio after the video). Default: 0 (unsupported).
     virtual int readAt(uint32_t offset, uint8_t* buffer, uint32_t len) {
         (void)offset; (void)buffer; (void)len; return 0;
     }
@@ -66,12 +64,10 @@ public:
     /// Close the item being written
     virtual void closeWrite(uint32_t maxDisplayTime = 60) = 0;
 
-    /// Abandon an unfinished write (download error / stall): does NOT commit the
-    /// slot table and does NOT mark unread — unlike closeWrite(). Default: no-op.
+    /// Abandon an unfinished write: nothing committed, not marked unread. Default: no-op.
     virtual void discardWrite() { }
 
-    /// Store caption text (truncated to the internal buffer length) on a finished
-    /// item (after closeWrite()/closeAppend()). Default: no-op.
+    /// Store caption text on a finished item (truncated to fit). Default: no-op.
     virtual void setItemText(const char* identifier, const char* text) { (void)identifier; (void)text; }
 
     /// Read an item's caption text. Returns true if there is text; false by default.
@@ -79,12 +75,10 @@ public:
         (void)identifier; (void)outBuf; (void)maxLen; return false;
     }
 
-    /// Keep writing into the slot just closed, without erasing (appends audio after
-    /// the video). Default: no-op.
+    /// Keep writing into the slot just closed (audio after the video). Default: no-op.
     virtual bool openForAppend(const char* identifier = nullptr) { (void)identifier; return false; }
 
-    /// Commit the appended part: records the audio size in the slot table. Without
-    /// this call the audio data is on storage but nobody knows how long it is.
+    /// Commit the appended part (records the audio size).
     virtual void closeAppend() {}
 
     // --- Queue management & item iteration ---
@@ -118,8 +112,7 @@ public:
 
     // --- General files on the card (theme, alarm music, log) ---
 
-    /// The underlying SD card, so SdStore can read/write arbitrary files. nullptr =
-    /// storage isn't a card (NAND build): every card-based feature turns itself off.
+    /// The underlying SD card for SdStore; nullptr on NAND (card features turn off).
     virtual class SDCardManager* sdCard() { return nullptr; }
 
     /// Remount the card + reload the manifest (card just reinserted). Only call while not playing.

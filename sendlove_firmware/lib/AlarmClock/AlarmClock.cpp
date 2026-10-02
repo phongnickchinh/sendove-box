@@ -2,8 +2,7 @@
 #include "ScreenLogger.h"
 #include <time.h>
 
-// Same as MIN_VALID_EPOCH in NetworkManager.cpp (2020-09-13). Below it the RTC
-// was never set -> local time is garbage and alarms must not ring by it.
+// Same as MIN_VALID_EPOCH in NetworkManager.cpp: below it the RTC is unset.
 static constexpr time_t ALARM_MIN_VALID_EPOCH = 1600000000;
 
 AlarmClock& AlarmClock::instance() {
@@ -28,8 +27,7 @@ void AlarmClock::begin() {
         _dirty = cfg.loadAlarmDirty();
         cfg.end();
     }
-    // Unpushed edits from the previous run (e.g. edited on the portal, then Wi-Fi
-    // saved -> restart): make rev differ from pushedRev so the first sync pushes.
+    // Unpushed edits from the previous run: make rev differ so the first sync pushes.
     _rev = _dirty ? 1 : 0;
     _pushedRev = 0;
     DLOG("[ALM] %u alarms, dirty=%d", (unsigned)_count, _dirty ? 1 : 0);
@@ -103,9 +101,7 @@ bool AlarmClock::upsert(const char* id, const char* time, bool enable, bool repe
         if (_count >= MAX_ALARMS) { unlock(); return false; }
         idx = (int)_count;
         AlarmItem fresh;
-        // Same id shape the backend generates ("alarm_<ms>") when the clock is valid.
-        // In AP mode after a cold boot there is no time yet, so use a random number
-        // — it only has to be unique.
+        // The backend's id shape ("alarm_<ms>"); a random number when there is no time yet.
         time_t now = ::time(nullptr);
         do {
             if (now >= ALARM_MIN_VALID_EPOCH) {
@@ -197,9 +193,8 @@ bool AlarmClock::pollDue(time_t now, char* outTime, size_t len, AlarmItem* outIt
         // Two alarms in the same minute: the first in the list wins. Not a mandatory case (MEMORY.md §28).
         bool repeatable = _items[i].repeatable;
         if (!repeatable) {
-            // Turned off the moment it starts ringing (not on dismiss): even after a
-            // power loss midway it won't ring again tomorrow. Snooze still works
-            // because it doesn't read isEnable.
+            // Turned off when it STARTS ringing, so a power loss can't make it ring
+            // again tomorrow. Snooze doesn't read isEnable.
             _items[i].isEnable = false;
             markDirtyLocked();
             saveLocked();
@@ -305,16 +300,13 @@ uint32_t AlarmClock::secondsToNext(time_t now) {
                          + ((t[3] - '0') * 10 + (t[4] - '0')) * 60;
         int32_t diff = alarmSec - curSec;
 
-        // Already in the alarm minute but pollDue() hasn't run yet (e.g. woke a few
-        // ms early). Return 0 so the sleep loop does NOT sleep again -> no missed alarm.
+        // In the alarm minute but pollDue() hasn't run yet: 0 keeps the box awake.
         if (diff <= 0 && diff > -60 && !firedThisMinute) {
             best = 0;
             break;
         }
         if (diff <= 0) {
-            // Already passed today. A one-shot alarm that is still on (it couldn't
-            // ring because the box was powered off) also waits for tomorrow —
-            // pollDue rings it, then it turns itself off.
+            // Already passed today: wait for tomorrow (a missed one-shot alarm too).
             diff += 86400;
         }
         if ((uint32_t)diff < best) best = (uint32_t)diff;

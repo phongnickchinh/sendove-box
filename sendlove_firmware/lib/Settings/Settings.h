@@ -4,14 +4,9 @@
 #include <Arduino.h>
 #include <atomic>
 
-// ============================================================================
-// Settings — the user settings CURRENTLY IN EFFECT (brightness, message volume)
-// ============================================================================
-// Sources: NVS at boot (begin), the cloud when `config_flag` is set (apply, called
-// from the WakeSync task). Readers: Task_MediaPlayer, Task_UIController,
-// DisplayDriver, MediaPlayer -> hence atomics. Settings live in NVS, not on the SD
-// card: with a faulty card the box keeps the right brightness/volume.
-// ============================================================================
+// Settings — the user settings in effect (brightness, message volume). Loaded from
+// NVS at boot, updated from the cloud by the sync task, read from several tasks
+// (hence atomics). Kept in NVS, not on the SD card, so a faulty card doesn't lose them.
 
 namespace Settings {
 
@@ -24,9 +19,7 @@ extern std::atomic<uint32_t> brightnessEpoch;
 /// Read NVS. Call once in setup(), AFTER ConfigManager has opened NVS.
 void begin();
 
-/// Clamp the values, save to NVS, update RAM. A value < 0 = the cloud didn't send
-/// that field -> keep the old one. Returns true if the NVS write succeeded (even
-/// when nothing changed).
+/// Clamp, save to NVS, update RAM. A value < 0 = field not sent, keep the old one.
 bool apply(int newBrightness, int newVolume, uint32_t rev);
 
 /// Actual PWM % for normal screens. Gamma 2, so the web slider feels perceptually even.
@@ -34,8 +27,7 @@ uint8_t currentBacklight();
 /// PWM % for the alarm screen: never darker than ALARM_MIN_BRIGHTNESS.
 uint8_t alarmBacklight();
 
-/// Q15 gain for volume 0..100 on a dB scale (100 = 0dB = 32768, 1 = -40dB, 0 = silent).
-/// 32768 marks the unscaled path: AudioPlayer skips the multiply entirely for it.
+/// Q15 gain for volume 0..100 on a dB scale (100 = 32768 = unscaled, 1 = -40dB, 0 = silent).
 int32_t volumeGainQ15(uint8_t vol);
 
 static constexpr int32_t GAIN_UNITY = 32768;

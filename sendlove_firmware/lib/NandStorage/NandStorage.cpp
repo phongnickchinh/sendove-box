@@ -1,54 +1,19 @@
 #include "NandStorage.h"
 #include "ScreenLogger.h"
 
-// ============================================================================
-// NandStorage Implementation — Hardware SPI2
-// ============================================================================
-
 // W25Q128 SPI commands
 static constexpr uint8_t W25Q_READ_DATA      = 0x03;
 static constexpr uint8_t W25Q_READ_STATUS_1  = 0x05;
 
-// SPI transaction settings for the NAND. Three constants for three paths — don't merge them.
-//
-// Hardware ceilings (measured / from the datasheet, not guessed): pins 4/5/6 aren't
-// the FSPI IOMUX pins on the ESP32-C3, so SPI goes through the GPIO matrix, with a
-// practical limit around 40MHz. On the W25Q128JV side: read opcode 0x03 takes
-// ~50MHz, Page Program 0x02 takes 133MHz. So the real limit is the WIRING on the
-// breadboard, not the chip.
+// SPI settings for the NAND: three constants for three paths — don't merge them.
+// All run at 4MHz: at 20MHz the breadboard WIRING corrupts data intermittently
+// (stutter, Bad jpegSize), see MEMORY.md §14. Don't raise them on the breadboard;
+// on a PCB, re-test with a NEWLY downloaded message played many times.
 
-// ERASE (eraseSector / eraseRange / formatAll). Keep 4MHz; do not raise it.
-// 20MHz would save about 6 MICROseconds: an erase command is only 4 bytes
-// (opcode + 3 address bytes), and the actual 150-2000ms erase happens INSIDE the
-// chip, independent of the SPI clock. In exchange, one corrupted address byte on
-// the wire = the wrong sector erased, silent data loss. The worst bet of the three.
+// ERASE: one corrupted address byte erases the wrong sector.
 static const SPISettings NAND_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
-
-// READ (readRaw) — LOWERED from 20MHz to 4MHz after stutter CAME BACK even with
-// the write path at 4MHz. Lowering the read path too made playback smooth again
-// (confirmed by the user).
-//
-// The theory in MEMORY.md §8 says the opposite: slow reads hold spiMutex longer,
-// contend with JPEG rendering and stutter. Reality disagreed — reading 5x SLOWER
-// was SMOOTHER. That proves the problem is DATA INTEGRITY on the wire, not bus
-// contention. 20MHz on this breadboard is flaky, not outright broken: it ran fine
-// for a long time, so it is easy to believe it is safe.
-//
-// Don't raise it on the breadboard. On a real PCB with short traces it can be
-// retried, but measure with a NEWLY downloaded message played many times — the
-// fault doesn't reproduce every time.
 static const SPISettings NAND_READ_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
-
-// WRITE (writeRaw) — LOWERED from 20MHz to 4MHz. It started as a diagnostic and
-// became the conclusion: all three paths run at 4MHz, the only configuration that
-// plays smoothly and reliably on this breadboard. At 20MHz downloaded data came
-// out corrupted (noisy images / Bad jpegSize / abnormal audio crackle).
-// The speed loss is smaller than it looks: the main speed-up was moving from
-// byte-by-byte SPI.transfer() to bulk SPI.writeBytes() — that change is
-// INDEPENDENT of the clock and is kept. 4MHz bulk is ~500KB/s, still faster than
-// the Wi-Fi download.
-// NOTE: changing this value does NOT fix messages downloaded earlier — the bad
-// bytes are already on the NAND. Only a BRAND-NEW download tells you anything.
+// WRITE: bulk writes still give ~500KB/s, faster than the Wi-Fi download.
 static const SPISettings NAND_WRITE_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 
 bool NandStorage::init(SemaphoreHandle_t spiMutex) {
@@ -97,8 +62,7 @@ void NandStorage::setSlotText(uint8_t slot, const char* text, uint16_t len) {
         _slots[slot].text[0] = '\0';
         return;
     }
-    // Truncate safely if it exceeds the buffer — never inside a multi-byte UTF-8
-    // character (the next byte is a continuation byte if (b & 0xC0) == 0x80).
+    // Truncate at a UTF-8 boundary (continuation bytes match (b & 0xC0) == 0x80).
     uint16_t copyLen = (len < SLOT_TEXT_MAX_LEN - 1) ? len : (SLOT_TEXT_MAX_LEN - 1);
     while (copyLen > 0 && (((uint8_t)text[copyLen]) & 0xC0) == 0x80) {
         copyLen--;
@@ -124,7 +88,7 @@ uint16_t NandStorage::getSlotText(uint8_t slot, char* outBuf, size_t maxLen) con
 int NandStorage::readAtSlot(uint32_t offset, uint8_t* buf, uint32_t len) {
     if (_currentSlot < 0 || len == 0) return 0;
 
-    // The hard limit is the physical slot boundary, not dataSize: the audio region sits AFTER dataSize.
+    // Limit = the physical slot boundary, not dataSize (the audio sits after it).
     uint32_t slotSpan = ((_currentSlot + 1) < NAND_SLOT_COUNT)
                             ? (NAND_SLOT_ADDRS[_currentSlot + 1] - NAND_SLOT_ADDRS[_currentSlot])
                             : (0x1000000UL - NAND_SLOT_ADDRS[_currentSlot]);
@@ -220,8 +184,7 @@ void NandStorage::readRaw(uint32_t addr, uint8_t* data, uint32_t len) {
     SPI.transfer((addr >> 8) & 0xFF);
     SPI.transfer(addr & 0xFF);
 
-    // Transfer the whole block at once instead of SPI.transfer() per byte: the
-    // per-byte loop costs ~3.5us/byte (mostly call overhead), bulk ~0.45us/byte.
+    // Bulk transfer: ~0.45us/byte vs ~3.5us/byte for per-byte SPI.transfer().
     SPI.transferBytes(nullptr, data, len);
 
     digitalWrite(PIN_NAND_CS, HIGH);
@@ -252,8 +215,7 @@ static void writeEnableInternal() {
 }
 
 bool NandStorage::eraseSector(uint32_t addr) {
-    // A silently skipped erase is extremely dangerous: flash only clears bits 1->0,
-    // so writing over an UNERASED area yields garbage with no error at all.
+    // Never skip an erase silently: writing over unerased flash gives garbage with no error.
     if (!acquireSPI()) {
         DLOG("[NAND] ERR: eraseSector SPI timeout @ %lu", (unsigned long)addr);
         return false;
@@ -347,8 +309,7 @@ bool NandStorage::eraseRange(uint32_t addr, uint32_t len) {
 
 bool NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
     if (!data || len == 0) return false;
-    // Must report failure: a silent return here writes nothing while the caller
-    // believes it succeeded -> a downloaded file with silent holes.
+    // Report the failure, or the caller ends up with holes in the file.
     if (!acquireSPI()) {
         DLOG("[NAND] ERR: write SPI timeout @ %lu", (unsigned long)addr);
         return false;
@@ -373,9 +334,7 @@ bool NandStorage::writeRaw(uint32_t addr, const uint8_t* data, uint32_t len) {
         SPI.transfer((currentAddr >> 8) & 0xFF);
         SPI.transfer(currentAddr & 0xFF);
 
-        // Bulk instead of a per-byte loop — same reason as the READ path in
-        // readRaw(): per-byte SPI.transfer() costs ~3.5us/byte (mostly call
-        // overhead), bulk ~0.45us/byte. One 256B page: ~900us -> ~120us.
+        // Bulk write (see readRaw()): a 256B page takes ~120us instead of ~900us.
         SPI.writeBytes(data + dataOffset, chunkLen);
         digitalWrite(PIN_NAND_CS, HIGH);
 
@@ -400,7 +359,7 @@ bool NandStorage::acquireSPI() {
         SPI.transfer(0x00); //send NOP command data
         SPI.transfer(0x00);
         delayMicroseconds(2);
-        digitalWrite(PIN_TFT_DC, HIGH); // data mode -> the display now ignores the bus traffic
+        digitalWrite(PIN_TFT_DC, HIGH); // data mode: the display ignores bus traffic
         SPI.endTransaction();
 
         return true;
@@ -421,8 +380,7 @@ void NandStorage::writeSlotTable() {
     for (uint8_t i = 0; i < NAND_SLOT_COUNT; i++) {
         memcpy(header + 4 + i * sizeof(SlotEntry), &_slots[i], sizeof(SlotEntry));
     }
-    // A corrupt slot table = the metadata of every slot lost, so a failed write
-    // must be reported loudly, never silently.
+    // A failed slot-table write loses every slot's metadata: report it loudly.
     if (!eraseRange(0x000000, 4096) || !writeRaw(0x000000, header, sizeof(header))) {
         DLOG("[NAND] ERR: slot table write FAILED");
         return;

@@ -18,14 +18,8 @@ public:
       auto cfg = _bus_instance.config();
       cfg.spi_host = SPI2_HOST;
       cfg.spi_mode = SPI_BUS_MODE;
-      // 40MHz rather than 20MHz. Pushing one 240x240 RGB565 frame = 921,600 bits;
-      // at 20MHz the push alone takes ~46ms while the frame budget at 15fps is
-      // 66ms -> with JPEG decode (~22ms) and the storage read (~4ms) it reaches
-      // ~74ms, ~8ms over budget, and drifts away from the audio (I2S runs on a
-      // hardware clock and never waits).
-      // 40MHz cuts the push to ~23ms -> ~52ms total, within budget.
-      // Don't go higher: pins 4/5/6 aren't the FSPI IOMUX pins on the ESP32-C3,
-      // so SPI goes through the GPIO matrix, whose practical limit is ~40MHz.
+      // 40MHz: a frame push takes ~23ms (~46ms at 20MHz, which overruns the 66ms
+      // budget at 15fps). Don't go higher: the GPIO matrix limit is ~40MHz.
       cfg.freq_write = 40000000;
       cfg.freq_read = 16000000;
       cfg.pin_sclk = PIN_SPI_SCK;
@@ -72,10 +66,8 @@ public:
   /// Display a centered message on screen
   void showMessage(const char *message);
 
-  /// Word-wrap and draw an ASCII caption (Vietnamese diacritics already stripped by
-  /// the caller) inside a rectangle (x,y,w,h). Lines break on the actual pixel width
-  /// in FreeSansBold9pt7b (built into LovyanGFX); the line count is limited to the
-  /// rectangle's height, and the last line ends in "..." if the text doesn't fit.
+  /// Word-wrap and draw an ASCII caption inside (x,y,w,h), by pixel width; the
+  /// last line ends in "..." if the text doesn't fit.
   void showWrappedText(const char *asciiText, int32_t x, int32_t y, int32_t w, int32_t h,
                         uint16_t color = 0xFFFF);
 

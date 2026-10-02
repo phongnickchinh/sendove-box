@@ -60,11 +60,8 @@ private:
     int8_t _activeSlot = 0;
     uint32_t _writeOffset = 0;
     uint32_t _slotCapacity = 0;
-    /// Erase-as-you-write: the absolute address erased so far in the slot being
-    /// written. openForWrite() erases only the first 64KB block (erasing a whole
-    /// ~5.3MB slot blocks synchronously for 15-25s, long enough for the HTTP socket
-    /// to hit TCP zero-window/timeout). writeChunk() erases further blocks as the
-    /// write cursor approaches them.
+    /// Erase-as-you-write: the address erased so far in the slot being written
+    /// (see openForWrite() / writeChunk()).
     uint32_t _erasedUpToAddr = 0;
 
     int8_t parseSlotId(const char* identifier) const;

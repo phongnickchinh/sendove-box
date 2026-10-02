@@ -6,9 +6,8 @@
 #include "ThemeStore.h"
 #include <time.h>
 
-// The background, fonts and default layout are NOT compiled into the firmware
-// (MEMORY.md §28): everything ships in the theme package (ThemeStore). Only LovyanGFX
-// built-in fonts remain, for the fallback screen and the alarm screen.
+// Background, fonts and layout come from the theme package (ThemeStore, MEMORY.md
+// §28). Built-in fonts are used only for the fallback and alarm screens.
 
 static constexpr int32_t BG_W = SCREEN_WIDTH;
 static constexpr int32_t BG_H = SCREEN_HEIGHT;
@@ -218,10 +217,8 @@ void LayoutEngine::renderStandbyScreen(DisplayDriver *display,
 
   display->releaseSPI();
 
-  // VLWfont::drawChar allocates the glyph bitmap with alloca ON THIS TASK'S STACK (up
-  // to a few KB for a large clock). The largest glyph may not appear in the first
-  // frame -> print whenever the remaining stack drops below the previous value (the
-  // high-water mark only decreases), so the number read is the true floor.
+  // VLW glyphs are alloca()ed on this task's stack: log whenever the remaining stack
+  // reaches a new low, so the last number printed is the true floor.
   if (_hasVlwTime || _hasVlwDate) {
     UBaseType_t left = uxTaskGetStackHighWaterMark(nullptr);
     if (left < _stackMin) {
@@ -274,9 +271,8 @@ void LayoutEngine::drawTextWidget(LGFX* canvas, const WidgetConfig& cfg, const c
     }
 
     int32_t centerY = boxY + (boxH / 2);
-    // Text color only, NO background color: the background is an image. The web
-    // subsets VLW with 0/255 alpha, so every pixel is drawn or skipped — no blending
-    // with read-back pixels (the ST7789 can't be read).
+    // Text color only, NO background color (the background is an image). The VLW
+    // alpha is 0/255, so no blending with read-back pixels is needed.
     canvas->setTextColor(cfg.color);
 
     if (cfg.align == "center") {

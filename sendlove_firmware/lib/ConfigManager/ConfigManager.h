@@ -5,25 +5,18 @@
 #include <Preferences.h>
 #include "config.h"
 
-// ============================================================================
-// ConfigManager — configuration stored in NVS (Non-Volatile Storage)
-// ============================================================================
-// Holds what must survive a power loss: Wi-Fi credentials (+ a backup for
-// rollback), the sync timestamp, alarms, user settings and the auth token.
-// ============================================================================
+// ConfigManager — NVS storage for what must survive a power loss: Wi-Fi
+// credentials, the sync timestamp, alarms, user settings and the auth token.
 
 struct AlarmItem {
-    // 24 chars, not 16: the backend generates ids "alarm_<ms>" = 19 chars. A
-    // 16-char buffer cut the tail off -> pushing it back to the cloud created a
-    // DIFFERENT key. Changing the size makes an old NVS blob no longer match ->
-    // loadAlarms() discards it and the first sync downloads the list again.
+    // 24 chars: backend ids "alarm_<ms>" are 19 chars; a truncated id would be
+    // pushed back as a different key.
     char id[24] = "";
     char time[6] = "00:00"; // "HH:MM"
     bool isEnable = false;
     bool repeatable = false;
-    // Alarm music. Empty = beep. Changing the struct size -> an old NVS blob has the
-    // wrong size -> loadAlarms() drops the blob AND clears the dirty flag (otherwise
-    // the first sync would push an empty list and wipe the alarms in the cloud).
+    // Alarm music; empty = beep. Changing this struct's size makes loadAlarms()
+    // drop the old NVS blob AND clear the dirty flag (or an empty list would be pushed).
     char musicId[24] = "";
     uint8_t volume = 80;   // 0..100, per alarm (product decision: default 80)
     bool ramp = true;      // fade in from 30% of the chosen level over ALARM_RAMP_MS
@@ -38,9 +31,7 @@ struct UserSettings {
 
 class ConfigManager {
 public:
-    /// Open the NVS namespace
-    /// @param namespaceName NVS namespace (e.g. "sendlove")
-    /// @return true on success
+    /// Open the NVS namespace.
     bool init(const char* namespaceName);
 
     /// Close the NVS handle
@@ -48,18 +39,13 @@ public:
 
     // --- Wi-Fi Credentials ---
 
-    /// Save Wi-Fi credentials to NVS
-    /// @return true if written
+    /// Save Wi-Fi credentials.
     bool saveWiFi(const char* ssid, const char* password);
 
-    /// Load Wi-Fi credentials from NVS
-    /// @param ssid buffer for the SSID (at least WIFI_SSID_MAX_LEN bytes)
-    /// @param password buffer for the password (at least WIFI_PASS_MAX_LEN bytes)
-    /// @return true if loaded
+    /// Load Wi-Fi credentials (buffers of WIFI_SSID_MAX_LEN / WIFI_PASS_MAX_LEN).
     bool loadWiFi(char* ssid, char* password);
 
-    /// Whether NVS holds Wi-Fi credentials
-    /// @return true if an SSID is stored
+    /// Whether an SSID is stored.
     bool hasWiFiConfig();
 
     // --- Wi-Fi Backup (Rollback) ---
@@ -87,9 +73,8 @@ public:
     /// Load the alarm list
     size_t loadAlarms(AlarmItem* alarms, size_t maxCount);
 
-    /// The "alarm list was edited on the box (portal / a one-shot alarm turning
-    /// itself off) and not yet pushed to the cloud" flag. Kept in NVS so it
-    /// survives the reboot that follows saving Wi-Fi on the portal.
+    /// "Alarms edited on the box, not yet pushed" flag. In NVS so it survives the
+    /// reboot after saving Wi-Fi on the portal.
     bool saveAlarmDirty(bool dirty);
     bool loadAlarmDirty();
 
@@ -101,8 +86,7 @@ public:
 
     // --- Firebase Auth ---
 
-    /// Save the Firebase Auth refresh token (exchanged for a new idToken without
-    /// resending the password). It doesn't expire with time.
+    /// Save the Firebase Auth refresh token.
     bool saveRefreshToken(const char* token);
 
     /// Load the refresh token. Returns false if never saved.

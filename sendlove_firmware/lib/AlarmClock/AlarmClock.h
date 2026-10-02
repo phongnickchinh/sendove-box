@@ -5,24 +5,14 @@
 #include "ConfigManager.h"
 #include "config.h"
 
-// ============================================================================
-// AlarmClock — the box's alarm list + the decision of when to ring
-// ============================================================================
-// Three places touch the list, on three different tasks:
-//   - NetworkManager (WakeSync task): downloads from / pushes to the cloud
-//   - the captive portal (NetworkController task): add / edit / delete in AP mode
-//   - Task_MediaPlayer + the sleep loop (UIController): ask "is it time to ring?"
-// so every public method takes the internal mutex. The RAM copy is the read
-// source; NVS is written only on change.
+// AlarmClock — the alarm list + the decision of when to ring. Used from three
+// tasks (sync, portal, player/sleep loop), so every public method takes the
+// internal mutex. RAM is the read source; NVS is written only on change.
 //
-// Two-way sync rule (product decision):
-//   - An edit ON THE BOX (portal, or a one-shot alarm turning itself off after
-//     ringing) sets the dirty flag (NVS). The next sync PUSHES THE WHOLE LIST to
-//     the cloud, overwriting the cloud copy.
-//   - While dirty, the cloud list is NOT accepted (the box wins). Once clean, the
-//     cloud is authoritative: a_flag set -> download and replace everything.
-//   No per-alarm merge: AP mode has no trustworthy clock to compare updated_at.
-// ============================================================================
+// Two-way sync (product decision): an edit ON THE BOX sets the dirty flag and the
+// next sync PUSHES THE WHOLE LIST (box wins, cloud list not accepted while dirty).
+// Once clean, the cloud is authoritative. No per-alarm merge: AP mode has no
+// trustworthy clock.
 
 class AlarmClock {
 public:
@@ -45,18 +35,15 @@ public:
 
     /// Whether there are edits not yet pushed to the cloud. `rev` is for markPushed().
     bool isDirty(uint32_t* rev);
-    /// Call after a successful PUT to the cloud with the snapshot taken at `rev`.
-    /// If a new edit arrived during the push, dirty stays set for the next sync.
+    /// After a successful PUT of the snapshot taken at `rev`; stays dirty if an
+    /// edit arrived meanwhile.
     void markPushed(uint32_t rev);
 
-    /// Call periodically (~500ms). true = start ringing now; outTime receives
-    /// "HH:MM" and outItem (if given) a copy of the ringing alarm (music, volume,
-    /// ramp). A 5-minute snooze returns the snoozed alarm. A one-shot alarm is
-    /// turned off (dirty) the MOMENT it starts ringing.
+    /// Poll (~500ms). true = start ringing now; outTime gets "HH:MM", outItem a copy
+    /// of the alarm. A one-shot alarm is turned off (dirty) the moment it rings.
     bool pollDue(time_t now, char* outTime, size_t len, AlarmItem* outItem = nullptr);
 
-    /// The distinct music_ids in use by alarms, ordered by the soonest alarm first
-    /// (download priority). Disabled alarms come last. Returns the number written.
+    /// Distinct music_ids in use, soonest alarm first (download priority). Returns the count.
     size_t musicInUse(time_t now, char (*outIds)[24], size_t maxCount);
 
     /// Short touch while ringing: ring again after ALARM_SNOOZE_SEC.

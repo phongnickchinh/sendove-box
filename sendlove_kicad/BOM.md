@@ -67,13 +67,15 @@ Phương án thay thế (không lắp cùng lúc, chung CS GPIO8): W25Q128JVSIQ 
 |---|---|---|---|
 | 1 | Ampli I2S class-D | MAX98357AETE+ (TQFN-16) | VDD nối thẳng VBAT/VSYS (2.5–5.5V), không qua LDO 3.3V |
 | 1 | R 680k: GPIO20 → SD_MODE | | Cùng R kéo xuống 100k bên trong ampli: HIGH → ~0.42V = chế độ (L+R)/2 (dải 0.16–0.77V); LOW → shutdown <1µA. Tiết kiệm ~2mA khi không phát |
-| — | Chân GAIN | để hở = 9dB | |
+| 1 | R_GAIN: footprint 0603 từ chân GAIN xuống GND | Không lắp / 0Ω / 100k | Chọn độ lợi bằng linh kiện lắp vào: **không lắp = 9dB**, **0Ω = 12dB**, **100k = 15dB**. Chốt 2026-09-24 (xem ghi chú dưới bảng) |
 | 1 | Tụ 10µF | | Sát VDD ampli |
 | 1 | Tụ 100nF | | Sát VDD ampli |
 | 1 | Loa 8Ω 1W, 28–36mm | | Cần buồng kín phía sau, không thì mất bass (SHOULD_READ.md:58) |
 | 1 | Đầu JST-PH 2 pin | | Nối loa |
 
 Firmware xuất stereo `RIGHT_LEFT` với hai kênh giống nhau, nên chế độ kênh nào của ampli cũng phát đúng.
+
+**Vì sao để pad chọn GAIN (chốt 2026-09-24):** firmware sắp có cài đặt âm lượng và nhạc báo thức, nhưng âm lượng phần mềm chỉ **giảm** được (nhân mẫu PCM với hệ số ≤ 1). Mức 100% trên web chính là mức của chân GAIN. Nếu 9dB không đủ to cho báo thức thì chỉ việc lắp 0Ω hoặc 100k, không phải sửa mạch. Chọn mức thấp nhất vẫn đủ to: 15dB ở âm lượng 100% có thể vượt 1W của loa khi pin đầy. Bảng nối chân theo trang pinout của Adafruit cho board MAX98357: 100k xuống GND = 15dB, nối GND = 12dB, để hở = 9dB, nối Vin = 6dB, 100k lên Vin = 3dB.
 
 ### LED thông báo
 | SL | Linh kiện | Gợi ý mã | Ghi chú |

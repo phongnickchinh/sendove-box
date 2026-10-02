@@ -8,14 +8,9 @@ import { Screen, AppBar, Body, Header, Button, Modal } from '../components/ui/Sc
 import Illustration from '../components/ui/Illustration';
 
 /**
- * The box's alarm music library (SD-card design, firmware MEMORY.md §28).
- *
- * Box rules the UI must state plainly:
- *   10 tracks per box, 5–60 seconds each (the box rings for at most a minute,
- *   looping shorter tracks). Music downloads to the box only when an alarm
- *   uses it; once downloaded it stays on the card and isn't fetched again.
- *   Decoding + cutting + conversion to 16 kHz mono happen IN THE BROWSER (the
- *   "decode on the client" rule); the backend only validates the file.
+ * The box's alarm music library (firmware MEMORY.md §28). Rules the UI states:
+ * 10 tracks per box, 5–60 seconds each; a track downloads to the box only when an
+ * alarm uses it. Decoding and conversion to 16 kHz mono happen IN THE BROWSER.
  */
 
 const MAX_TRACKS = 10;
@@ -189,10 +184,7 @@ export default function ReceiverMusic() {
   );
 }
 
-/**
- * Player popup for a library track: name, progress bar, play/pause, stop.
- * Closing it (button, Esc, backdrop tap) stops playback and revokes the object URL.
- */
+/** Player popup for a library track. Closing it stops playback and revokes the object URL. */
 function MusicPlayer({ boxId, track, onClose }) {
   const [state, setState] = useState('loading'); // loading | ready | error
   const [paused, setPaused] = useState(true);
@@ -286,10 +278,7 @@ function MusicPlayer({ boxId, track, onClose }) {
   );
 }
 
-/**
- * Pick a file → decode → choose a segment (start + 5–60s length) → preview →
- * encode to 16 kHz + AUDC → upload. With initial.musicId it replaces that track.
- */
+/** Pick a file → choose a 5–60s segment → preview → encode → upload. initial.musicId = replace that track. */
 function AddMusicModal({ boxId, initial, onClose, onSaved }) {
   const [decoded, setDecoded] = useState(null);
   const [fileName, setFileName] = useState('');

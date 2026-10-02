@@ -37,10 +37,8 @@ export function dayLabel(ts) {
 }
 
 /**
- * A "still message" is sent as type 'image' (the backend has no separate enum
- * — see utils/sendMessage.js). It is recognizable because it never has an
- * original image (image_url): only a thumbnail/bin when it carries a picture,
- * bg_music when it carries music.
+ * A "still message" is sent as type 'image' (no separate backend enum); it is
+ * recognizable by never having an original image (image_url).
  */
 export const isStatic = (msg) => msg.type === 'image' && !msg.image_url;
 

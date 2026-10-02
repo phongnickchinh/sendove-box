@@ -1,12 +1,9 @@
 import { SCREEN, BG_BYTES } from '../theme/layout';
 
 /**
- * Any image → the box's standby background: center-crop to a square, scale to
- * 240×240, quantize to little-endian RGB565 (5-6-5 bits) — the format the
- * firmware draws directly, so the box needs no image decoder.
- *
- * previewUrl is redrawn from the quantized 565 values THEMSELVES, so the
- * preview shows the same color banding as the box, no prettier than reality.
+ * Any image → the box's standby background: center-crop, scale to 240×240,
+ * quantize to little-endian RGB565 (drawn directly by the firmware).
+ * previewUrl is redrawn from the quantized values, so it shows the box's banding.
  */
 export async function imageToRgb565(file) {
   const bitmap = await createImageBitmap(file);
@@ -59,11 +56,7 @@ export function rgb565ToImageData(bytes) {
   return img;
 }
 
-/**
- * The box's default background (exported from the firmware's old
- * StandbyBackground[]): the firmware no longer has a compiled-in background, so
- * "Default" is also an image the web sends down like any other theme.
- */
+/** The default background: the firmware compiles none in, so the web sends it like any other. */
 export async function loadDefaultBackground(url) {
   const res = await fetch(url);
   const bytes = new Uint8Array(await res.arrayBuffer());

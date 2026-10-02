@@ -9,14 +9,10 @@ import Illustration from '../components/ui/Illustration';
 import { useToast } from '../components/ui/Toast';
 
 /**
- * Alarm list + alarm editor dialog.
- *
- * Two firmware rules must be visible in the UI, not hidden:
- *   MAX_ALARMS = 10 (config.h) — when full, the add button is disabled rather
- *     than letting the user tap and get a 400.
- *   repeatable = false is a one-shot alarm: after ringing, the firmware sets
- *     is_enable = false. The row stays in the list, switched off — the copy
- *     must say so or the user thinks it's broken.
+ * Alarm list + alarm editor dialog. Two firmware rules the UI must show:
+ *   MAX_ALARMS = 10 — when full, the add button is disabled.
+ *   repeatable = false is a one-shot alarm: after ringing it stays in the list,
+ *   switched off — the copy must say so.
  */
 
 const MAX_ALARMS = 10;

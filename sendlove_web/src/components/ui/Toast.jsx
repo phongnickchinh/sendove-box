@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
 
 /**
- * Floating notice at the top of the viewport — always in sight, even when the
- * button just pressed is at the bottom of a long page.
+ * Floating notice at the top of the viewport.
  * const [toast, showToast] = useToast(); showToast('Đã lưu'); showToast('Lỗi…', 'err');
  */
 export function useToast() {

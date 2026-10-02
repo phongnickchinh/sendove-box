@@ -2,12 +2,9 @@ import React, { useEffect, useRef } from 'react';
 import { clampRange, fmtTime } from '../../utils/trim';
 
 /**
- * Two-handle range picker for video / audio.
- *
- * Two stacked <input type="range"> (no library; keyboard-accessible: Tab to a
- * handle, then arrow keys, 0.1s steps). mediaRef (optional) is the preview
- * <video>/<audio>: dragging a handle seeks to it, and playback loops inside the
- * chosen range — you hear/see exactly what will be sent.
+ * Two-handle range picker for video / audio: two stacked <input type="range">
+ * (keyboard-accessible). mediaRef (optional) = the preview element: dragging
+ * seeks it and playback loops inside the chosen range.
  */
 export default function RangeTrimmer({ duration, maxSpan, value, onChange, mediaRef }) {
   const lastHandle = useRef('start');

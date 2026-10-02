@@ -3,10 +3,8 @@ import Icon from './ui/Icon';
 import { iconOf, titleOf } from '../utils/messageFormat';
 
 /**
- * One message row — shared by the sender history and the receiver list.
- *
- * msg.thumbnail: a signed URL (15 minutes) the backend attaches in GET /messages.
- * When absent (text/voice messages) or broken (expired URL), fall back to the icon.
+ * One message row, shared by sender and receiver. msg.thumbnail is a 15-minute
+ * signed URL; when absent or expired, fall back to the icon.
  */
 export default function MessageRow({ msg, meta, noText = null, onOpen }) {
   const [broken, setBroken] = useState(false);

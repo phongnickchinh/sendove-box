@@ -21,15 +21,10 @@ const TONE_DOT = {
 };
 
 /**
- * Sent-message history of one box.
- *
- * There is NO "delivered / seen" badge: Message has no status field — by
- * design the sender doesn't know a message's state (message.types.ts); the
- * ESP32 only compares timestamps with its own last_download_ts. What the
- * sender can actually know is the box's last wake-up, so that is what's shown.
- *
- * Pagination: the backend only has ?limit (the N newest, max 100), no cursor
- * — "Load more" refetches with a larger limit.
+ * Sent-message history of one box. There is NO "delivered / seen" badge:
+ * messages have no status field by design; the box's last wake-up is shown
+ * instead. Pagination: ?limit only (max 100), so "Load more" refetches with a
+ * larger limit.
  */
 
 const PAGE = 20;

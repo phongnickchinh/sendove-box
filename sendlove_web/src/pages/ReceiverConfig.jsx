@@ -9,23 +9,18 @@ import { Screen, AppBar, Body, Header, Button, CircleIcon, Modal } from '../comp
 import { useToast } from '../components/ui/Toast';
 
 /**
- * Box settings page + unpair confirmation.
- *
- * Three groups, three different APIs — they can't share one Save button:
+ * Box settings page + unpair confirmation. Three groups, three APIs (so no
+ * shared Save button):
  *   Wi-Fi               PUT  /boxes/:boxId/wifi    (ssid 1..32, password ≤ 63)
- *   LED/screen/speaker  PUT  /boxes/:boxId/config  (led_state, display_brightness, playback_volume)
+ *   LED/screen/speaker  PUT  /boxes/:boxId/config
  *   Unpair              DELETE /boxes/:boxId/unpair
- *
- * There is NO "update firmware" button: the backend has ota_flag and OtaTask
- * but no user-facing route, so a button here would be dead.
+ * There is NO "update firmware" button: no user-facing route exists for it.
  */
 
 const DEFAULT_CFG = { led_state: 'OFF', display_brightness: 100, playback_volume: 100 };
 const CFG_KEYS = Object.keys(DEFAULT_CFG);
 
-/* The firmware's LEDState enum. The firmware doesn't apply this section yet
-   (BREATHING has no effect implemented) — the "Coming soon" badge sits on the
-   section title, not on each option. */
+/* The firmware's LEDState enum; not applied by the firmware yet ("Coming soon" badge). */
 const LED_OPTIONS = [
   { value: 'OFF', label: 'Tắt' },
   { value: 'SOLID', label: 'Sáng đều' },
@@ -211,8 +206,7 @@ export default function ReceiverConfig() {
               ))}
             </div>
 
-            {/* The firmware clamps brightness to at least 5% (SETTINGS_MIN_BRIGHTNESS): at 0
-                the screen goes black and the box looks dead. Volume 0 = mute messages;
+            {/* The firmware clamps brightness to at least 5%. Volume 0 mutes messages;
                 alarms have their own volume. */}
             <Slider label="Độ sáng màn hình" value={cfg.display_brightness} min={5}
               onChange={(v) => setCfg({ ...cfg, display_brightness: v })} />
@@ -297,10 +291,8 @@ export default function ReceiverConfig() {
 }
 
 /**
- * SD card + latest error log (status.sd_state / sd_free_mb / log_tail sent by the firmware).
- * With a faulty card the box keeps running: the theme lives in flash and alarms
- * beep; only messages and music can't download. The fix is to replace/format
- * the card — software does nothing more.
+ * SD card + latest error log (status.sd_state / sd_free_mb / log_tail). With a
+ * faulty card the box keeps running; only messages and music can't download.
  */
 function SdCard({ status }) {
   const [openLog, setOpenLog] = useState(false);
@@ -337,9 +329,8 @@ function SdCard({ status }) {
 }
 
 /**
- * Whether the box has applied the latest save: the backend bumps
- * config.config_rev on every save, and the box copies it to status.config_rev
- * after writing NVS. A sleeping box takes up to 5 minutes to wake.
+ * Whether the box applied the latest save: it copies config.config_rev to
+ * status.config_rev once done (up to 5 minutes for a sleeping box).
  */
 function ApplyState({ config, status }) {
   const want = config?.config_rev;

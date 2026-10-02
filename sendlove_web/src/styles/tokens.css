@@ -1,8 +1,4 @@
-/* ============================================================
-   Sendlove Box — Design tokens
-   Source: the Figma script set "Warm Minimalism + Motion-led delight".
-   Every value maps 1:1 to a color / type / spacing variable in the design file.
-   ============================================================ */
+/* Sendlove Box design tokens: 1:1 with the Figma variables ("Warm Minimalism"). */
 
 :root {
   /* --- Rose --- */
@@ -60,20 +56,14 @@
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 
-  /* --- Text on the primary pink button: INTENTIONALLY theme-independent.
-     rose-400 keeps nearly the same lightness in light and dark, so the contrast
-     rule "text on pink is always dark, never white" (~7:1) holds in both. Do
-     NOT point this at --caramel-900: that token flips in dark mode and would
-     break the rule. */
+  /* Text on the primary pink button: INTENTIONALLY theme-independent (always dark,
+     ~7:1). Do NOT point this at --caramel-900, which flips in dark mode. */
   --on-accent: #3D2A20;
 
-  /* ============================================================
-     ROLE tokens — components use this layer; each theme maps it to its palette.
-     LIGHT = the original Figma look (caramel borders, pink Tips, pink chips,
-     role-tinted box cards). Product decision: keep light as-is to preserve the
-     brand. Only DARK (rose wine) follows the restrained-color rule:
-       rose = actions, caramel = receiver, everything else neutral.
-     ============================================================ */
+  /* ROLE tokens — the layer components use; each theme maps it to its palette.
+     LIGHT keeps the original Figma look (product decision: preserve the brand).
+     Only DARK follows the restrained rule: rose = actions, caramel = receiver,
+     everything else neutral. */
   --bg-page:   var(--caramel-50);
   --bg-card:   var(--neutral-0);
   --bg-sunken: var(--neutral-100);
@@ -118,12 +108,8 @@
   --add-dot-fg: var(--rose-800);
 }
 
-/* ============================================================
-   Dark mode — "rose wine".
-   Remaps the SURFACE layer and the role tokens. The rose-* ramp is unchanged
-   (brand); anywhere rose is used as TEXT goes through --text-accent / --chip-*.
-   Active under [data-theme="dark"] (set on <html> by ThemeContext).
-   ============================================================ */
+/* Dark mode ("rose wine"), active under [data-theme="dark"]: remaps the surface
+   layer and the role tokens. The rose-* ramp is unchanged (brand). */
 :root[data-theme='dark'] {
   --caramel-50:  #1C1216;  /* page background */
   --caramel-100: #3A2830;  /* pill / pale block background */
@@ -179,9 +165,7 @@
   --seg-track: #140C10;
 }
 
-/* ============================================================
-   Type scale — use these classes; don't set ad-hoc font sizes
-   ============================================================ */
+/* Type scale — use these classes; don't set ad-hoc font sizes */
 .sl-title   { font-size: 22px; font-weight: 700; line-height: 1.2;  color: var(--caramel-900); }
 .sl-heading { font-size: 17px; font-weight: 600; line-height: 1.3;  color: var(--caramel-900); }
 .sl-body    { font-size: 15px; font-weight: 400; line-height: 1.6;  color: var(--neutral-500); }

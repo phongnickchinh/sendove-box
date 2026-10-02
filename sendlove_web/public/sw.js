@@ -1,11 +1,6 @@
 /*
- * Sendlove Box's minimal service worker.
- *
- * It INTENTIONALLY caches no JS/CSS/API: everything still comes from the
- * network as if there were no service worker, so a new deploy reaches users on
- * the next load — no stale versions. Its only job: when a PAGE LOAD fails
- * offline, serve offline.html (cached at install) instead of the browser's
- * error page.
+ * Minimal service worker. INTENTIONALLY caches no JS/CSS/API (a deploy reaches
+ * users on the next load); it only serves offline.html when a page load fails.
  */
 // Bump this version whenever offline.html changes, or installed devices keep the old copy forever.
 const CACHE = 'sendlove-offline-v1';

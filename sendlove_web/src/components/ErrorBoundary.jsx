@@ -1,11 +1,7 @@
 import React from 'react';
 import { Screen, Body, Actions, Button, CircleIcon } from './ui/Screen';
 
-/**
- * Last safety net when a page throws during render: an on-brand message with
- * two ways out, and the technical details collapsed so they can still be
- * screenshotted for a bug report.
- */
+/** Last safety net when a page throws during render; technical details stay collapsed for bug reports. */
 export class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);

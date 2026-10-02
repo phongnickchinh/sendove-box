@@ -8,15 +8,9 @@ import { Actions, Button, Tips } from '../ui/Screen';
 import RangeTrimmer from './RangeTrimmer';
 
 /**
- * Body of the voice step: a white card 236 tall, a 72 mic circle on rose/200,
- * a status label + timer.
- *
- * Two sources: record live, or pick an existing audio file. Both share one
- * path: decode to an AudioBuffer → pick a range (up to maxSeconds) → cut,
- * mono, resample, limit peaks → WAV (mediaEncoder.encodeAudioSegment).
- *
- * purpose='music' is the background-music slot of a still message — same
- * mechanism, different copy.
+ * Body of the voice step. Two sources (record live, or pick a file) share one
+ * path: decode → pick a range (up to maxSeconds) → encodeAudioSegment.
+ * purpose='music' = the background-music slot of a still message.
  */
 const TEXT = {
   voice: { title: 'Lời nhắn thoại', tip: 'Loại này không kèm dòng chữ nào.' },
@@ -34,9 +28,7 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
   const audioRef = useRef(null);
-  // The requestAnimationFrame loop reads a ref, not state: the state captured in
-  // drawWaveform's closure is the value when recording started (false), which
-  // would stop the draw loop immediately.
+  // A ref, not state: the draw loop's closure would keep the stale state value.
   const isRecordingRef = useRef(false);
   const clipUrl = useObjectUrl(clip?.blob);
   const t = TEXT[purpose] || TEXT.voice;
@@ -57,9 +49,7 @@ const VoiceInput = ({ onRecordComplete, onCancel, maxSeconds = 15, purpose = 'vo
     }
   }, [maxSeconds]);
 
-  // MUST be declared before any useEffect that lists it in deps: the deps array
-  // is read during render, and reading an uninitialized const is a
-  // ReferenceError (TDZ) that crashes this card.
+  // MUST be declared before any useEffect listing it in deps (TDZ otherwise).
   const stopRecording = useCallback(async () => {
     if (!recorderRef.current || !isRecordingRef.current) return;
     isRecordingRef.current = false;

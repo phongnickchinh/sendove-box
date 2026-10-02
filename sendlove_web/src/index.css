@@ -1,8 +1,4 @@
-/* ============================================================
-   Global reset. All design values live in styles/tokens.css and
-   styles/sendlove.css — this file INTENTIONALLY defines no colors, fonts or
-   spacing of its own.
-   ============================================================ */
+/* Global reset only: design values live in styles/tokens.css and styles/sendlove.css. */
 @import './styles/tokens.css';
 
 * {

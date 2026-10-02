@@ -11,13 +11,8 @@ import { loadDefaultBackground } from '../utils/rgb565';
 import { ensureWebFont } from '../utils/vlw';
 
 /**
- * Theme picker.
- *
- * Sources: GET /boxes/:boxId/theme (the theme saved on the account, may be
- * null) + the presets in theme/layout.js. Selecting a row updates the preview
- * — every preset is a real layout, so it can be previewed.
- *
- * The "draft" travels to the editor/send pages through location.state:
+ * Theme picker: the saved theme (may be null) + the presets in theme/layout.js.
+ * The draft travels to the editor/send pages through location.state:
  *   { name, widgets, bg: null | { path, url } | { bytes, previewUrl } }
  */
 export default function ThemePicker() {

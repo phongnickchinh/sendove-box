@@ -1,14 +1,10 @@
 import apiClient from './client';
 
 /**
- * Box alarms — /boxes/:boxId/alarms.
- * Receiver role only (alarm.routes.ts requireRole('receiver')).
- *
- * Constraints from validation.middleware.ts — a violation is a 400, not a
- * network error, so the form must enforce them:
- *   time       "HH:mm", exactly 5 chars with a leading zero ("07:30", NOT "7:30")
- *   is_enable  required on create
- *   repeatable required on create — false = ring once, then turn itself off
+ * Box alarms — /boxes/:boxId/alarms, receiver only. The backend validates
+ * (400 on violation), so the form must enforce:
+ *   time       "HH:mm" with a leading zero ("07:30", NOT "7:30")
+ *   is_enable, repeatable   required on create (repeatable false = ring once)
  */
 
 export const getAlarms = async (boxId) => {

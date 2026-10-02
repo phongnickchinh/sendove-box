@@ -6,11 +6,8 @@ import { Screen } from '../components/ui/Screen';
 import InstallHint, { InAppBrowserWarning } from '../components/InstallHint';
 
 /**
- * The Figma "login signup" frame. The background photo is
- * src/assets/login-hero.jpg, applied in .sl-login-hero (sendlove.css) with a
- * dark overlay. The layout uses vertically centered flex instead of the
- * design's absolute coordinates so it holds on other screen heights — an
- * intentional simplification.
+ * The Figma "login signup" frame: a hero photo (.sl-login-hero) with a floating
+ * card, centered with flex instead of the design's absolute coordinates.
  */
 
 /** Google logo — keeps its 4 original colors; the brand guideline forbids recoloring. */

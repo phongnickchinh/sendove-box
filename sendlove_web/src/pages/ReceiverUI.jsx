@@ -12,14 +12,9 @@ import { timeAgo } from '../utils/messageFormat';
 import { fwVersion, lastSeenMs, syncTone } from '../utils/boxStatus';
 
 /**
- * Box status + received messages (receiver home).
- *
- * Two BoxStatus fields are INTENTIONALLY not shown:
- *   online   — the box sleeps and wakes only every 5 minutes, so online = false
- *              nearly all the time while the box is fine; showing it would be
- *              a false alarm. Status here is derived from last_seen.
- *   charging — PowerManager::isCharging() is hardcoded to return false (there
- *              is no charge-detect circuit). Only the battery % is shown.
+ * Box status + received messages (receiver home). Two BoxStatus fields are
+ * INTENTIONALLY not shown: `online` (the box mostly sleeps; status is derived
+ * from last_seen) and `charging` (the firmware has no charge detection).
  */
 
 

@@ -97,11 +97,7 @@ export const encodeImageToBin = async (imageBlob) => {
   };
 };
 
-/**
- * Hard cap for any clip — the max duration the backend accepts
- * (validation.middleware.ts confirmMessageSchema). The per-storage cap
- * (15s NAND / 60s SD) is applied by the range picker, not here.
- */
+/** Hard cap the backend accepts; the per-storage cap (15s NAND / 60s SD) is applied by the range picker. */
 const HARD_MAX_SECONDS = 60;
 
 /** Clamp [start, end) to a valid segment of a media `total` seconds long. */
@@ -119,8 +115,8 @@ export const encodeVideoToBin = async (videoBlob, onProgress, range) => {
     video.setAttribute('playsinline', ''); // required on mobile
 
     video.onloadeddata = async () => {
-      const fps = 15; // Target FPS
-      // Encode only the segment the user picked in VideoInput.
+      const fps = 15;
+      // Only the segment picked in VideoInput.
       const { start, duration } = segmentOf(video.duration, range);
       const totalFrames = Math.floor(duration * fps);
       
@@ -189,13 +185,12 @@ export function audioBufferToWavBlob(buffer) {
   const result = new Float32Array(buffer.length);
   buffer.copyFromChannel(result, 0, 0); // Assuming mono
   
-  // Calculate size
   const dataLength = result.length * (bitDepth / 8);
   const bufferLength = 44 + dataLength;
   const arrayBuffer = new ArrayBuffer(bufferLength);
   const view = new DataView(arrayBuffer);
   
-  // Write WAV header
+  // WAV header
   const writeString = (view, offset, string) => {
     for (let i = 0; i < string.length; i++) {
       view.setUint8(offset + i, string.charCodeAt(i));
@@ -216,7 +211,7 @@ export function audioBufferToWavBlob(buffer) {
   writeString(view, 36, 'data');
   view.setUint32(40, dataLength, true);
   
-  // Write PCM data
+  // PCM data
   let offset = 44;
   for (let i = 0; i < result.length; i++, offset += 2) {
     let s = Math.max(-1, Math.min(1, result[i]));
@@ -226,15 +221,12 @@ export function audioBufferToWavBlob(buffer) {
   return new Blob([view], { type: 'audio/wav' });
 }
 
-// The box's MAX98357A plays 16-bit mono. 8 kHz is enough for speech and keeps
-// the file small enough for a NAND slot (one slot holds both video and audio).
+// 16-bit mono. 8 kHz is enough for speech and fits a NAND slot next to the video.
 const AUDIO_SAMPLE_RATE = 8000;
 
 /**
- * PCM budget the current firmware can load for ONE audio file
- * (AUDIO_MAX_PCM_BYTES = 600000, config.h) — only ~18.7s at 16 kHz. Longer
- * voice messages drop to 8 kHz (~37.5s) so the box still plays them in full.
- * Beyond 37.5s the firmware cap itself has to be raised.
+ * PCM budget of the firmware for ONE audio file (AUDIO_MAX_PCM_BYTES, config.h):
+ * ~18.7s at 16 kHz; longer voice messages drop to 8 kHz (~37.5s).
  */
 export const FW_AUDIO_PCM_BYTES = 600000;
 
@@ -253,11 +245,7 @@ export async function decodeAudioBlob(blob) {
   }
 }
 
-/**
- * Cut [start, end) from an AudioBuffer, downmix to mono, resample, normalize
- * loudness and limit peaks (see renderSegment) → WAV PCM16. Used for voice
- * messages (recorded or uploaded) and background music of still messages.
- */
+/** Cut [start, end), render it (see renderSegment) → WAV PCM16. For voice messages and background music. */
 export async function encodeAudioSegment(buffer, range, sampleRate) {
   const { start, duration } = segmentOf(buffer.duration, range);
   const rate = sampleRate || voiceSampleRate(duration);
@@ -266,10 +254,9 @@ export async function encodeAudioSegment(buffer, range, sampleRate) {
 }
 
 /**
- * Alarm music: 16 kHz mono (product decision — the "stay at 8 kHz" rule is
- * lifted for music ONLY), 5–60 seconds (the box rings for at most a minute),
- * source file ≤ 15 MB — decodeAudioData decodes the whole track into RAM and
- * a 10-minute file crashes the tab on a phone.
+ * Alarm music: 16 kHz mono (product decision: the 8 kHz rule is lifted for music
+ * ONLY), 5–60 seconds, source file ≤ 15 MB (decodeAudioData decodes the whole
+ * track into RAM; a long file crashes the tab on a phone).
  */
 export const ALARM_MUSIC = {
   RATE: 16000,
@@ -280,13 +267,10 @@ export const ALARM_MUSIC = {
 };
 
 /**
- * Cut an alarm-music clip into the file the box plays straight from the card:
- * "AUDC" + u16 sample rate + u32 WAV size (little-endian, matching
- * AudioPlayer::parseAudc), then WAV PCM16. For voice messages the firmware adds
- * AUDC on download; music goes straight to the card, so the web must wrap it.
- * Shares renderSegment (loudness normalization + compression + peak ceiling)
- * with voice messages so alarm and message volume are comparable. High peaks
- * make the amp draw current spikes → voltage sag. A 50ms fade on both ends
+ * Cut an alarm-music clip into the file the box plays from the card: "AUDC" +
+ * u16 sample rate + u32 WAV size (little-endian), then WAV PCM16. The web wraps
+ * it because music, unlike voice messages, goes straight to the card. Same
+ * renderSegment as voice, so volumes are comparable; a 50ms fade on both ends
  * keeps the loop from clicking.
  */
 export async function encodeAlarmMusic(buffer, range) {
@@ -320,14 +304,12 @@ export async function audFileToWavBlob(arrayBuffer) {
 }
 
 export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
-  // Decode offline instead of real-time play(): no autoplay-policy dependency,
-  // no dropped samples when the tab is throttled, and faster than real time.
+  // Decode offline, not by real-time play(): no autoplay policy, no dropped samples.
   let decoded;
   try {
     decoded = await decodeAudioBlob(videoBlob);
   } catch (err) {
-    // The browser can't decode this container's audio track.
-    // The video still sends, just without sound.
+    // Undecodable audio track: the video still sends, without sound.
     console.error('Không giải mã được audio track của video', err);
     return null;
   }
@@ -339,7 +321,7 @@ export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
     return null;
   }
 
-  // Same segment as the picture (encodeVideoToBin) so audio lines up with frames.
+  // Same segment as the picture, so audio lines up with the frames.
   const { start, duration } = segmentOf(decoded.duration, range);
   const rendered = await renderSegment(decoded, start, duration, AUDIO_SAMPLE_RATE);
 
@@ -349,43 +331,24 @@ export const extractAudioFromVideo = async (videoBlob, onProgress, range) => {
 };
 
 /**
- * Loudness normalization (product decision): everything sent to the box — voice
- * messages, video audio, alarm music — lands at the same loudness, so the
- * volume % on the box is relative to one speaker reference level, not to how
- * loud the source was recorded.
- *
- * Loudness = RMS (dBFS) over 400ms blocks, skipping silent ones (absolute gate
- * at -60 dB, relative gate 10 dB below the mean — same idea as LUFS) so pauses
- * between sentences don't cause over-boosting. Measured after a high-pass at
- * the profile's lowHz: the box's small speaker barely reproduces bass, so a
- * bass-heavy track must not count as "loud".
- *
- * "Really loud" (product decision — at -20 dB every file was quieter than the
- * alarm beep): -10 dB target, heavy compression, drop the bass the speaker
- * can't reproduce (it only costs headroom and amp current), then a limiter
- * pins peaks near 0 dBFS. To make it quieter: lower the profile's targetDb
- * first, AUDIO_PEAK_CEILING second.
+ * Loudness normalization (product decision): everything sent to the box lands
+ * at the same loudness, "really loud": -10 dB target, heavy compression, bass
+ * cut, then a limiter near 0 dBFS. To make it quieter lower the profile's
+ * targetDb first, AUDIO_PEAK_CEILING second.
  */
-// Voice messages / video audio: speech must stay clear; don't compress into distortion.
+// Voice messages / video audio: speech must stay clear.
 const PROFILE_VOICE = { targetDb: -10, lowHz: 250, presenceDb: 0 };
-// Alarm music: the goal is waking someone up, not sounding good. The beep is a
-// 1.6 kHz tone — right where the ear is most sensitive and the small speaker is
-// strongest — so at equal RMS it still sounds louder than music. Hence: cut more
-// bass (< 400 Hz), boost +6 dB around PRESENCE_HZ, and pin to -6 dB RMS (only
-// ~6 dB crest factor: sounds "flat", acceptable for an alarm).
+// Alarm music: made to wake someone up, not to sound good. To compete with the
+// 1.6 kHz beep: cut more bass (< 400 Hz), +6 dB around PRESENCE_HZ, -6 dB RMS.
 const PROFILE_ALARM = { targetDb: -6, lowHz: 400, presenceDb: 6 };
 const PRESENCE_HZ = 2000;
-// A very quiet recording is mostly background noise: boosting past this only amplifies noise.
+// Boosting a very quiet recording past this only amplifies noise.
 const LOUDNESS_MAX_BOOST_DB = 30;
 
 /**
- * Resample to mono at `rate`. OfflineAudioContext handles both the downmix
- * (1-channel destination) and the sample-rate interpolation.
- * Pass 1 only resamples, to measure loudness; pass 2 cuts bass, applies the
- * normalization gain and compresses. Loudness is re-measured after compression:
- * the browser's DynamicsCompressorNode adds its OWN makeup gain (~+4 dB on
- * Chrome) that can't be disabled, so a final factor pulls it back to target
- * before limiting.
+ * Resample to mono at `rate`. Pass 1 only resamples, to measure loudness; pass 2
+ * cuts bass, applies the gain and compresses. Loudness is re-measured afterwards
+ * because DynamicsCompressorNode adds its own makeup gain (~+4 dB on Chrome).
  */
 async function renderSegment(decoded, start, duration, rate, profile = PROFILE_VOICE) {
   const { targetDb, lowHz } = profile;
@@ -394,8 +357,7 @@ async function renderSegment(decoded, start, duration, rate, profile = PROFILE_V
   const gainDb = loudness === null ? 0 : Math.min(LOUDNESS_MAX_BOOST_DB, targetDb - loudness);
   const rendered = await renderPass(decoded, start, duration, rate, { process: true, gainDb, profile });
   const data = rendered.getChannelData(0);
-  // Limiting peaks drops loudness below target (peaky speech loses ~3 dB):
-  // iterate measure → compensate → limit a few times to converge on the target.
+  // Limiting lowers loudness: iterate measure → compensate → limit to converge.
   for (let pass = 0; pass < 5; pass++) {
     const after = await measureLoudness(rendered, lowHz);
     if (after === null || Math.abs(targetDb - after) < 0.3) break;
@@ -403,16 +365,14 @@ async function renderSegment(decoded, start, duration, rate, profile = PROFILE_V
     for (let i = 0; i < data.length; i++) data[i] *= fix;
     limitPeaks(data, rate, AUDIO_PEAK_CEILING);
   }
-  limitPeaks(data, rate, AUDIO_PEAK_CEILING);  // the loop above may exit before limiting even once
+  limitPeaks(data, rate, AUDIO_PEAK_CEILING);  // the loop may exit without limiting
   logAndCapPeak(rendered, loudness, gainDb);
   return rendered;
 }
 
 /**
- * 5ms look-ahead limiter: the gain at each sample is the minimum over the
- * window ahead (ducks before the peak, no clipping), releasing back to 1 in
- * ~80ms. Pins peaks without scaling the WHOLE clip the way logAndCapPeak does —
- * scaling everything would throw away the loudness just normalized.
+ * 5ms look-ahead limiter, ~80ms release: pins peaks without scaling the WHOLE
+ * clip (which would undo the loudness normalization).
  */
 function limitPeaks(data, rate, ceiling) {
   const look = Math.max(1, Math.round(0.005 * rate));
@@ -443,9 +403,7 @@ async function renderPass(decoded, start, duration, rate, { process, gainDb = 0,
   if (!process) {
     source.connect(offlineCtx.destination);
   } else {
-    // Below lowHz the speaker makes no sound; that content only eats headroom
-    // (peaks hit the ceiling sooner) and amp current. Removing it makes the
-    // audible part louder under the same ceiling.
+    // Below lowHz the speaker is silent; that content only eats headroom.
     const highpass = offlineCtx.createBiquadFilter();
     highpass.type = 'highpass';
     highpass.frequency.value = profile.lowHz;
@@ -461,10 +419,8 @@ async function renderPass(decoded, start, duration, rate, { process, gainDb = 0,
     const gain = offlineCtx.createGain();
     gain.gain.value = 10 ** (gainDb / 20);
 
-    // Heavy compression shrinks the crest factor, so average loudness can go
-    // higher under the same peak ceiling. The MAX98357A shares its supply with
-    // the backlight; if the box crackles or the screen flickers during playback,
-    // lower the profile's targetDb (accepted risk).
+    // Heavy compression raises average loudness under the same ceiling. If the box
+    // crackles or the screen flickers, lower the profile's targetDb (accepted risk).
     const compressor = offlineCtx.createDynamicsCompressor();
     compressor.threshold.value = -24;
     compressor.knee.value = 12;
@@ -515,11 +471,9 @@ async function measureLoudness(buffer, lowHz) {
   return 10 * Math.log10(mean(kept));
 }
 
-// Peak amplitude ceiling sent to the box (limitPeaks enforces it; logAndCapPeak
-// is the last safety net). Product decision: as loud as possible (0.98 = -0.2
-// dBFS). It used to be 0.7 to limit voltage sag from the amp sharing the
-// backlight supply — if the box crackles or the screen flickers during playback,
-// this is the second knob to lower, after the profile's targetDb.
+// Peak ceiling sent to the box (product decision: as loud as possible). If the
+// box crackles or the screen flickers (the amp shares the backlight supply), this
+// is the second knob to lower, after the profile's targetDb.
 const AUDIO_PEAK_CEILING = 0.98;
 
 function logAndCapPeak(buffer, loudness, gainDb) {

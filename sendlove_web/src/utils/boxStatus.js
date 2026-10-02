@@ -1,9 +1,7 @@
 /**
- * Reads boxes/{id}/status correctly. The node has TWO writers:
- *   - backend /device/heartbeat: last_seen in milliseconds, fw_version, charging
- *   - the current firmware PATCHes status.json directly (NetworkManager.cpp heartbeat):
- *     last_seen = time(nullptr) in SECONDS, "fw", "is_charging"
- * Reading the firmware's last_seen as milliseconds yields "synced 20,000 days ago".
+ * Reads boxes/{id}/status, which has TWO writers: the backend heartbeat
+ * (last_seen in milliseconds, fw_version, charging) and the firmware itself
+ * (last_seen in SECONDS, "fw", "is_charging").
  */
 
 /** 1e12 ms = year 2001; an epoch in seconds stays below that until year 33658. */
@@ -18,10 +16,8 @@ export const fwVersion = (status) => status?.fw_version || status?.fw || null;
 const MINUTE = 60 * 1000;
 
 /**
- * Connection health derived from last_seen — do NOT use status.online (the box
- * sleeps almost all the time; online=false doesn't mean broken). The box wakes
- * every ~5 minutes: up to 15 minutes late is still normal, and only past 2
- * hours is it worth calling lost.
+ * Connection health from last_seen — do NOT use status.online (the box mostly
+ * sleeps). It wakes every ~5 minutes: 15 minutes late is normal, 2 hours = lost.
  */
 export function syncTone(seenAtMs) {
   if (!seenAtMs) return 'unknown';
@@ -32,12 +28,9 @@ export function syncTone(seenAtMs) {
 }
 
 /**
- * Video/audio duration cap by the box's storage type.
- * NAND: 3 fixed ~5.3 MB slots → 15s.
- * SD card, or a box that hasn't reported its storage (no firmware sends
- * storage_type yet; product decision: treat a missing value as SD, the current
- * build) → 60s, the backend's
- * duration cap (validation.middleware.ts confirmMessageSchema).
+ * Video/audio duration cap by storage type: NAND (3 slots of ~5.3 MB) → 15s;
+ * SD → 60s, the backend's cap. No firmware sends storage_type yet; a missing
+ * value counts as SD, the current build (product decision).
  */
 export const MAX_SECONDS = { nand: 15, sd: 60 };
 

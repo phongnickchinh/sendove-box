@@ -6,10 +6,8 @@ import Icon from '../components/ui/Icon';
 import { Screen, Body, Button, Tips } from '../components/ui/Screen';
 
 /**
- * The Figma "new-box" frame — a modal over the Dashboard in the design. Here it
- * stays a standalone /pair route (changing the navigation architecture just to
- * show the Dashboard dimmed behind isn't worth it) and only reproduces that
- * dialog's CARD styling.
+ * The Figma "new-box" frame. A modal in the design; here a standalone /pair
+ * route that only reproduces the dialog's card.
  */
 /** Matches the backend's pairBoxSchema: S/R + 6–9 chars of A-Z0-9. */
 const PAIRING_CODE = /^[SR][A-Z0-9]{6,9}$/;

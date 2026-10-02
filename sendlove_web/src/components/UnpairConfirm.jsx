@@ -6,12 +6,9 @@ import Icon from './ui/Icon';
 import { Button, CircleIcon, Modal } from './ui/Screen';
 
 /**
- * Unpair confirmation popup, shared by sender and receiver.
- *
- * DELETE /boxes/:boxId/unpair has no role guard and removes ONLY the caller
- * (box.service.ts unpairBox): it clears that role's pairing slot and their
- * boxes_list entry. It deletes no messages, alarms or settings and doesn't
- * touch the other person — so the copy below states only what really happens.
+ * Unpair confirmation popup, shared by sender and receiver. Unpairing removes
+ * ONLY the caller: no messages, alarms or settings are deleted and the other
+ * person is untouched — the copy below must say only that.
  */
 const EFFECTS = {
   sender: [

@@ -1,20 +1,13 @@
 /**
- * Subsets a font into a VLW file for the box (SD-card design, firmware MEMORY.md §28).
- *
- * The format matches LovyanGFX VLWfont::loadFont / drawChar (lgfx_fonts.cpp) —
- * every integer is 32-bit BIG-endian:
+ * Subsets a font into a VLW file for the box (firmware MEMORY.md §28), in the
+ * LovyanGFX VLWfont format — every integer 32-bit BIG-endian:
  *   24 B header   : glyphCount, version(11), size(px), 0, ascent, descent
- *   28 B per glyph: unicode, height, width, xAdvance, dY (glyph top above the
- *                   baseline), dX (left edge relative to the cursor), 0
- *   then the glyph bitmaps back to back, 1 alpha byte per pixel (w*h)
- * Glyphs MUST be sorted by unicode: the box looks them up with lower_bound.
- * width/xAdvance are uint8 and dX is int8 on the box → font size is capped by
- * PX_RANGE (theme/layout.js).
- *
- * Alpha is BINARY (0 or 255), no anti-aliasing: the box's ST7789 can't read
- * pixels back, so LovyanGFX blends partial alpha against ONE fixed background
- * color instead of the background image → glyph edges would smear black. With
- * 0/255 a pixel is either drawn or skipped.
+ *   28 B per glyph: unicode, height, width, xAdvance, dY, dX, 0
+ *   then the glyph bitmaps, 1 alpha byte per pixel
+ * Glyphs MUST be sorted by unicode (the box uses lower_bound). The box stores
+ * width/xAdvance as uint8, hence the size cap PX_RANGE (theme/layout.js).
+ * Alpha is BINARY (0 or 255): the ST7789 can't be read back, so partial alpha
+ * would blend against a fixed color and smear the glyph edges.
  */
 
 const GOOGLE_CSS = 'https://fonts.googleapis.com/css2';
@@ -141,9 +134,8 @@ export function parseVlw(bytes) {
 }
 
 /**
- * Draw `text` the way LovyanGFX does on the box: middle_* datum alignment,
- * alpha-255 pixels drawn as-is, a missing glyph drawn as an empty box (the box
- * calls drawCharDummy and doesn't crash — mandatory case, firmware MEMORY.md §28).
+ * Draw `text` the way LovyanGFX does on the box; a missing glyph is an empty
+ * box (the box doesn't crash — mandatory case, firmware MEMORY.md §28).
  */
 export function drawVlwText(ctx, font, text, x, y, color, align) {
   const codes = [...text.normalize('NFC')].map((c) => c.codePointAt(0));

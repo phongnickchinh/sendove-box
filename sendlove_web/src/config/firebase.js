@@ -15,16 +15,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-// The web never reads RTDB or Storage directly — everything goes through the
-// backend (api/*) and media uses signed URLs. Don't add getDatabase/getStorage:
-// unused, they cost ~123 kB of bundle.
+// The web never reads RTDB or Storage directly (backend + signed URLs). Don't add
+// getDatabase/getStorage: ~123 kB of bundle for nothing.
 
 // Provider for Google sign-in
 export const googleProvider = new GoogleAuthProvider();
 
-// Facebook sign-in provider. "Facebook" must be enabled by hand in Firebase
-// Console > Authentication > Sign-in method (needs an App ID/Secret from Meta
-// for Developers) — it can't be configured from code.
+// Facebook sign-in: must be enabled by hand in the Firebase Console.
 export const facebookProvider = new FacebookAuthProvider();
 
 export default app;

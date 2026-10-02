@@ -19,10 +19,7 @@ const TONE_DOT = {
   unknown: 'var(--neutral-400)',
 };
 
-/**
- * Status row under the box name: colored dot + last sync, then battery %.
- * Derived from last_seen, not status.online (the box sleeps almost all the time).
- */
+/** Status row under the box name, derived from last_seen (not status.online: the box mostly sleeps). */
 function BoxStatusRow({ status }) {
   if (status === undefined) {
     return <div className="sl-boxcard__status"><span className="sl-boxcard__statusitem">Đang đọc…</span></div>;

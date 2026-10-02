@@ -1,10 +1,6 @@
 import React from 'react';
 
-/**
- * Outline icon set; paths come straight from the Figma script's icon table.
- * Keeps the design's 24 viewBox, 1.75 stroke width and round caps/joins.
- * Color inherits `currentColor`, so it is set with CSS instead of a prop.
- */
+/** Outline icon set from the Figma file (24 viewBox, 1.75 stroke). Color = currentColor. */
 const PATHS = {
   back: <path d="M15 5l-7 7 7 7" />,
   heart: (

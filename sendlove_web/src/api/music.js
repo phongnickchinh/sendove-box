@@ -1,11 +1,7 @@
 import apiClient from './client';
 import { uploadToSignedPolicy } from '../utils/mediaUploader';
 
-/**
- * The box's alarm music library — /boxes/:boxId/music (music.routes.ts), receiver only.
- * Up to 10 tracks, 5–60 seconds each (MUSIC_LIMITS in the backend).
- * Every response is wrapped in { success, data }.
- */
+/** The box's alarm music library — /boxes/:boxId/music, receiver only. Up to 10 tracks, 5–60 seconds each. */
 
 /** data: AlarmMusic[] {music_id, name, rev, duration_ms, size, ...} in insertion order */
 export const listMusic = async (boxId) => {
@@ -14,10 +10,8 @@ export const listMusic = async (boxId) => {
 };
 
 /**
- * Two-step upload: request a policy → upload straight to Storage → commit (the
- * backend measures size + crc32 and checks the AUDC header). Passing musicId
- * replaces that track's content (new rev).
- * blob: the result of encodeAlarmMusic(). Returns the stored AlarmMusic.
+ * Upload: request a policy → upload to Storage → commit (the backend verifies
+ * the file). musicId replaces that track. blob comes from encodeAlarmMusic().
  */
 export const uploadMusic = async (boxId, blob, { name, durationMs, musicId }, onProgress) => {
   const init = await apiClient.post(`/boxes/${boxId}/music/upload`, musicId ? { music_id: musicId } : {});

@@ -1,16 +1,7 @@
-/* ============================================================
-   Sendlove Box — primitives built from the Figma file's auto-layout.
-   Mapping:
-     AL(VERTICAL|HORIZONTAL)   -> flex container
-     itemSpacing               -> gap
-     padding[T,R,B,L]          -> padding
-     primary/counterAxisAlign  -> justify-content / align-items
-     fillW(node)               -> align-self: stretch
-     acts() pinned at y=932-34-h -> margin-top:auto (no position:absolute)
-   The design's absolute 430x932 frame becomes a 100dvh flex column: same
-   order, spacing and proportions, but it survives the mobile keyboard and
-   long content.
-   ============================================================ */
+/* Sendlove Box primitives, built from the Figma auto-layout (auto-layout -> flex,
+   itemSpacing -> gap, bottom-pinned actions -> margin-top:auto). The design's
+   430x932 frame becomes a 100dvh flex column, so it survives the mobile keyboard
+   and long content. */
 
 /* ---------- page background + column shell ---------- */
 .sl-page {
@@ -37,8 +28,7 @@
   position: relative;
 }
 
-/* Desktop: the design stays mobile — keep the 430 column and set it off with
-   a thin border; no fake phone frame. */
+/* Desktop: keep the 430 mobile column, set off by a thin border. */
 @media (min-width: 768px) {
   .sl-page { background: var(--rose-50); padding: var(--sp-8) 0; }
   .sl-shell {
@@ -51,9 +41,7 @@
   }
 }
 
-/* ---------- appbar ----------
-   Mirrors the Figma appbar frame: HORIZONTAL, gap 12, padding [16,20,16,20].
-   Height is NOT fixed — it follows its content, like auto-layout AUTO. */
+/* ---------- appbar ---------- (height follows its content) */
 .sl-appbar {
   flex: 0 0 auto;
   display: flex;
@@ -77,8 +65,7 @@
 .sl-iconbtn--44 { width: 44px; height: 44px; }
 .sl-iconbtn:disabled { opacity: .4; cursor: not-allowed; }
 
-/* Appbar back button: 40x40 circle with a 0.5 border per Figma — distinct from
-   .sl-iconbtn (36px, no border) used elsewhere. */
+/* Appbar back button: 40x40 bordered circle (not .sl-iconbtn, 36px borderless). */
 .sl-back {
   flex: 0 0 auto;
   width: 40px; height: 40px;
@@ -91,8 +78,7 @@
 }
 .sl-back:hover { background: var(--rose-50); }
 
-/* "Step x/y" pill: hairline border, NO solid fill; 14/600 caramel-800 text
-   (same scale as .sl-label-s), per Figma. */
+/* "Step x/y" pill: hairline border, no fill. */
 .sl-step {
   flex: 0 0 auto;
   padding: 4px 14px;
@@ -112,8 +98,7 @@
   padding: var(--sp-2) var(--sp-5) 10px;
   min-height: 0;
 }
-/* Result screens have no appbar: content starts at safe-top + 72 (appbar
-   space) + 72, matching the design. */
+/* Result screens have no appbar: content starts at safe-top + 72 + 72. */
 .sl-body-col--center {
   align-items: center; text-align: center;
   padding-top: calc(var(--safe-top) + 144px);
@@ -160,9 +145,7 @@
   background: var(--chip-accent-bg);
   color: var(--chip-accent-fg);
 }
-/* Chips in LISTS (messages, widgets, nav tiles). Light: pink as designed.
-   Dark: translucent pink — a row of SOLID pink tiles on the wine background
-   is too much color. */
+/* Chips in lists. Light: pink as designed; dark: translucent pink (solid is too much). */
 .sl-chip--muted { background: var(--chip-bg); color: var(--chip-fg); }
 
 /* ---------- circle(): round icon holder ---------- */
@@ -194,29 +177,25 @@
   transition: filter .18s ease, background .18s ease;
 }
 .sl-btn:disabled { opacity: .5; cursor: not-allowed; }
-/* --on-accent is INTENTIONALLY theme-independent (see tokens.css): the pink
-   button keeps nearly the same lightness in both themes, so its text needn't change either. */
+/* --on-accent is INTENTIONALLY theme-independent (see tokens.css). */
 .sl-btn--pri { background: var(--rose-400); color: var(--on-accent); }
 .sl-btn--pri:hover:not(:disabled) { filter: brightness(.96); }
 .sl-btn--gho { background: transparent; color: var(--text-accent); }
 .sl-btn--gho:hover:not(:disabled) { background: var(--rose-50); }
-/* Destructive button: error-fill with white text, NOT the primary pink — pink
-   means a normal action; borrowing it for delete invites mis-taps. */
+/* Destructive button: error fill, NOT the primary pink (that invites mis-taps). */
 /* White is FIXED: neutral-0 flips to the dark card background in dark mode. */
 .sl-btn--dan { background: var(--error-fill); color: #FFFFFF; }
 .sl-btn--dan:hover:not(:disabled) { filter: brightness(.94); }
 .sl-btn--block { width: 100%; }
-/* Button hierarchy: ONE solid pink button per screen (primary action); the
-   second-most important = outlined (sec); cancel/close/later = plain text (gho);
-   solid red only on a delete confirmation (dan). */
+/* Button hierarchy: ONE solid pink (primary) per screen; outlined = secondary;
+   plain text = cancel/later; solid red only on a delete confirmation. */
 .sl-btn--sec { background: transparent; color: var(--text-accent); box-shadow: inset 0 0 0 1px var(--text-accent); }
 .sl-btn--sec:hover:not(:disabled) { background: var(--rose-50); }
 /* Disabled primary: neutral grey — pale pink still looks tappable. */
 .sl-btn--pri:disabled { background: var(--neutral-100); color: var(--neutral-500); opacity: 1; }
 
-/* ---------- acts(): button row pinned to the bottom, 34 above the safe area ----------
-   Lives inside .sl-body-col, so it inherits the 20px side padding; 24 here
-   plus the body's 10px bottom padding gives the designed 34. */
+/* ---------- acts(): button row pinned to the bottom, 34 above the safe area
+   (24 here + the body's 10px bottom padding) ---------- */
 .sl-acts {
   margin-top: auto;
   display: flex; flex-direction: column; gap: var(--sp-2);
@@ -260,8 +239,7 @@
 .sl-typecard:hover { border-color: var(--rose-400); background: var(--rose-50); }
 
 /* ---------- scrim + modal (the ONLY place with a shadow) ---------- */
-/* Fixed to the VIEWPORT, not absolute to .sl-shell: the shell is as tall as the
-   page, so on a long page the popup would land off-screen at the bottom. */
+/* Fixed to the VIEWPORT: absolute to the page-tall .sl-shell would land off-screen. */
 .sl-scrim {
   position: fixed; inset: 0;
   background: rgba(61, 42, 32, 0.45);
@@ -335,9 +313,8 @@
   transition: background .18s ease;
 }
 .sl-toggle[aria-checked="true"] { background: var(--rose-400); justify-content: flex-end; }
-/* "Dark theme" toggle in the account popover: Figma uses the caramel accent,
-   NOT pink like the alarm toggle. Dark mode points this token at pink (light
-   caramel on the wine background lacks contrast with the knob). */
+/* "Dark theme" toggle: caramel accent, not pink like the alarm toggle (dark mode
+   points the token at pink for contrast). */
 .sl-toggle--accent[aria-checked="true"] { background: var(--toggle-accent-on); }
 .sl-toggle__knob {
   width: 18px; height: 18px;
@@ -404,8 +381,7 @@
 .sl-note--err  { background: var(--error-bg);   color: var(--error-text); }
 
 /* ---------- 0-100 slider (brightness, volume) ----------
-   accent-color only paints the filled part; the rest falls back to the
-   browser's dark default track, so both ends are drawn by hand. */
+   Both track ends are drawn by hand: accent-color only paints the filled part. */
 .sl-range {
   width: 100%;
   height: 24px;
@@ -439,12 +415,10 @@
   border: 2px solid var(--neutral-0);
 }
 
-/* ---------- large section label (YOUR BOX): 17/SemiBold neutral-500. Separate
-   from .sl-heading (same size, caramel-900): this is always a secondary label. ---------- */
+/* ---------- large section label (YOUR BOX): like .sl-heading but always secondary ---------- */
 .sl-section-label { font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--neutral-500); }
 
-/* ---------- add-box-card (Dashboard): a separate Figma component from
-   .sl-addrow (Alarms/ThemeEditor) ---------- */
+/* ---------- add-box-card (Dashboard); not .sl-addrow ---------- */
 .sl-addbox {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: var(--sp-2);
@@ -469,8 +443,7 @@
 .sl-input--accent { border-color: var(--input-accent); }
 
 /* ---------- "new-box" dialog card (PairBox) ----------
-   NOT the Login card (327 wide, r10, bordered): this one is 379 wide, r12, NO
-   border, padding 20, gap 16. Two distinct cards in the design — keep them apart. */
+   A different card from the Login one in the design — keep them apart. */
 .sl-pair-card {
   width: 100%; max-width: 379px;
   display: flex; flex-direction: column;
@@ -505,8 +478,7 @@
 }
 .sl-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* ---------- small popover anchored to the appbar (bell, avatar) ----------
-   Unlike .sl-scrim (covers the bottom), it anchors top-right and isn't full width. */
+/* ---------- small popover anchored top-right to the appbar (bell, avatar) ---------- */
 .sl-popover-anchor { position: absolute; inset: 0; z-index: 10; }
 .sl-popover {
   position: absolute;
@@ -533,10 +505,8 @@
 .sl-popover__row--danger { color: var(--error-text); font-weight: 600; }
 .sl-popover__divider { height: 0.5px; background: var(--line-card); border: none; margin: 2px 0; }
 
-/* ---------- Login: full-bleed background photo + floating card ----------
-   Not the standard Body structure, hence its own block. .sl-shell is already position:relative. */
-/* The Figma photo (Anthony Melone, Unsplash) is bright and busy, so a warm dark
-   overlay keeps the white logo and terms line readable. */
+/* ---------- Login: full-bleed background photo + floating card ---------- */
+/* Photo: Anthony Melone, Unsplash. A warm dark overlay keeps the white text readable. */
 .sl-login-hero {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
@@ -558,16 +528,12 @@
 .sl-login-logo {
   font-family: 'Dancing Script', cursive; /* per Figma — this logo alone does NOT use Quicksand */
   font-size: 40px; font-weight: 700; line-height: 1.15;
-  /* Fixed #FDF0EF, NOT var(--rose-50): the hero gradient is theme-independent
-     but --rose-50 isn't (translucent in dark mode — nearly invisible here).
-     Text on the hero must keep one color. */
+  /* Fixed color, NOT var(--rose-50): the hero is theme-independent, the token isn't. */
   color: #FDF0EF;
   text-shadow: 0 2px 16px rgba(0, 0, 0, .35);
 }
-/* The login card is a FIXED "light island": it sits on the theme-independent
-   hero, so it doesn't change either. Tokens are redeclared here so everything
-   inside (headline, buttons, .sl-reason) uses the light palette even under
-   <html data-theme="dark"> — otherwise button text contrast drops to 2.4:1. */
+/* The login card is a FIXED "light island" on the theme-independent hero: tokens
+   are redeclared so its contents stay light even under data-theme="dark". */
 .sl-login-card {
   --neutral-0: #FFFFFF;
   --caramel-50: #FDF8F3;
@@ -608,9 +574,7 @@
 }
 .sl-login-btn:hover:not(:disabled) { background: var(--caramel-50); }
 .sl-login-btn:disabled { opacity: .6; cursor: not-allowed; }
-/* Install hint (InstallHint.jsx) — secondary line at the bottom of the login
-   card, separated by a hairline. Not a primary button: this screen already
-   has two sign-in buttons. */
+/* Install hint (InstallHint.jsx): a secondary line, not another primary button. */
 .sl-install {
   display: flex; align-items: flex-start; gap: var(--sp-2);
   padding-top: var(--sp-3);
@@ -664,12 +628,8 @@
 }
 
 /* ---------- box-card (Dashboard) ----------
-   Two groups per Figma:
-     left  = avatar + name + status row (dot + "Online", battery icon + "%")
-     right = role pill + chevron as ONE block, pushed right by the card's
-             space-between.
-   Border color comes from --boxcard-line-*: by role in light (rose-300 /
-   caramel-300), neutral in dark. */
+   left = avatar + name + status row; right = role pill + chevron as one block.
+   Border from --boxcard-line-*: by role in light, neutral in dark. */
 .sl-boxcard {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--sp-3);
@@ -681,9 +641,7 @@
   cursor: pointer;
   text-align: left;
 }
-/* Dark theme drops the role-colored border: border + avatar + pill + chevron
-   in one hue says the same thing four times. Role then shows only in the pill
-   and the avatar background. */
+/* Dark theme drops the role-colored border; the role shows in the pill and avatar. */
 .sl-boxcard--sender { border-color: var(--boxcard-line-sender); }
 .sl-boxcard--receiver { border-color: var(--boxcard-line-recv); }
 
@@ -700,16 +658,14 @@
 
 .sl-boxcard__mid { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 
-/* Status row: colored dot + label, then battery icon + %. Same gap:6 pattern
-   as the battery/firmware row in ReceiverUI. */
+/* Status row: colored dot + label, then battery icon + %. */
 .sl-boxcard__status { display: flex; align-items: center; gap: var(--sp-3); }
 .sl-boxcard__statusitem { display: flex; align-items: center; gap: 6px; color: var(--neutral-500); font-size: 12px; line-height: 1.4; }
 .sl-boxcard__dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: var(--r-full); }
 
 .sl-boxcard__right { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); }
 
-/* Chevron in the right group: rose-500 for sender; caramel-700 for receiver
-   ("one step darker than the pill", per Figma). */
+/* Chevron: one step darker than the role pill. */
 .sl-boxcard__chevron--sender { color: var(--chevron-sender); }
 .sl-boxcard__chevron--receiver { color: var(--chevron-recv); }
 
@@ -772,8 +728,7 @@
 .sl-filter[aria-pressed="true"] { background: var(--chip-accent-bg); border-color: var(--boxcard-line-sender); color: var(--chip-accent-fg); font-weight: 600; }
 
 /* ---------- video/audio range picker: two stacked range inputs ----------
-   The thumb is 20px, so the rail is inset 10px each side — the thumb center
-   travels the full rail and the % fill lines up with the thumb. */
+   The rail is inset 10px (half the thumb) so the % fill lines up with the thumb. */
 .sl-trimwrap { display: flex; flex-direction: column; gap: var(--sp-1); width: 100%; }
 .sl-trim { position: relative; height: 32px; }
 .sl-trim__track {
@@ -855,8 +810,7 @@
   vertical-align: middle;
 }
 
-/* ---------- theme editor (ThemeEditor) ----------
-   The preview sticks to the top so the property panel can scroll while the result stays visible. */
+/* ---------- theme editor: the preview sticks to the top while the panel scrolls ---------- */
 .sl-editor__stage {
   position: sticky; top: 0; z-index: 5;
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-2);
@@ -866,9 +820,8 @@
   border-bottom: 0.5px solid var(--line-card);
 }
 .sl-editor__screen { display: flex; }
-/* Short viewports (landscape phones, small devices): the 240px preview + chip
-   row eat most of the height. Shrink the preview; dragging stays correct because
-   BoxScreen converts coordinates from the actual rendered size. */
+/* Short viewports: shrink the preview (BoxScreen converts drag coordinates from
+   the rendered size). */
 @media (max-height: 760px) { .sl-editor__screen { zoom: .75; } }
 .sl-editor__chips {
   display: flex; gap: var(--sp-2); width: 100%;
@@ -910,10 +863,8 @@
 .sl-editor__num:focus-within { border-color: var(--rose-400); box-shadow: 0 0 0 3px var(--rose-50); }
 .sl-editor__num:has(input:disabled) { opacity: .5; }
 
-/* iOS zooms the whole page when focusing an input with text under 16px and
-   doesn't zoom back. Raise to 16px on iOS only (detected via
-   -webkit-touch-callout); Android and desktop keep the designed 15px. Must
-   come AFTER the two 15px rules above to win. */
+/* iOS zooms the page when focusing an input under 16px: raise to 16px on iOS only.
+   Must come AFTER the two 15px rules above. */
 @supports (-webkit-touch-callout: none) {
   .sl-input, .sl-editor__num input { font-size: 16px; }
 }
@@ -977,8 +928,7 @@ body:has(.sl-savebar) .sl-sendpill { bottom: calc(var(--safe-bottom) + 84px); }
 }
 .sl-sendpill__err { font-size: 12px; line-height: 1.4; color: var(--error-text); }
 
-/* ---------- toast (components/ui/Toast.jsx) ----------
-   Fixed to the top of the VIEWPORT, not the page: the save button is often at the bottom of a long page. */
+/* ---------- toast (components/ui/Toast.jsx): fixed to the top of the VIEWPORT ---------- */
 .sl-toast {
   position: fixed; z-index: 30;
   top: calc(var(--safe-top) + 12px); left: 50%; transform: translateX(-50%);
@@ -997,9 +947,7 @@ body:has(.sl-savebar) .sl-sendpill { bottom: calc(var(--safe-bottom) + 84px); }
 @keyframes sl-toast-in { from { opacity: 0; transform: translate(-50%, -8px); } }
 @media (prefers-reduced-motion: reduce) { .sl-toast { animation: none; } }
 
-/* ---------- floating bottom save bar (box settings) ----------
-   fixed to the viewport rather than sticky (chosen when .sl-shell still used
-   overflow:hidden, which breaks sticky). */
+/* ---------- floating bottom save bar (box settings), fixed to the viewport ---------- */
 .sl-savebar {
   position: fixed; z-index: 9;
   bottom: 0; left: 50%; transform: translateX(-50%);

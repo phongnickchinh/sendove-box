@@ -6,10 +6,9 @@ import { MAX_BIN_BYTES } from './boxStatus';
 export class SendError extends Error {}
 
 /**
- * Encode + upload one message — kept out of SenderUI so a send keeps running
- * after the user leaves the send screen (context/SendContext.jsx holds the state).
- *
- * input: { type, text, mediaData, range } — mediaData depends on the type:
+ * Encode + upload one message; kept out of SenderUI so a send survives leaving
+ * the send screen (SendContext holds the state).
+ * input: { type, text, mediaData, range } — mediaData by type:
  *   video/image: File · voice: { wavBlob, duration } · static: { imageBlob, audioData }
  * cb: { onPhase('uploading'), onProgress(0-100), onSummary({ fileName, duration }) }
  */

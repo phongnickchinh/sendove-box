@@ -4,11 +4,8 @@ import { Screen, AppBar, Body, Actions, Button, Chip, CircleIcon, Modal } from '
 import Illustration from '../ui/Illustration';
 
 /**
- * The three step-3 screens in the design:
- *   03-convert-popup   -> phase 'encoding' | 'uploading'  (popup over the step-2 screen)
- *   04-send-successful -> phase 'done'
- *   05-send-fail       -> phase 'error'
- * The popup is the only place in the flow allowed to have a shadow.
+ * The step-3 screens: a popup for phase 'encoding' | 'uploading', then the
+ * 'done' or 'error' screen.
  */
 
 const TYPE_ICON = { video: 'video', image: 'image', voice: 'mic', text: 'text', static: 'image' };

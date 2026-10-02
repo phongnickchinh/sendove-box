@@ -5,15 +5,9 @@ import Icon from './ui/Icon';
 import { Modal } from './ui/Screen';
 
 /**
- * Message detail popup (+ voice variant), shared by the sender (history) and
- * the receiver (the box's message list).
- *
- * NOT yet checked against the Figma frame — built from the style guide; revisit
- * once the frame is available.
- *
- * Data: the list only has raw storage paths, so the popup calls
- * GET /messages/:id on open to get signed URLs (15-minute expiry — a popup left
- * open longer can't reload media; closing and reopening fetches fresh URLs).
+ * Message detail popup, shared by sender and receiver. NOT yet checked against
+ * the Figma frame. It calls GET /messages/:id on open for signed URLs (15-minute
+ * expiry; reopening fetches fresh ones).
  */
 export default function MessageDetail({ boxId, message, onClose }) {
   const [detail, setDetail] = useState(null);

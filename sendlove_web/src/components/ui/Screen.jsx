@@ -5,11 +5,8 @@ import '../../styles/sendlove.css';
 
 /**
  * Screen building blocks, mapped 1:1 from the Figma script helpers
- * chrome()/body()/acts()/hdr()/tips()/btn()/chip()/circle()/modal().
- *
- * The only difference from Figma: the design positions everything absolutely
- * in a 430x932 frame. Here that frame is a 100dvh flex column, so the button
- * row sticks to the bottom with margin-top:auto instead of y = 932 - 34 - h.
+ * (chrome/body/acts/hdr/tips/btn/chip/circle/modal). The 430x932 frame is a
+ * 100dvh flex column here.
  */
 
 /** Device frame: page background + the 430 column, centered on wide screens */
@@ -22,10 +19,8 @@ export function Screen({ children }) {
 }
 
 /**
- * chrome(frame, stepLabel) — the appbar. step = null hides the step pill.
- * title/subtitle: the Dashboard variant — the greeting + subtitle sit INSIDE
- * the appbar (per Figma), not in Body.
- * onBack and title are mutually exclusive on the left side — use one.
+ * The appbar. step = null hides the step pill. title/subtitle = the Dashboard
+ * variant (greeting inside the appbar). Use either onBack or title, not both.
  */
 export function AppBar({ onBack, title, subtitle, step, right }) {
   return (
@@ -120,9 +115,8 @@ export function CircleIcon({ size, bg, color, icon, iconSize, sw }) {
 }
 
 /**
- * scrim(frame) + modal(frame) — overlay and popup, the only place with a shadow.
- * onClose (optional): clicking outside or Esc closes it. Omit it while the
- * popup runs something that must not be interrupted (unpairing, encoding).
+ * Overlay + popup. onClose (optional): clicking outside or Esc closes it; omit
+ * it while the popup runs something that must not be interrupted.
  */
 export function Modal({ children, onClose, className = '' }) {
   useEffect(() => {

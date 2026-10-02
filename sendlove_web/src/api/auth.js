@@ -2,13 +2,10 @@ import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut } from 
 import { auth, googleProvider, facebookProvider } from "../config/firebase";
 
 /**
- * Popup blocked / unsupported by a mobile browser → fall back to redirect.
- * The redirect result does NOT come back here: the page reloads and
- * onAuthStateChanged in AuthContext receives the user like any other sign-in.
- *
- * Config note: on current Chrome/Safari (third-party storage blocked), redirect
- * only works when VITE_FIREBASE_AUTH_DOMAIN is the SAME domain that hosts the
- * web app (iot-app-839a2.web.app), not *.firebaseapp.com.
+ * Popup blocked → fall back to redirect; its result arrives through
+ * onAuthStateChanged after the reload, not here. Redirect only works when
+ * VITE_FIREBASE_AUTH_DOMAIN is the domain hosting the web app
+ * (iot-app-839a2.web.app), not *.firebaseapp.com.
  */
 const REDIRECT_INSTEAD = new Set([
   'auth/popup-blocked',
@@ -42,18 +39,10 @@ async function signInWith(provider, label) {
 /** Sign in with Google (popup, redirect fallback). */
 export const signInWithGoogle = () => signInWith(googleProvider, 'Google');
 
-/**
- * Sign in with Facebook (popup, redirect fallback). If Facebook isn't enabled
- * in the Firebase Console, Firebase returns "auth/operation-not-allowed" —
- * shown as a proper error message, no crash.
- */
+/** Sign in with Facebook (popup, redirect fallback). Must be enabled in the Firebase Console. */
 export const signInWithFacebook = () => signInWith(facebookProvider, 'Facebook');
 
-/**
- * The error of the redirect that just returned, if any. Success needs no call —
- * onAuthStateChanged already has the user; this only surfaces the error
- * instead of failing silently.
- */
+/** The error of the redirect that just returned, if any (success comes via onAuthStateChanged). */
 export const readRedirectError = async () => {
   try {
     await getRedirectResult(auth);

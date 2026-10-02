@@ -6,12 +6,8 @@ import { initialRange } from '../../utils/trim';
 import useObjectUrl from '../../utils/useObjectUrl';
 
 /**
- * Body of the video step: a white r16 card with a caramel/300 border holding
- * either the content-type chip or the 240x240 preview. The surrounding screen
- * (appbar, title, caption field) is built by SenderUI.
- *
- * Range picking: videos of any length are accepted; the user drags to choose
- * up to `maxSeconds` (15s NAND box / 60s SD box — utils/boxStatus.js).
+ * Body of the video step: the card with the 240x240 preview. Any video length
+ * is accepted; the user picks up to `maxSeconds` of it (utils/boxStatus.js).
  */
 const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -40,9 +36,8 @@ const VideoInput = ({ onVideoSelect, onCancel, maxSeconds }) => {
       setRange(initialRange(d, maxSeconds));
     };
     if (el.duration === Infinity) {
-      // WebM recorded by the browser (MediaRecorder) has no duration in its
-      // header: Chrome reports Infinity until it has seeked to the end. Seek far
-      // ahead to make it scan, read the real duration on durationchange, then rewind.
+      // MediaRecorder WebM reports duration Infinity until seeked to the end: seek far
+      // ahead, read the real duration on durationchange, then rewind.
       const onChange = () => {
         if (!Number.isFinite(el.duration)) return;
         el.removeEventListener('durationchange', onChange);

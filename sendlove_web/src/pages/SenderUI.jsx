@@ -40,15 +40,12 @@ export default function SenderUI() {
   const [type, setType] = useState(null); // 'video' | 'image' | 'voice' | 'text' | 'static'
   const [text, setText] = useState('');
 
-  // "Still message" card: holds the chosen image / background music until the
-  // shared Send button is pressed — unlike the single-media cards, which send
-  // as soon as their input is done.
+  // "Still message" card: holds its image / music until the shared Send button
+  // (single-media cards send as soon as their input is done).
   const [staticImageBlob, setStaticImageBlob] = useState(null);
   const [staticAudioData, setStaticAudioData] = useState(null); // { wavBlob, duration }
 
-  // The send lives in SendContext (it outlives this page): after "Later" or
-  // leaving the page, the floating bottom bar reports progress and the result,
-  // with a Retry button on failure.
+  // The send lives in SendContext and outlives this page (floating bottom bar).
   const { job, running, start, retry, leave } = useSend();
   const [toast, showToast] = useToast();
 

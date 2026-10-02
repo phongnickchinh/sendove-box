@@ -8,12 +8,12 @@ const DISMISS_KEY = 'sendlove-install-hint';
 const IN_APP_BROWSER = /FBAN|FBAV|FB_IAB|Instagram|Zalo|Line\//i;
 
 /**
- * Pure — takes the userAgent instead of reading navigator so it can be tested without a device.
+ * Pure (takes the userAgent, so it is testable).
  * @returns {'installed' | 'in-app' | 'ios' | 'other'}
- *   installed: running from the home-screen icon; no hint needed.
- *   in-app:    browser inside Zalo/Facebook/… — must be reopened in a real browser.
- *   ios:       iPhone/iPad — no automatic install prompt; point the user at Share.
- *   other:     Android/desktop — wait for the browser's beforeinstallprompt event.
+ *   installed: running from the home-screen icon
+ *   in-app:    inside Zalo/Facebook/… — must be reopened in a real browser
+ *   ios:       no install prompt; point the user at Share
+ *   other:     wait for the browser's beforeinstallprompt event
  */
 export function detectInstallMode({ userAgent, standalone, maxTouchPoints = 0 }) {
   if (standalone) return 'installed';
@@ -42,11 +42,7 @@ export function dismissHint() {
   try { localStorage.setItem(DISMISS_KEY, 'off'); } catch { /* storage blocked by the browser; ignore */ }
 }
 
-/*
- * beforeinstallprompt (Chrome/Edge on Android and desktop) fires ONCE, early,
- * possibly before the Login screen mounts — so listen at module load and keep
- * the event for the component to pick up later.
- */
+/* beforeinstallprompt fires ONCE, possibly before any component mounts: capture it at module load. */
 let installPrompt = null;
 const listeners = new Set();
 

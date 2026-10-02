@@ -1,10 +1,7 @@
 import apiClient from './client';
 import { uploadToSignedPolicy } from '../utils/mediaUploader';
 
-/**
- * Standby-screen theme — theme.controller.ts / theme.routes.ts, receiver only.
- * Every response is wrapped in { success, data }.
- */
+/** Standby-screen theme (theme.routes.ts), receiver only. */
 
 /** data: BoxTheme | null (never saved → the box shows its fallback screen) */
 export const getTheme = async (boxId) => {
@@ -30,10 +27,7 @@ export const uploadFont = async (boxId, bytes, onProgress) => {
   return path;
 };
 
-/**
- * Upload an RGB565 background (exactly 115,200 bytes) to Storage; returns the
- * storage path to pass to saveTheme({ background }).
- */
+/** Upload an RGB565 background (exactly 115,200 bytes); returns the storage path for saveTheme(). */
 export const uploadBackground = async (boxId, bytes, onProgress) => {
   const response = await apiClient.post(`/boxes/${boxId}/theme/background`);
   const { path, upload } = response.data.data; // { path, upload: { url, fields } }

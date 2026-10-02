@@ -3,17 +3,12 @@ import Icon from '../components/ui/Icon';
 import { runSend, SendError } from '../utils/sendMessage';
 
 /**
- * A send outlives the send screen. Without this, leaving the page mid-upload
- * let the upload run with nobody reporting the result — a failure silently
- * lost the content.
- *
+ * A send outlives the send screen, so leaving the page mid-upload still reports
+ * the result.
  * job: { id, boxId, boxName, input, phase: encoding|uploading|done|error, progress,
  *        summary: { fileName, duration }, errorText, detached }
  * detached = the user left the step-3 screen → the floating bottom bar takes over.
- *
- * ONE send at a time: starting a second while the first is unfinished is
- * refused (start returns false). Letting it overwrite the first would bring
- * back the "failed and nobody knew" bug.
+ * ONE send at a time: a second start() while one is unfinished returns false.
  */
 const SendCtx = createContext(null);
 

@@ -16,9 +16,8 @@ function readStored() {
 }
 
 /**
- * Light/dark theme: sets data-theme on <html> so the surface tokens in
- * tokens.css switch (see :root[data-theme='dark']). Defaults to light — the OS
- * prefers-color-scheme is intentionally not read.
+ * Light/dark theme: sets data-theme on <html> (see tokens.css). Defaults to
+ * light — the OS prefers-color-scheme is intentionally not read.
  */
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(readStored);

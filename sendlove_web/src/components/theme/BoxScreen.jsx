@@ -5,11 +5,8 @@ import { parseVlw, drawVlwText } from '../../utils/vlw';
 import { rgb565ToImageData } from '../../utils/rgb565';
 
 /**
- * Colors of the PHYSICAL BOX SCREEN — fixed, NOT following the web theme. With
- * var(--caramel-*) the preview background turns dark wine in dark mode while
- * the clock text stays #000000 from the box theme → invisible. The box screen
- * is a physical object with one look. Without a background image the box fills
- * BLACK (the firmware has no built-in background).
+ * Colors of the PHYSICAL box screen: fixed, NOT following the web theme. Without
+ * a background image the box fills BLACK.
  */
 const NO_BG = '#000000';
 const BOX_INK = '#83513E';
@@ -24,19 +21,12 @@ function textStyle(w) {
 
 const textOf = (w) => (w.type === 'clock_date' ? formatDate(w) : w.sample);
 
-/**
- * The box's real screen, drawn 1:1 at 240 × 240 so the theme's x/y/w/h read
- * directly off the picture with no conversion.
- *
- * background: the RGB565-quantized background image (utils/rgb565.js).
- */
+/** The box's screen, drawn 1:1 at 240 × 240. background = the RGB565-quantized image (utils/rgb565.js). */
 export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showBoxes, background }) {
   const screenRef = useRef(null);
   const drag = useRef(null); // { id, px, py, x, y, maxX, maxY, k }
 
-  /* Dragging a widget: pointer coordinates are converted to the box's 240 units
-     (the preview may render smaller than 240 on narrow phones), rounded to
-     integers and clamped to the screen. */
+  /* Dragging: pointer coordinates → the box's 240 units, rounded and clamped. */
   const startDrag = (e, w) => {
     onSelect?.(w.id);
     if (!onMove) return;
@@ -82,9 +72,8 @@ export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showB
           justifyContent: w.align === 'center' ? 'center' : w.align === 'right' ? 'flex-end' : 'flex-start',
         };
 
-        /* The widget outline = the exact w×h box drawBackgroundPatch will clear,
-           not decoration. Drawing it is the only way to see a too-small box
-           BEFORE the device shows stale text. */
+        /* The outline is the exact w×h box the firmware clears: it reveals a
+           too-small box before the device shows stale text. */
         const box = showBoxes
           ? {
               borderRadius: 4,
@@ -126,10 +115,8 @@ export default function BoxScreen({ widgets, selectedId, onSelect, onMove, showB
 
 /**
  * A preview that matches the box EXACTLY (firmware MEMORY.md §29, proposal #10):
- * drawn from the very bytes to be sent —
- * the RGB565 background and the freshly subsetted VLW fonts, with 0/255 alpha
- * like LovyanGFX. Characters missing from the font show as empty boxes, as on
- * the box. Battery/Wi-Fi widgets only mark their position.
+ * drawn from the very bytes to be sent (RGB565 background + subsetted VLW fonts).
+ * Battery/Wi-Fi widgets only mark their position.
  */
 export function ExactPreview({ widgets, fonts, bgBytes }) {
   const ref = useRef(null);
@@ -171,10 +158,7 @@ export function ExactPreview({ widgets, fonts, bgBytes }) {
   );
 }
 
-/**
- * A REAL thumbnail of a theme: BoxScreen itself (background + text + fonts)
- * scaled from 240 down to `size` with CSS zoom.
- */
+/** A real thumbnail of a theme: BoxScreen scaled from 240 down to `size`. */
 export function MiniScreen({ widgets, background, size = 56 }) {
   return (
     <span style={{ flex: '0 0 auto', width: size, height: size, borderRadius: 8, overflow: 'hidden', display: 'block' }}>

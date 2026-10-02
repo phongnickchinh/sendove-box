@@ -5,12 +5,7 @@ import {
   subscribeInstallPrompt, getInstallPrompt, promptInstall,
 } from '../utils/installHint';
 
-/**
- * Warning shown when the page opens in the in-app browser of Zalo / Facebook /
- * Messenger: Google refuses sign-in there and the user only sees a cryptic
- * error. Box links are usually shared through these apps, so this is a common
- * entry point.
- */
+/** Warning for the in-app browsers of Zalo / Facebook / Messenger, where Google refuses sign-in. */
 export function InAppBrowserWarning() {
   const [mode] = useState(currentInstallMode);
   if (mode !== 'in-app') return null;
@@ -26,13 +21,9 @@ export function InAppBrowserWarning() {
 }
 
 /**
- * "Add to home screen" hint. iPhone has no automatic install prompt, so it
- * points at the Share button; on Android/desktop a tap opens the browser's
- * install dialog. Hidden once installed or dismissed.
- *
- * card: render as a standalone card (Dashboard). The default is the last line
- * of the login card. It must also appear on the Dashboard because signed-in
- * users never see the Login screen.
+ * "Add to home screen" hint: points at Share on iPhone (no install prompt),
+ * opens the install dialog elsewhere. Hidden once installed or dismissed.
+ * card = standalone card for the Dashboard (signed-in users never see Login).
  */
 export default function InstallHint({ card = false }) {
   const [mode] = useState(currentInstallMode);

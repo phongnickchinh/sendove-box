@@ -12,25 +12,12 @@ import {
 } from '../theme/layout';
 
 /**
- * Theme editor.
- *
- * Layout: the preview is PINNED to the top (sticky) — tap to select, drag to
- * move a widget — with the property panel right below it, so position edits
- * are visible while editing.
- *
- * A field appears in the property panel only if LayoutEngine.cpp ACTUALLY
- * reads it for that widget type (WIDGET_TYPES in theme/layout.js):
- *   font    -> a web font family (subset to VLW on send) or a firmware built-in font
- *   format  -> clock_date: LayoutEngine::formatDate (+ locale vi/en)
- *   color   -> hexToColor, exactly 7 chars #RRGGBB
- *   align   -> drawTextWidget: center / right / anything else = left
- *   x,y,w,h -> drawBackgroundPatch clears exactly the w×h box before drawing
- *
- * INTENTIONALLY ABSENT: image widgets (the firmware can't draw them) and a
- * battery color (drawBatteryIcon ignores cfg.color).
- *
- * The draft comes from ThemePicker through location.state; opened directly by
- * URL, it loads the saved theme, or the default layout if there is none.
+ * Theme editor: a sticky preview (tap to select, drag to move) above the
+ * property panel. A field appears only if the firmware ACTUALLY reads it for
+ * that widget type (WIDGET_TYPES in theme/layout.js) — hence no image widgets
+ * and no battery color.
+ * The draft comes from ThemePicker through location.state; opened by URL, it
+ * loads the saved theme or the default layout.
  */
 export default function ThemeEditor() {
   const { boxId } = useParams();

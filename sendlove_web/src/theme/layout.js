@@ -1,17 +1,11 @@
 /**
  * Theme contract for the box's standby screen — must match the backend
- * ThemeService (sendlove_backend/src/services/theme.service.ts, route
- * /boxes/:boxId/theme) and the firmware's LayoutEngine::loadTheme()
- * (sendlove_firmware/lib/LayoutEngine).
+ * ThemeService (theme.service.ts) and the firmware's LayoutEngine::loadTheme().
+ * The firmware compiles in NO background, fonts or layout (firmware MEMORY.md
+ * §28): everything ships in the theme package.
  *
- * The firmware has NO compiled-in background, fonts or layout (SD-card design,
- * see firmware MEMORY.md §28): everything ships in the theme package the box
- * downloads to the card and copies to flash. Without a theme the box draws a
- * black fallback screen with white text.
- *
- * Fonts: the web subsets exactly the needed characters into VLW files (utils/vlw.js) —
- *   'f_time' = font for every time widget, 'f_date' = font for every date widget.
- *   'Font7' / 'Font2' = fonts built into the firmware (7-segment / small ASCII-only).
+ * Fonts: 'f_time' / 'f_date' = VLW files subset by the web (utils/vlw.js) for
+ * time / date widgets; 'Font7' / 'Font2' = firmware built-ins.
  */
 
 /** config.h SCREEN_WIDTH/HEIGHT. */
@@ -39,11 +33,7 @@ export const BUILTIN_FONTS = {
 /** Font file name inside the package, by widget type. */
 export const VLW_KEY = { clock_time: 'f_time', clock_date: 'f_date' };
 
-/**
- * Allowed font sizes. The ceiling is real: VLWfont::drawChar allocates each
- * glyph bitmap with alloca on the box's 8KB draw-task stack — a 56px digit is
- * ~2-3KB per glyph.
- */
+/** Allowed font sizes. The ceiling is real: the box allocates each glyph on an 8KB stack (~2-3KB at 56px). */
 export const PX_RANGE = { clock_time: [24, 56], clock_date: [12, 28] };
 
 /** LayoutEngine::formatDate — MUST match character for character (the web subsets the font from these strings). */
@@ -66,14 +56,10 @@ export const ALIGNS = [
 ];
 
 /**
- * Every widget type the firmware can draw. `color`/`align` are set only when
- * the firmware actually reads that field for the type:
- *   battery_icon — pushImage of a multi-color image, IGNORES cfg.color; the
- *                  level is hardcoded (`int state = 3;`).
- *   wifi_icon    — 24px drawBitmap, uses color, no alignment.
- *   chip_temp    — fixed built-in small font, uses color + align.
- * min = floor for w×h: drawTextWidget clears exactly the w×h box before
- * redrawing, so a box narrower than the text leaves stale pixels on screen.
+ * Every widget type the firmware can draw. `color`/`align` are set only where
+ * the firmware reads them (battery_icon ignores color; wifi_icon has no align).
+ * min = floor for w×h: the firmware clears exactly that box before redrawing, so
+ * a box narrower than the text leaves stale pixels.
  */
 export const WIDGET_TYPES = {
   clock_time: { label: 'Giờ', icon: 'clock', sample: '21:47', color: true, align: true, min: { w: 100, h: 30 }, size: { w: 160, h: 50 } },
@@ -85,8 +71,7 @@ export const WIDGET_TYPES = {
 
 export const MAX_WIDGETS = 8;
 
-// Font-less types (battery, Wi-Fi) have both VLW_KEY[type] and w.font undefined — guard
-// for it, or undefined === undefined treats them as font widgets and PX_RANGE[type] crashes the editor.
+// Guard font-less types (battery, Wi-Fi): undefined === undefined would treat them as font widgets.
 export const isVlw = (w) => !!VLW_KEY[w.type] && w.font === VLW_KEY[w.type];
 
 /** The date as the box will draw it at `now`. */
@@ -188,9 +173,8 @@ export function widgetProblem(w) {
 }
 
 /**
- * Widgets of one type SHARE a single font file (f_time / f_date), taken from
- * the first widget's family + size. Returns a message when another widget
- * differs (the box will draw it with the first widget's font).
+ * Widgets of one type SHARE one font file, taken from the first widget's family
+ * + size. Returns a message when another widget differs.
  */
 export function sharedFontIssue(widgets) {
   for (const type of Object.keys(VLW_KEY)) {

@@ -1,18 +1,13 @@
 import { buildVlw, ensureWebFont } from './vlw';
 import { FONT_FAMILIES, VLW_KEY, charsetFor, isVlw } from '../theme/layout';
 
-/**
- * Bitmap cap for ONE glyph: the box's VLWfont::drawChar allocates it with
- * alloca on the draw-task stack (8KB, config.h TASK_STACK_MEDIA_PLAYER).
- * Anything larger is rejected before sending.
- */
+/** Bitmap cap for ONE glyph: the box allocates it on an 8KB task stack. */
 export const MAX_GLYPH_BYTES = 3000;
 
 /**
- * Subset the fonts for a theme package: one file for all time widgets (f_time),
- * one for all date widgets (f_date), using the family + size of the FIRST
- * widget of each type (see sharedFontIssue in theme/layout.js).
- * Returns { f_time?: {bytes, family, px}, f_date?: ... } — only types with a VLW widget.
+ * Subset the fonts of a theme package: one file per widget type (f_time,
+ * f_date), from the FIRST widget's family + size (see sharedFontIssue).
+ * Returns { f_time?: {bytes, family, px}, f_date?: ... }.
  */
 export async function buildThemeFonts(widgets) {
   const out = {};

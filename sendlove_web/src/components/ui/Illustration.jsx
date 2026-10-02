@@ -2,9 +2,7 @@ import React from 'react';
 
 /**
  * Thin-line illustrations for empty states and send results. Colors come from
- * tokens, so they follow light/dark: body = caramel-100, lines = caramel-800,
- * accent = rose-400. (fill/stroke are set through style because SVG attributes
- * don't accept var(--…).)
+ * tokens, set through style (SVG attributes don't accept var(--…)).
  */
 const INK = { stroke: 'var(--caramel-800)', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' };
 const BODY = { ...INK, fill: 'var(--caramel-100)' };

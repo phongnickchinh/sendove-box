@@ -1,12 +1,9 @@
 /**
- * Clamp the trim range [start, end] (seconds) as the user drags one handle.
- *
- * Rules: 0 ≤ start < end ≤ duration, minSpan ≤ end - start ≤ maxSpan.
- * Dragging one end past maxSpan DRAGS THE OTHER END ALONG (the handle being
- * held stays put) — feels more natural than blocking the handle.
- *
+ * Clamp the trim range [start, end] (seconds) as the user drags one handle:
+ * 0 ≤ start < end ≤ duration, minSpan ≤ end - start ≤ maxSpan. Dragging past
+ * maxSpan drags the OTHER end along.
  * @param {'start'|'end'} handle  the handle that just moved
- * @param {number} value          that handle's new value
+ * @param {number} value          its new value
  * @param {{start:number,end:number}} range  the current range
  */
 export function clampRange(handle, value, range, { duration, maxSpan, minSpan = 1 }) {

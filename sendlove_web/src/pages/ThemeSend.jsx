@@ -8,15 +8,12 @@ import { toApiWidgets } from '../theme/layout';
 import { buildThemeFonts } from '../utils/themePack';
 
 /**
- * Theme send — saves the theme package to the account (SD-card design, firmware MEMORY.md §28).
- *
- *   1. Subset fonts: each text widget type using a web font → one VLW file with
- *      exactly the needed characters (utils/vlw.js). The preview below is drawn
- *      from THESE very files (firmware MEMORY.md §29, proposal #10).
- *   2. Upload: the new background (or the default one), 115,200 B, + the font files.
- *   3. PUT /theme {theme_name, widgets, background, fonts} → the backend measures
- *      size + crc32 of each file, bumps rev and sets theme_flag. On its next sync
- *      the box downloads the package to the card, copies it to flash and redraws.
+ * Theme send — saves the theme package to the account (firmware MEMORY.md §28):
+ *   1. Subset fonts into VLW files (utils/vlw.js); the preview is drawn from THESE
+ *      very files (firmware MEMORY.md §29, proposal #10).
+ *   2. Upload the background (115,200 B) + the font files.
+ *   3. PUT /theme → the backend bumps rev and sets theme_flag; the box installs
+ *      it on its next sync.
  */
 export default function ThemeSend() {
   const { boxId } = useParams();
